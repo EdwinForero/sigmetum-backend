@@ -10,7 +10,11 @@ const login = require('./endpoints/login.js');
 const auth = require('./endpoints/tokenAuth.js');
 
 const app = express();
-const PORT = 8000;
+const PORT = process.env.PORT || 5050;
+
+app.use("/healthcheck", (req, res) => {
+    res.status(200).send("ok");
+})
 
 app.use(cors());
 app.use(express.json());
@@ -25,5 +29,5 @@ app.use(auth);
 app.use(getMergedData);
 
 app.listen(PORT, () => {
-    console.log(`Servidor corriendo en http://localhost:${PORT}`);
+    console.log(`Servidor corriendo en ${PORT}`);
 });
