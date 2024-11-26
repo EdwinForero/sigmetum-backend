@@ -7,17 +7,17 @@ const convertExcelToJson = (filePath) => {
     const jsonData = XLSX.utils.sheet_to_json(worksheet);
 
     const columnMapping = [
-        "Provincia",
-        "Municipio",
-        "Altitud Media",
-        "Sector Biogeográfico",
-        "Piso Bioclimático",
-        "Ombrotipo",
-        "Naturaleza del Sustrato",
-        "Tipo de Serie",
-        "Serie de Vegetación",
-        "Vegetación Potencial",
-        "Especies Características"
+        "province",
+        "municipe",
+        "averageAltitude",
+        "biogeographicSector",
+        "bioclimaticFloor",
+        "ombrotype",
+        "natureOfSubstrate",
+        "seriesType",
+        "vegetationSeries",
+        "potentialVegetation",
+        "characteristicSpecies"
     ];
 
     const processedData = jsonData.map(row => {
