@@ -6,7 +6,7 @@ router.post("/send-email", async (req, res) => {
     const { username, email, subject, message } = req.body;
   
     const transporter = nodemailer.createTransport({
-        host: "smtp-mail.outlook.com",
+        host: "smtp.gmail.com",
         port: 587,
         secure: false,
         auth: {
@@ -16,9 +16,10 @@ router.post("/send-email", async (req, res) => {
       });
   
     const mailOptions = {
-      from: email,
+      from: process.env.EMAIL,
       to: process.env.EMAIL,
-      subject: `${subject} - enviado por ${username}`,
+      replyTo: email,
+      subject: `${subject} - enviado por ${username}<${email}>`,
       text: message,
     };
   
