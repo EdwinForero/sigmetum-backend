@@ -4,37 +4,39 @@ const convertExcelToJson = (filePath) => {
     const workbook = XLSX.readFile(filePath);
     const firstSheetName = workbook.SheetNames[0];
     const worksheet = workbook.Sheets[firstSheetName];
-    const jsonData = XLSX.utils.sheet_to_json(worksheet);
 
-    const columnMapping = {
-        "Provincia": "Provincia",
-        "Municipio": "Municipio",
-        "Alt. Media": "Altitud Media",
-        "Sector Biog.": "Sector Biogeográfico",
-        "Piso Biocl.": "Piso Bioclimático",
-        "Ombrot.": "Ombrotipo",
-        "Nat. Sustr.": "Naturaleza del Sustrato",
-        "Tipo Serie": "Tipo de Serie",
-        "Serie Veget.": "Serie de Vegetación",
-        "Veg. Pot.": "Vegetación Potencial",
-        "Esp. Recom.": "Especies Características",
-        "Esp. Características.": "Especies Características",
-    };
+    const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
 
-    const processedData = jsonData.map(row => {
+    const fixedColumnOrder = [
+        "Provincia",
+        "Municipio",
+        "Altitud Media",
+        "Sector Biogeográfico",
+        "Piso Bioclimático",
+        "Ombrotipo",
+        "Naturaleza del Sustrato",
+        "Tipo de Serie",
+        "Serie de Vegetación",
+        "Vegetación Potencial",
+        "Especies Características"
+    ];
+
+    const dataRows = jsonData.slice(1);
+
+    const processedData = dataRows.map((row) => {
         const processedRow = {};
-    
-        for (const [key, value] of Object.entries(row)) {
-            const formattedKey = columnMapping[key] || key;
-            if (!formattedKey.startsWith('__EMPTY') && value !== null && value !== '') {
+
+        fixedColumnOrder.forEach((columnName, index) => {
+            const value = row[index];
+            if (value !== undefined && String(value).trim() !== '') {
                 if (typeof value === 'string' && value.includes(',')) {
-                    processedRow[formattedKey] = value.split(',').map(item => item.trim()).filter(item => item !== '');
+                    processedRow[columnName] = value.split(',').map(item => item.trim()).filter(item => item !== '');
                 } else {
-                    processedRow[formattedKey] = value;
+                    processedRow[columnName] = value;
                 }
             }
-        }
-    
+        });
+
         return processedRow;
     });
 
