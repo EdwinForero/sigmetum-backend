@@ -22,25 +22,38 @@ const convertExcelToJson = (filePath) => {
     ];
 
     const dataRows = jsonData.slice(1);
-
-    const processedData = dataRows.map((row) => {
+    const emptyFields = [];
+    const processedData = dataRows.map((row, rowIndex) => {
         const processedRow = {};
+        let hasEmptyFields = false;
 
         fixedColumnOrder.forEach((columnName, index) => {
             const value = row[index];
             if (value !== undefined && String(value).trim() !== '') {
                 if (typeof value === 'string' && value.includes(',')) {
-                    processedRow[columnName] = value.split(',').map(item => item.trim()).filter(item => item !== '');
+                    processedRow[columnName] = value
+                        .split(',')
+                        .map(item => item.trim())
+                        .filter(item => item !== '');
                 } else {
                     processedRow[columnName] = value;
                 }
+            } else {
+                hasEmptyFields = true;
             }
         });
+
+        if (hasEmptyFields) {
+            emptyFields.push({
+                rowIndex: rowIndex + 2,
+                rowData: row
+            });
+        }
 
         return processedRow;
     });
 
-    return processedData;
+    return { processedData, emptyFields };
 };
 
 module.exports = { convertExcelToJson };

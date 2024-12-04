@@ -9,6 +9,7 @@ const getMergedData = require('./endpoints/getData.js');
 const login = require('./endpoints/login.js');
 const auth = require('./endpoints/tokenAuth.js');
 const sendMail = require('./endpoints/sendMail.js');
+const confirmUpload = require('./endpoints/confirmUpload.js');
 
 const app = express();
 const PORT = process.env.PORT || 8000;
@@ -20,6 +21,7 @@ app.use("/healthcheck", (req, res) => {
 app.use(cors());
 app.use(express.json());
 
+app.use(confirmUpload);
 app.use(sendMail);
 app.use(deleteFile);
 app.use(updateFile);

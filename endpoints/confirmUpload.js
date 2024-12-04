@@ -1,38 +1,21 @@
 const express = require('express');
-const multer = require('multer');
-const { convertExcelToJson } = require('../functions/convertExcelToJson');
+const router = express.Router();
 const { formatFileName } = require('../functions/formatFileName');
-const fs = require('fs');
 const { uploadFileToS3 } = require('../aws/awsS3connect.js');
 const { listFilesInS3Folder } = require('../aws/awsS3connect.js');
 const path = require('path');
+const fs = require('fs');
 
-const router = express.Router();
-const upload = multer({ dest: 'uploads/' });
-
-router.post('/upload', upload.single('file'), async (req, res) => {
+router.post('/upload/confirm', async (req, res) => {
     try {
-        const filePath = path.join(__dirname, '../uploads', req.file.filename);
+        const { confirmed, fileData } = req.body;
 
-        const { processedData, emptyFields } = convertExcelToJson(filePath);
-
-        if (emptyFields.length > 0) {
-
-            return res.status(400).json({
-                message: 'Se detectaron campos vacíos en algunas filas.',
-                emptyFields,
-                processedData,
-                actionRequired: 'Confirma si deseas continuar con el proceso o cancelar.'
-            });
+        if (!confirmed) {
+            return res.status(400).json({ message: 'El proceso fue cancelado por el usuario.' });
         }
-
-        if (!processedData || !Array.isArray(processedData)) {
-            throw new Error('La conversión a JSON falló. Los datos no son válidos.');
-        }
-
-        const provincia = processedData[0]?.["Provincia"] || "Desconocido";
+        
+        const provincia = fileData[0]?.["Provincia"] || "Desconocido";
         const provinciaFolder = `backupFiles/${provincia}`;
-
         const filesInFolder = await listFilesInS3Folder(provinciaFolder);
         let version = 1;
 
@@ -46,27 +29,25 @@ router.post('/upload', upload.single('file'), async (req, res) => {
             }
         });
 
+        
         const backupFileName = formatFileName(provincia, ".json", version);
         const jsonFileName = `${provincia}.json`;
 
-        const jsonString = JSON.stringify(processedData, null, 2);
+        const jsonString = JSON.stringify(fileData, null, 2);
         const jsonFilePath = path.join(__dirname, '../uploads', jsonFileName);
         fs.writeFileSync(jsonFilePath, jsonString, 'utf8');
 
         await uploadFileToS3(jsonFileName, jsonFilePath, `usedFiles`);
         await uploadFileToS3(backupFileName, jsonFilePath, provinciaFolder);
 
-        fs.unlink(filePath, (err) => {
-            if (err) console.error('Error al borrar el archivo temporal:', err);
-        });
         fs.unlink(jsonFilePath, (err) => {
             if (err) console.error('Error al borrar el archivo JSON temporal:', err);
         });
 
-        res.json({ message: 'Archivos subidos con éxito' });
+        res.json({ message: 'Archivos subidos con éxito después de la confirmación.' });
     } catch (error) {
         console.error(error);
-        res.status(500).json({ error: 'Error al procesar el archivo' });
+        res.status(500).json({ error: 'Error al completar el proceso.' });
     }
 });
 
