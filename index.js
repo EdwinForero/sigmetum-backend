@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const compression = require('compression');
 const uploadRoutes = require('./endpoints/upload.js');
 const updateFile = require('./endpoints/updateFile.js');
 const listFiles = require('./endpoints/listFiles.js');
@@ -20,6 +21,7 @@ app.use("/healthcheck", (req, res) => {
 
 app.use(cors());
 app.use(express.json());
+app.use(compression());
 
 app.use(confirmUpload);
 app.use(sendMail);
