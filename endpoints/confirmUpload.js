@@ -5,8 +5,9 @@ const { uploadFileToS3 } = require('../aws/awsS3connect.js');
 const { listFilesInS3Folder } = require('../aws/awsS3connect.js');
 const path = require('path');
 const fs = require('fs');
+const { tokenAuth } = require('../functions/tokenAuthentication');
 
-router.post('/upload/confirm', async (req, res) => {
+router.post('/upload/confirm', tokenAuth, async (req, res) => {
     try {
         const { confirmed, fileData } = req.body;
 

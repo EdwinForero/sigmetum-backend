@@ -6,11 +6,12 @@ const fs = require('fs');
 const { uploadFileToS3 } = require('../aws/awsS3connect.js');
 const { listFilesInS3Folder } = require('../aws/awsS3connect.js');
 const path = require('path');
+const { tokenAuth } = require('../functions/tokenAuthentication');
 
 const router = express.Router();
 const upload = multer({ dest: 'uploads/' });
 
-router.post('/upload', upload.single('file'), async (req, res) => {
+router.post('/upload', upload.single('file'), tokenAuth, async (req, res) => {
     try {
         const filePath = path.join(__dirname, '../uploads', req.file.filename);
 

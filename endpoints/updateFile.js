@@ -1,8 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const { updateFileS3 } = require('../aws/awsS3connect.js');
+const { tokenAuth } = require('../functions/tokenAuthentication');
 
-router.post('/update-file', async (req, res) => {
+router.post('/update-file', tokenAuth, async (req, res) => {
     try {
         const { fileName } = req.body;
         const match = fileName.match(/\/([^/]+)\//);
