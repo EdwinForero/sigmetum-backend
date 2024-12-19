@@ -11,6 +11,64 @@ const s3 = new S3({
     },
 });
 
+exports.getTextJsonS3 = async (fileName, folderName) => {
+    try {
+        const params = {
+            Bucket: process.env.AWS_BUCKET_NAME,
+            Key: `${folderName}/${fileName}`,
+        };
+
+        const data = await s3.getObject(params);
+        const jsonData = await streamToString(data.Body);
+        return JSON.parse(jsonData);
+    } catch (error) {
+        return [];
+    }
+}
+
+exports.deleteTermFromS3 = async (termToDelete, fileName, folderName) => {
+    try {
+      const terms = await this.getTextJsonS3(fileName, folderName);
+  
+      const updatedTerms = terms.filter((item) => item.term !== termToDelete);
+  
+      const uploadParams = {
+        Bucket: process.env.AWS_BUCKET_NAME,
+        Key: `${folderName}/${fileName}`,
+        Body: JSON.stringify(updatedTerms, null, 2),
+        ContentType: 'application/json',
+      };
+  
+      await s3.putObject(uploadParams);
+      return { success: true };
+    } catch (error) {
+      console.error('Error al eliminar el término:', error);
+      return { success: false, message: error.message };
+    }
+};
+
+exports.uploadTextToJsonS3 = async (newText, fileName, folderName) => {
+    try {
+
+        existingContent = await this.getTextJsonS3(fileName, folderName);
+        existingContent.push({ term: newText });
+
+        const uploadParams = {
+            Bucket: process.env.AWS_BUCKET_NAME,
+            Key: `${folderName}/${fileName}`,
+            Body: JSON.stringify(existingContent, null, 2),
+            ContentType: 'application/json',
+        };
+
+        const result = await s3.putObject(uploadParams);
+        console.log(`Archivo actualizado con éxito: ${result.Location}`);
+        return result.Location;
+    } catch (error) {
+        console.error(`Error subiendo texto: ${error.message}`);
+        throw error;
+    }
+};
+
 exports.uploadFileToS3 = async (fileName, filePath, folderName) => {
     try {
         const fileStream = fs.createReadStream(filePath);
