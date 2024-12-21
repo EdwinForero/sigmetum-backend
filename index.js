@@ -14,6 +14,7 @@ const auth = require('./endpoints/tokenAuth.js');
 const sendMail = require('./endpoints/sendMail.js');
 const uploadTerm = require('./endpoints/uploadTerm.js');
 const confirmUpload = require('./endpoints/confirmUpload.js');
+const getImage = require('./endpoints/getImage.js');
 
 const app = express();
 const PORT = process.env.PORT || 8000;
@@ -27,6 +28,7 @@ app.use(express.json());
 app.use(compression());
 
 app.use(confirmUpload);
+app.use(getImage);
 app.use(sendMail);
 app.use(deleteFile);
 app.use(deleteTerm);

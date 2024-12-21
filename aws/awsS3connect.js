@@ -1,5 +1,7 @@
 require('dotenv').config();
-const { S3 } = require('@aws-sdk/client-s3');
+const { S3, GetObjectCommand } = require('@aws-sdk/client-s3');
+const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
+
 const fs = require('fs');
 const path = require('path');
 
@@ -10,6 +12,23 @@ const s3 = new S3({
         secretAccessKey: process.env.AWS_SECRETACCESSKEY,
     },
 });
+
+exports.getImageFromS3 = async (imageKey) => {
+    const params = {
+      Bucket: process.env.AWS_BUCKET_NAME,
+      Key: `contentManagement/images/${imageKey}`,
+    };
+  
+    const command = new GetObjectCommand(params);
+  
+    try {
+      const url = await getSignedUrl(s3, command, { expiresIn: 3600 });
+      return url;
+    } catch (error) {
+      console.error("Error obteniendo la imagen de S3: ", error);
+      throw new Error("Error obteniendo la URL firmada");
+    }
+};
 
 exports.getTextJsonS3 = async (fileName, folderName) => {
     try {
