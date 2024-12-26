@@ -3,8 +3,8 @@ const bcrypt = require('bcrypt');
 
 const JWT_SECRET = process.env.JWT_SECRET;
 const JWT_EXPIRATION = process.env.JWT_EXPIRATION;
-const USERNAME = process.env.ADMIN_USERNAME || 'admin';
-const PASSWORD = process.env.ADMIN_PASSWORD || '$2b$10$OsxmuEF8VfhOULh6BhctvukgWjKheO/Kx.cnpP5XeRaHfldGCYdSW';
+const USERNAME = process.env.ADMIN_USERNAME || 'SigmetumA.Management';
+const PASSWORD = process.env.ADMIN_PASSWORD || '$2b$10$egV8vl6ea2OMZ6qAaj15MOKfPzN4gxA9PzsGZ87NElpyJuANt/n.K';
 
 const users = [
   {
