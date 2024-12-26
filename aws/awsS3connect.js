@@ -13,10 +13,10 @@ const s3 = new S3({
     },
 });
 
-exports.getImageFromS3 = async (imageKey) => {
+exports.getPresignedUrlFromS3 = async (filePath, imageKey) => {
     const params = {
       Bucket: process.env.AWS_BUCKET_NAME,
-      Key: `contentManagement/images/${imageKey}`,
+      Key: `${filePath}/${imageKey}`,
     };
   
     const command = new GetObjectCommand(params);
