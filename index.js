@@ -16,7 +16,9 @@ const uploadTerm = require('./endpoints/uploadTerm.js');
 const confirmUpload = require('./endpoints/confirmUpload.js');
 const getImage = require('./endpoints/getImage.js');
 const getFile = require('./endpoints/getFile.js');
-
+const listImages = require('./endpoints/listImages.js');
+const deleteImage = require('./endpoints/deleteImage.js');
+const uploadImage = require('./endpoints/uploadImage.js');
 const app = express();
 const PORT = process.env.PORT || 8000;
 
@@ -28,6 +30,9 @@ app.use(cors());
 app.use(express.json());
 app.use(compression());
 
+app.use(uploadImage);
+app.use(deleteImage);
+app.use(listImages);
 app.use(getFile);
 app.use(confirmUpload);
 app.use(getImage);

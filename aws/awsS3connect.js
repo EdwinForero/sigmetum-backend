@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { S3, GetObjectCommand } = require('@aws-sdk/client-s3');
+const { S3, GetObjectCommand, ListObjectsV2Command, DeleteObjectCommand } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 
 const fs = require('fs');
@@ -12,6 +12,43 @@ const s3 = new S3({
         secretAccessKey: process.env.AWS_SECRETACCESSKEY,
     },
 });
+
+exports.getPresignedUrlsFromS3Folder = async (folderPath) => {
+    const params = {
+      Bucket: process.env.AWS_BUCKET_NAME,
+      Prefix: folderPath.endsWith('/') ? folderPath : `${folderPath}/`,
+    };
+  
+    try {
+      const command = new ListObjectsV2Command(params);
+      const response = await s3.send(command);
+  
+      if (!response.Contents || response.Contents.length === 0) {
+        throw new Error('No se encontraron archivos en la carpeta especificada.');
+      }
+
+      const urls = await Promise.all(
+        response.Contents.map(async (item) => {
+          const getObjectParams = {
+            Bucket: process.env.AWS_BUCKET_NAME,
+            Key: item.Key,
+          };
+          const getObjectCommand = new GetObjectCommand(getObjectParams);
+          const url = await getSignedUrl(s3, getObjectCommand, { expiresIn: 3600 });
+  
+          return {
+            fileName: item.Key.replace(folderPath, '').replace(/^\//, ''),
+            url,
+          };
+        })
+      );
+  
+      return urls;
+    } catch (error) {
+      console.error('Error obteniendo URLs prefirmadas:', error);
+      throw new Error('Error obteniendo las URLs prefirmadas para los archivos en la carpeta.');
+    }
+};
 
 exports.getPresignedUrlFromS3 = async (filePath, imageKey) => {
     const params = {
@@ -84,6 +121,24 @@ exports.uploadTextToJsonS3 = async (newText, fileName, folderName) => {
         return result.Location;
     } catch (error) {
         console.error(`Error subiendo texto: ${error.message}`);
+        throw error;
+    }
+};
+
+exports.uploadImageToS3 = async (file, filePath, fileKey) => {
+    try {
+        const params = {
+            Bucket: process.env.AWS_BUCKET_NAME,
+            Key:  `${filePath}/${fileKey}`,
+            Body: file.buffer,
+            ContentType: file.mimetype
+        };
+    
+        const uploadResult = await s3.putObject(params);
+        console.log(`Archivo subido con éxito`);
+        return uploadResult.Location;
+    } catch (error) {
+        console.error(`Error subiendo archivo: ${error.message}`);
         throw error;
     }
 };
@@ -163,6 +218,22 @@ exports.getFileFromS3 = async (filePath) => {
     } catch (error) {
         console.error(`Error al obtener el archivo: ${error.message}`);
         throw error;
+    }
+};
+
+exports.deleteImageFromS3 = async (filePath, imageKey) => {
+    try {
+        const params = {
+            Bucket: process.env.AWS_BUCKET_NAME,
+            Key: `${filePath}/${imageKey}`,
+        };
+
+        await s3.deleteObject(params);
+        console.log('Archivo eliminado correctamente');
+        return { success: true };
+    } catch (error) {
+        console.error('Error al eliminar el archivo de S3:', error);
+        return { success: false, error: error.message };
     }
 };
 
