@@ -1,8 +1,9 @@
-function formatFileName(provincia, extension, version = 1) {
+function formatFileName(version = 1) {
     const date = new Date();
-    const formattedDate = `${date.getDate().toString().padStart(2, '0')}_${(date.getMonth() + 1).toString().padStart(2, '0')}_${date.getFullYear()}`;
-
-    return `${provincia}_V${version}_${formattedDate}${extension}`;
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}_v${version}.xlsx`;
 }
 
 module.exports = { formatFileName };

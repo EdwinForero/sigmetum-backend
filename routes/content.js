@@ -13,16 +13,9 @@ const {
     uploadTextToJsonS3,
     deleteTermFromS3,
 } = require('../aws/awsS3connect');
-const {
-    GALLERY_PATH,
-    IMAGES_PATH,
-    FILES_PATH,
-    CONTENT_PATH,
-    TERMS_FILE,
-} = require('../config/s3Paths');
+const { GALLERY_PATH, TERMS_PATH, TERMS_FILE } = require('../config/s3Paths');
 
-const storage = multer.memoryStorage();
-const upload = multer({ storage });
+const upload = multer({ storage: multer.memoryStorage() });
 
 const transporter = nodemailer.createTransport({
     host: 'smtp.gmail.com',
@@ -34,7 +27,7 @@ const transporter = nodemailer.createTransport({
     },
 });
 
-// --- Rutas públicas ---
+// ─── Public routes ───────────────────────────────────────────────────────────
 
 router.post('/send-email', async (req, res, next) => {
     const { username, email, subject, message } = req.body;
@@ -64,17 +57,8 @@ router.get('/list-images', async (req, res, next) => {
 
 router.get('/get-image', async (req, res, next) => {
     try {
-        const imageUrl = await getPresignedUrlFromS3(IMAGES_PATH, req.query.imageKey);
+        const imageUrl = await getPresignedUrlFromS3(GALLERY_PATH, req.query.imageKey);
         res.json({ success: true, data: { imageUrl } });
-    } catch (error) {
-        next(error);
-    }
-});
-
-router.get('/get-file', async (req, res, next) => {
-    try {
-        const fileUrl = await getPresignedUrlFromS3(FILES_PATH, req.query.fileKey);
-        res.json({ success: true, data: { fileUrl } });
     } catch (error) {
         next(error);
     }
@@ -82,14 +66,14 @@ router.get('/get-file', async (req, res, next) => {
 
 router.get('/list-terms', async (req, res, next) => {
     try {
-        const terms = await getTextJsonS3(TERMS_FILE, CONTENT_PATH);
+        const terms = await getTextJsonS3(TERMS_FILE, TERMS_PATH);
         res.json({ success: true, data: terms });
     } catch (error) {
         next(error);
     }
 });
 
-// --- Rutas protegidas ---
+// ─── Protected routes ────────────────────────────────────────────────────────
 
 const protectedRouter = express.Router();
 protectedRouter.use(tokenAuth);
@@ -107,8 +91,8 @@ protectedRouter.post('/upload-image', upload.single('file'), async (req, res, ne
         const fileExtension = file.originalname.substring(file.originalname.lastIndexOf('.'));
         const fileKey = `${sanitizedTitle}${fileExtension}`;
 
-        const result = await uploadImageToS3(file, GALLERY_PATH, fileKey);
-        res.status(200).json({ success: true, data: result });
+        await uploadImageToS3(file, GALLERY_PATH, fileKey);
+        res.status(200).json({ success: true, data: { key: `${GALLERY_PATH}/${fileKey}` } });
     } catch (error) {
         next(error);
     }
@@ -140,8 +124,8 @@ protectedRouter.post('/upload-term', async (req, res, next) => {
             return res.status(400).json({ success: false, error: 'Term cannot be empty' });
         }
 
-        const fileUrl = await uploadTextToJsonS3(term, TERMS_FILE, CONTENT_PATH);
-        res.status(200).json({ success: true, data: { message: 'Term added successfully', fileUrl } });
+        await uploadTextToJsonS3(term, TERMS_FILE, TERMS_PATH);
+        res.status(200).json({ success: true, data: 'Term added successfully' });
     } catch (error) {
         next(error);
     }
@@ -155,7 +139,7 @@ protectedRouter.delete('/delete-term', async (req, res, next) => {
     }
 
     try {
-        const result = await deleteTermFromS3(term, TERMS_FILE, CONTENT_PATH);
+        const result = await deleteTermFromS3(term, TERMS_FILE, TERMS_PATH);
         if (result.success) {
             res.json({ success: true, data: 'Term deleted successfully' });
         } else {
