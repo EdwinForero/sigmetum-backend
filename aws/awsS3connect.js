@@ -1,16 +1,16 @@
-require('dotenv').config();
 const { S3, GetObjectCommand, ListObjectsV2Command, DeleteObjectCommand } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
+const { fromSSO } = require('@aws-sdk/credential-providers');
+const { BACKUP_FILES, USED_FILES } = require('../config/s3Paths');
 
 const fs = require('fs');
 const path = require('path');
 
+const isLocal = process.env.NODE_ENV === 'local';
+
 const s3 = new S3({
     region: process.env.AWS_REGION,
-    credentials: {
-        accessKeyId: process.env.AWS_ACCESSKEYID,
-        secretAccessKey: process.env.AWS_SECRETACCESSKEY,
-    },
+    credentials: isLocal ? fromSSO({ profile: process.env.AWS_PROFILE }) : undefined,
 });
 
 exports.getPresignedUrlsFromS3Folder = async (folderPath) => {
@@ -84,7 +84,7 @@ exports.getTextJsonS3 = async (fileName, folderName) => {
 
 exports.deleteTermFromS3 = async (termToDelete, fileName, folderName) => {
     try {
-      const terms = await this.getTextJsonS3(fileName, folderName);
+      const terms = await exports.getTextJsonS3(fileName, folderName);
   
       const updatedTerms = terms.filter((item) => item.term !== termToDelete);
   
@@ -106,7 +106,7 @@ exports.deleteTermFromS3 = async (termToDelete, fileName, folderName) => {
 exports.uploadTextToJsonS3 = async (newText, fileName, folderName) => {
     try {
 
-        existingContent = await this.getTextJsonS3(fileName, folderName);
+        const existingContent = await exports.getTextJsonS3(fileName, folderName);
         existingContent.push({ term: newText });
 
         const uploadParams = {
@@ -117,7 +117,6 @@ exports.uploadTextToJsonS3 = async (newText, fileName, folderName) => {
         };
 
         const result = await s3.putObject(uploadParams);
-        console.log(`Archivo actualizado con éxito: ${result.Location}`);
         return result.Location;
     } catch (error) {
         console.error(`Error subiendo texto: ${error.message}`);
@@ -135,7 +134,6 @@ exports.uploadImageToS3 = async (file, filePath, fileKey) => {
         };
     
         const uploadResult = await s3.putObject(params);
-        console.log(`Archivo subido con éxito`);
         return uploadResult.Location;
     } catch (error) {
         console.error(`Error subiendo archivo: ${error.message}`);
@@ -143,18 +141,19 @@ exports.uploadImageToS3 = async (file, filePath, fileKey) => {
     }
 };
 
-exports.uploadFileToS3 = async (fileName, filePath, folderName) => {
+exports.uploadFileToS3 = async (fileName, bodyOrPath, folderName) => {
     try {
-        const fileStream = fs.createReadStream(filePath);
+        const body = Buffer.isBuffer(bodyOrPath)
+            ? bodyOrPath
+            : fs.createReadStream(bodyOrPath);
 
         const uploadParams = {
             Bucket: process.env.AWS_BUCKET_NAME,
             Key: `${folderName}/${fileName}`,
-            Body: fileStream,
+            Body: body,
         };
 
         const data = await s3.putObject(uploadParams);
-        console.log(`Archivo subido con éxito`);
         return data.Location;
     } catch (error) {
         console.error(`Error subiendo archivo: ${error.message}`);
@@ -189,15 +188,14 @@ exports.listFilesInS3Folder = async (folderName) => {
 
 exports.updateFileS3 = async (filePath, fileName) => {
     try {
-        const jsonSourceData = await this.getFileFromS3(filePath);
+        const jsonSourceData = await exports.getFileFromS3(filePath);
         const uploadParams = {
             Bucket: process.env.AWS_BUCKET_NAME,
-            Key: `usedFiles/${fileName}.json`,
+            Key: `${USED_FILES}/${fileName}.json`,
             Body: JSON.stringify(jsonSourceData),
         };
 
         const data = await s3.putObject(uploadParams);
-        console.log(`Archivo actualizado con éxito`);
         return data.Location;
     } catch (error) {
         console.error(`Error actualizando archivo: ${error.message}`);
@@ -229,7 +227,6 @@ exports.deleteImageFromS3 = async (filePath, imageKey) => {
         };
 
         await s3.deleteObject(params);
-        console.log('Archivo eliminado correctamente');
         return { success: true };
     } catch (error) {
         console.error('Error al eliminar el archivo de S3:', error);
@@ -241,14 +238,13 @@ exports.deleteFileFromS3 = async (filePath) => {
     try {
         const [folder, versionedFile] = filePath.split('/').slice(-2);
         const baseFileName = versionedFile.split('_')[0];
-        const folderPrefix = `backupFiles/${folder}`;
+        const folderPrefix = `${BACKUP_FILES}/${folder}`;
 
         const deleteParams = {
             Bucket: process.env.AWS_BUCKET_NAME,
             Key: filePath,
         };
         await s3.deleteObject(deleteParams);
-        console.log(`Archivo eliminado exitosamente`);
 
         const listParams = {
             Bucket: process.env.AWS_BUCKET_NAME,
@@ -256,7 +252,7 @@ exports.deleteFileFromS3 = async (filePath) => {
         };
         const listedObjects = await s3.listObjectsV2(listParams);
 
-        const fixedFilePath = `usedFiles/${baseFileName}.json`;
+        const fixedFilePath = `${USED_FILES}/${baseFileName}.json`;
 
         if (!listedObjects.Contents || listedObjects.Contents.length === 0) {
             const deleteFixedFileParams = {
@@ -264,7 +260,6 @@ exports.deleteFileFromS3 = async (filePath) => {
                 Key: fixedFilePath,
             };
             await s3.deleteObject(deleteFixedFileParams);
-            console.log(`Archivo fijo eliminado`);
         } else {
             const files = listedObjects.Contents.map((file) => file.Key);
             const relatedFiles = files.filter((file) =>
@@ -272,10 +267,11 @@ exports.deleteFileFromS3 = async (filePath) => {
             );
 
             const sortedVersions = relatedFiles
-                .map((file) => ({
-                    key: file,
-                    version: parseInt(file.match(/_V(\d+)_/)[1], 10),
-                }))
+                .map((file) => {
+                    const match = file.match(/_V(\d+)_/);
+                    return match ? { key: file, version: parseInt(match[1], 10) } : null;
+                })
+                .filter(Boolean)
                 .sort((a, b) => b.version - a.version);
 
             const versionToRestore = sortedVersions[0];
@@ -287,7 +283,6 @@ exports.deleteFileFromS3 = async (filePath) => {
             };
 
             await s3.copyObject(copyParams);
-            console.log(`Archivo fijo restaurado con datos`);
         }
 
         return { message: 'Proceso completado exitosamente' };
