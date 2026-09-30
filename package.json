@@ -5,7 +5,10 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node index.js"
+    "start": "node index.js",
+    "lint": "eslint . --max-warnings 5",
+    "quality": "node scripts/quality-check.mjs",
+    "docs:check": "node scripts/docs-check.mjs"
   },
   "author": "",
   "license": "ISC",
@@ -26,6 +29,11 @@
     "nodemailer": "^6.9.16"
   },
   "devDependencies": {
+    "@eslint/js": "9.39.5",
+    "eslint": "9.39.5",
+    "eslint-plugin-n": "17.24.0",
+    "eslint-plugin-security": "4.1.0",
+    "globals": "17.12.0",
     "nodemon": "^3.1.7"
   }
 }
