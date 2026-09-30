@@ -152,7 +152,7 @@ Se registran en [07](../07-estado-y-deuda-tecnica.md). La convención (prefijos 
 
 ## 6. Avisar al frontend y a la infraestructura
 
-El documento `sigmetum-frontend/docs/integracion/para-backend.md` es la fuente de verdad de **lo que espera el frontend** de esta API. Este repositorio tiene un [INTEGRACION.md](../../INTEGRACION.md) que apunta a él. Desde la carpeta de este repositorio, el documento está en `../sigmetum-frontend/docs/integracion/para-backend.md`.
+El documento `sigmetum-frontend/docs/integracion/para-backend.md` es la fuente de verdad de **lo que espera el frontend** de esta API. Desde la carpeta de este repositorio, el documento está en `../sigmetum-frontend/docs/integracion/para-backend.md` (ver también [README.md](../README.md#integración-con-los-otros-repositorios)).
 
 ### Contrato con el frontend: qué revisar en su sección 7
 

@@ -68,4 +68,4 @@ sigmetum-backend/
 ## Repositorios relacionados
 
 - **sigmetum-infra** — Terraform: Elastic Beanstalk (este backend), Amplify (frontend React), bucket S3, red y DNS.
-- **Frontend (React)** — desplegado en Amplify; consume esta API. Lo que espera de ella está en `../sigmetum-frontend/docs/integracion/para-backend.md`; lo que este backend le ofrece, en [integracion/para-frontend.md](integracion/para-frontend.md) (ver [INTEGRACION.md](../INTEGRACION.md)).
+- **Frontend (React)** — desplegado en Amplify; consume esta API. Lo que espera de ella está en `../sigmetum-frontend/docs/integracion/para-backend.md`; lo que este backend le ofrece, en [integracion/para-frontend.md](integracion/para-frontend.md).
