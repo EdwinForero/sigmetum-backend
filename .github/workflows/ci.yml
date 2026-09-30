@@ -1,0 +1,53 @@
+# Integración continua: ejecuta la definición de terminado de docs/guias/buenas-practicas-backend.md.
+# npm test no se incluye todavía: hoy es el placeholder de "npm init" y siempre falla (ver M11 en
+# docs/07-estado-y-deuda-tecnica.md). Se añadirá aquí cuando existan tests reales. Si cambias un paso
+# aquí, cámbialo también en CLAUDE.md y en las guías (npm run docs:check comprueba que los comandos
+# citados en la documentación existen en package.json).
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [master, feature/sigmetum_v2]
+  schedule:
+    # Cada lunes: detecta vulnerabilidades nuevas en las dependencias (npm audit) aunque no haya cambios de código.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Calidad y documentación
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      # Node 20: el mismo que usa Elastic Beanstalk (ver docs/integracion/para-infra.md).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: ESLint
+        run: npm run lint
+
+      - name: Calidad y seguridad
+        run: npm run quality
+
+      - name: Documentación al día
+        run: npm run docs:check
+
+      # - name: Tests
+      #   run: npm test
+      # Pendiente de activar cuando exista una suite de tests real (M11).
