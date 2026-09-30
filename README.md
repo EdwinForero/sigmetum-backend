@@ -25,4 +25,12 @@ La documentación completa está en [docs/](docs/README.md):
 - [Almacenamiento S3 y versionado](docs/06-almacenamiento-s3.md)
 - [Estado y deuda técnica](docs/07-estado-y-deuda-tecnica.md)
 
+Guías de trabajo (normativas):
+
+- [Buenas prácticas del backend](docs/guias/buenas-practicas-backend.md): estructura, contrato de respuesta, validación, S3, pruebas y ESLint
+- [Seguridad de la API](docs/guias/seguridad.md): autenticación, autorización, claves de S3, archivos, dependencias y estado actual
+- [Mantenimiento de la documentación](docs/guias/mantenimiento.md): qué actualizar tras cada cambio
+
+Antes de dar un cambio por terminado: `npm run lint`, `npm run quality` y `npm run docs:check`.
+
 La infraestructura (Elastic Beanstalk, S3, Amplify, DNS) se gestiona en el repositorio **sigmetum-infra**.

@@ -14,3 +14,5 @@ description: Pre-merge security checklist for this backend before merging to mas
 7. **Error responses**: verify middleware/errorHandler.js's `isDev` gate is not being bypassed — stack traces must not leak in production responses.
 8. **Input sanitization**: user-supplied strings used in S3 keys or file names are sanitized (see the `sanitizedTitle` pattern in routes/content.js) to prevent path traversal or key injection.
 9. **Password/token handling**: bcrypt is used for password hashing and jsonwebtoken for tokens — no custom crypto, no plaintext comparisons.
+10. **Docs**: run `npm run docs:check` and follow docs/guias/mantenimiento.md (section 3, "Antes de fusionar la rama"); note in the PR anything that changes the contract with the frontend.
+11. **Rules and rationale**: this list is the procedure; the norms, their reason and the current state of each are in [seguridad.md](../../../docs/guias/seguridad.md). Run `npm run lint` and `npm run quality` (it fails on unaccepted high/critical advisories; see [dependencies](../../../docs/guias/seguridad.md#s9-dependencias)).

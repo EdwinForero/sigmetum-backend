@@ -11,6 +11,18 @@ npm start                 # o: npx nodemon index.js
 
 El servidor escucha en `PORT` (8000 por defecto). Comprobación rápida: `GET http://localhost:8000/healthcheck` → `ok`.
 
+## Scripts de npm
+
+| Comando | Qué hace |
+|---|---|
+| `npm start` | Arranca el servidor (`node index.js`) |
+| `npm test` | Placeholder de `npm init`: falla siempre, porque aún no hay tests (ver M11 en [07](07-estado-y-deuda-tecnica.md)) |
+| `npm run lint` | ESLint 9: falla con errores o si los avisos superan el tope de `--max-warnings` de `package.json` |
+| `npm run quality` | Puerta de calidad y seguridad: patrones prohibidos, rutas sin autenticación, variables sin declarar, secretos, `npm audit` de producción y ESLint (ver [seguridad.md](guias/seguridad.md)) |
+| `npm run docs:check` | Comprueba que `docs/` coincide con el código (ver [mantenimiento.md](guias/mantenimiento.md)). Con `-- --metrics` imprime las métricas reales |
+
+Para recarga en caliente no hay script: usa `npx nodemon index.js` (hallazgo B2 en [07](07-estado-y-deuda-tecnica.md)).
+
 ## Variables de entorno
 
 `config/validateEnv.js` aborta el arranque si falta alguna obligatoria.

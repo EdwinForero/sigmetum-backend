@@ -12,7 +12,26 @@ API REST en Node.js/Express que da soporte al frontend de Sigmetum: carga y vers
 | [04-api.md](04-api.md) | Referencia completa de endpoints |
 | [05-modulos.md](05-modulos.md) | Detalle de cada módulo, función y método |
 | [06-almacenamiento-s3.md](06-almacenamiento-s3.md) | Estructura del bucket y modelo de versionado |
-| [07-estado-y-deuda-tecnica.md](07-estado-y-deuda-tecnica.md) | Análisis del estado actual, riesgos y bugs conocidos |
+| [07-estado-y-deuda-tecnica.md](07-estado-y-deuda-tecnica.md) | Métricas, hallazgos abiertos y discrepancias con el frontend |
+
+### Guías de trabajo (normativas)
+
+Las guías son normas con su motivo, su forma de comprobarlas y su estado en este repositorio. Las skills de `.claude/skills/` son el procedimiento paso a paso y enlazan a ellas.
+
+| Guía | Cuándo se lee |
+|---|---|
+| [guias/buenas-practicas-backend.md](guias/buenas-practicas-backend.md) | Antes de escribir **cualquier código**: estructura, contrato de respuesta, validación, S3, rendimiento, pruebas, dependencias y ESLint |
+| [guias/seguridad.md](guias/seguridad.md) | Cuando la tarea toca autenticación, rutas, subida de archivos, S3, CORS, correo, dependencias, secretos o logs |
+| [guias/mantenimiento.md](guias/mantenimiento.md) | **Al terminar** cualquier cambio: qué actualizar en `docs/` y cómo se valida |
+
+### Integración con los otros repositorios
+
+Lo que este backend ofrece y necesita de cada repositorio hermano. Ver [INTEGRACION.md](../INTEGRACION.md) para la convención completa.
+
+| Documento | Para quién |
+|---|---|
+| [integracion/para-frontend.md](integracion/para-frontend.md) | Quien mantiene `sigmetum-frontend` |
+| [integracion/para-infra.md](integracion/para-infra.md) | Quien mantiene `sigmetum-infra` |
 
 ## Estructura del repositorio
 
@@ -36,11 +55,18 @@ sigmetum-backend/
 │   └── awsS3connect.js          # Todas las operaciones contra S3
 ├── middleware/
 │   └── errorHandler.js          # Manejador de errores centralizado
+├── scripts/
+│   ├── docs-check.mjs           # Comprueba que docs/ coincide con el código (npm run docs:check)
+│   └── quality-check.mjs        # Puerta de calidad y seguridad (npm run quality)
+├── eslint.config.js             # Configuración de ESLint 9 (npm run lint)
+├── CLAUDE.md                    # Instrucciones para Claude Code (tabla de guías y definición de terminado)
+├── INTEGRACION.md               # Apunta a la documentación de integración con frontend e infra
+├── .github/                     # CI, plantilla de PR y Dependabot
 ├── .claude/                     # Configuración compartida de Claude Code (plugins y skills)
-└── docs/                        # Esta documentación
+└── docs/                        # Esta documentación (guias/ e integracion/)
 ```
 
 ## Repositorios relacionados
 
 - **sigmetum-infra** — Terraform: Elastic Beanstalk (este backend), Amplify (frontend React), bucket S3, red y DNS.
-- **Frontend (React)** — desplegado en Amplify; consume esta API.
+- **Frontend (React)** — desplegado en Amplify; consume esta API. Lo que espera de ella está en `../sigmetum-frontend/docs/integracion/para-backend.md`; lo que este backend le ofrece, en [integracion/para-frontend.md](integracion/para-frontend.md) (ver [INTEGRACION.md](../INTEGRACION.md)).
