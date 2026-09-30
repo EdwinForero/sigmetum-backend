@@ -26,12 +26,12 @@ Las guías son normas con su motivo, su forma de comprobarlas y su estado en est
 
 ### Integración con los otros repositorios
 
-Lo que este backend ofrece y necesita de cada repositorio hermano. Ver [INTEGRACION.md](../INTEGRACION.md) para la convención completa.
+Lo que este backend ofrece y necesita de cada repositorio hermano. La convención está en [guias/mantenimiento.md#6-avisar-al-frontend-y-a-la-infraestructura](guias/mantenimiento.md#6-avisar-al-frontend-y-a-la-infraestructura).
 
-| Documento | Para quién |
-|---|---|
-| [integracion/para-frontend.md](integracion/para-frontend.md) | Quien mantiene `sigmetum-frontend` |
-| [integracion/para-infra.md](integracion/para-infra.md) | Quien mantiene `sigmetum-infra` |
+| Documento | Para quién | Lado opuesto |
+|---|---|---|
+| [integracion/para-frontend.md](integracion/para-frontend.md) | Quien mantiene `sigmetum-frontend` | [sigmetum-frontend/docs/integracion/para-backend.md](https://github.com/EdwinForero/sigmetum-frontend/tree/feature/sigmetum_front_v2/docs/integracion) (disponible tras fusión) |
+| [integracion/para-infra.md](integracion/para-infra.md) | Quien mantiene `sigmetum-infra` | `sigmetum-infra` aún no tiene `para-backend.md` (verificado 30/09/2026; solo `para-frontend.md`) |
 
 ## Estructura del repositorio
 
@@ -60,7 +60,6 @@ sigmetum-backend/
 │   └── quality-check.mjs        # Puerta de calidad y seguridad (npm run quality)
 ├── eslint.config.js             # Configuración de ESLint 9 (npm run lint)
 ├── CLAUDE.md                    # Instrucciones para Claude Code (tabla de guías y definición de terminado)
-├── INTEGRACION.md               # Apunta a la documentación de integración con frontend e infra
 ├── .github/                     # CI, plantilla de PR y Dependabot
 ├── .claude/                     # Configuración compartida de Claude Code (plugins y skills)
 └── docs/                        # Esta documentación (guias/ e integracion/)
