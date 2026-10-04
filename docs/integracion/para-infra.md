@@ -3,7 +3,7 @@
 Documento para quien mantiene `sigmetum-infra`. Explica **qué necesita este backend para arrancar y funcionar** en cada entorno. Sigue la convención de [../guias/mantenimiento.md](../guias/mantenimiento.md#6-avisar-al-frontend-y-a-la-infraestructura).
 
 - Lo verificado contra el código de Terraform está marcado **(verificado)**; lo que depende de la cuenta real de AWS, **(por confirmar)**.
-- Fecha de la verificación: 30/09/2026. Backend: rama `feature/sigmetum_v2`, commit `ace5367`. Infraestructura: rama `feature/testing`, commit `19bdde3`.
+- Fecha de la verificación: 30/09/2026 (actualizado 03/10/2026). Backend: rama `feature/sigmetum_v2`. Infraestructura: rama `feature/testing`, commit `19bdde3`.
 - No se han leído secretos ni `terraform.tfvars`: solo nombres de variables y los `.tfvars.example`.
 
 ## 1. Resumen
@@ -11,7 +11,7 @@ Documento para quien mantiene `sigmetum-infra`. Explica **qué necesita este bac
 | Id | Problema | Efecto |
 |---|---|---|
 | **I1** | `HealthCheckPath` de Beanstalk es `/`, pero el backend solo responde `200` en `/healthcheck` (`/` no tiene ruta definida) | El entorno puede figurar como no saludable **(verificado en el código de ambos repos; por confirmar en el entorno real, porque Express podría responder algo distinto a un healthcheck fallido)** |
-| **I2** | No hay `trust proxy` configurado en el backend, y no hay evidencia de que el proxy de Beanstalk/ALB limite `X-Forwarded-For` de otra forma | Detrás del ALB de prod, todos los clientes podrían compartir la IP del balanceador en el limitador de `POST /log` (10 intentos/15 min): el límite deja de ser por cliente. Ver el hallazgo interno M12 |
+| **I2** | ~~No hay `trust proxy` configurado en el backend~~ | **Resuelto (03/10/2026)**: `app.set('trust proxy', 1)` añadido en `index.js`. Cadena verificada: ALB → nginx (loopback) → Express; 1 salto externo. El rate-limiter de login ya lee la IP real del cliente. |
 | **I3** | `terraform.tfvars.example` de `dev` y `prod` **ya incluyen** `ALLOWED_ORIGIN`, `ADMIN_USERNAME` y `ADMIN_PASSWORD` **(verificado, 30/09/2026)** | El documento del frontend (`para-infra.md` de `sigmetum-frontend`, I5) decía que faltaban: **puede estar resuelto**. Confirmar con quien mantiene `sigmetum-infra` si el `terraform.tfvars` real (no el ejemplo) también las tiene aplicadas |
 | **I4** | `load_balancer_type = "single"` en dev, es decir, **sin ALB**: `backend_url` se construye como `http://${module.beanstalk.endpoint_url}` (ver `environments/dev/main.tf`) | El backend de dev se sirve por HTTP; si el frontend de dev se sirve por HTTPS (Amplify), el navegador bloquea las peticiones por contenido mixto (coincide con `frontend:I4`) |
 | **I5** | No hay regla de grupo de seguridad explícita para la salida a `smtp.gmail.com:587` en el módulo `beanstalk` | Se asume la salida por defecto del grupo de seguridad del VPC por defecto (normalmente abierta a todo el tráfico saliente), pero no está verificado en el código **(por confirmar)** |
@@ -58,7 +58,7 @@ Nombres únicamente; nunca valores reales. Fuente: `config/validateEnv.js` **(ve
 | Runtime | Node.js 20 (`64bit Amazon Linux 2023 v6.4.0 running Node.js 20`) | Sí, en `modules/beanstalk/variables.tf` |
 | Comando de arranque | `npm start` (`node index.js`), el que usa Beanstalk por convención para una app Node | Por confirmar: no hay un `Procfile` en este repositorio; Beanstalk infiere `npm start` de `package.json` |
 | Puerto interno | `PORT` (8000 por defecto); Beanstalk enruta el puerto 80 externo hacia él | Sí (`app.listen(PORT)` en `index.js`, `Port = 80` en `modules/beanstalk/main.tf`) |
-| `package.json` → `engines` | **No declarado** (hallazgo interno B3) | Sí; Beanstalk no lo exige, pero conviene fijarlo |
+| `package.json` → `engines` | `"node": "20.x"` declarado **(resuelto 03/10/2026, B3)** | Sí |
 | Health check | `GET /healthcheck` → `200 ok`, texto plano, sin auth ni CORS (se registra antes de esos middlewares) | Sí, en `index.js` |
 | **`HealthCheckPath` en Terraform** | `/` (no `/healthcheck`) | Sí, en `modules/beanstalk/main.tf` → **I1** |
 | Despliegue | Subir un zip del código por consola o CI/CD; sin pipeline automatizado hoy | Sí, según el README de `sigmetum-infra` → I6 |
@@ -116,7 +116,7 @@ Ver el resumen de la sección 1. Estado y responsable:
 | Id | Responsable | Acción |
 |---|---|---|
 | **I1** | Infraestructura | Cambiar `HealthCheckPath` a `/healthcheck` en `modules/beanstalk/main.tf` |
-| **I2** | Infraestructura y backend | Infra: confirmar cuántos saltos de proxy hay entre el cliente y la instancia (ALB, y si la plataforma de Beanstalk añade otro). Backend: configurar `app.set('trust proxy', N)` con ese número (hallazgo interno M12) |
+| **I2** | ~~Infraestructura y backend~~ | **Resuelto (03/10/2026)**: `app.set('trust proxy', 1)` en `index.js` |
 | **I3** | Ambos | Confirmar si el `terraform.tfvars` real de cada entorno ya tiene `ALLOWED_ORIGIN`, `ADMIN_USERNAME` y `ADMIN_PASSWORD` aplicados. Si es así, este documento y el del frontend (I5 de `para-infra.md`) se actualizan como resuelto |
 | **I4** | Infraestructura y frontend | Decidir si dev necesita HTTPS (ALB con certificado, o un dominio con proxy). Coincide con `frontend:I4` |
 | **I5** | Infraestructura | Confirmar o documentar explícitamente la regla de salida a `smtp.gmail.com:587` |

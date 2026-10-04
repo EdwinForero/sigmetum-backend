@@ -25,6 +25,9 @@ const contentRoutes = require('./routes/content');
 const app = express();
 const PORT = process.env.PORT || 8000;
 
+// 1 hop: ALB → nginx (loopback) → Express; tells express-rate-limit to read the real client IP from X-Forwarded-For
+app.set('trust proxy', 1);
+
 app.use('/healthcheck', (req, res) => {
     res.status(200).send('ok');
 });

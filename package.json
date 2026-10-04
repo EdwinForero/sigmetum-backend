@@ -10,6 +10,9 @@
     "quality": "node scripts/quality-check.mjs",
     "docs:check": "node scripts/docs-check.mjs"
   },
+  "engines": {
+    "node": "20.x"
+  },
   "author": "",
   "license": "ISC",
   "dependencies": {
