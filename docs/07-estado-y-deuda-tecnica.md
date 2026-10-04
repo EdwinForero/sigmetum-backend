@@ -1,7 +1,7 @@
 # Estado actual y deuda técnica
 
-- Fecha del análisis: 30/09/2026.
-- Rama: `feature/sigmetum_v2`, sobre el commit `ace5367`.
+- Fecha del análisis: 30/09/2026 (actualizado 04/10/2026).
+- Rama: `feature/sigmetum_v2`, commit `dec5c0f`.
 - Lo marcado **(verificado)** se comprobó leyendo el código, ejecutándolo o en `sigmetum-infra`; lo marcado **(por confirmar)** se deduce, pero no se probó contra un S3 real ni contra el despliegue.
 - Las normas que salen de estos hallazgos están en [buenas prácticas](guias/buenas-practicas-backend.md) y [seguridad](guias/seguridad.md).
 
@@ -9,7 +9,7 @@
 
 El código está limpio, es pequeño y sigue convenciones consistentes: formato de respuesta único, errores centralizados, validación de entorno al arrancar, rutas de S3 centralizadas y credenciales AWS por rol/SSO. Los dos refactors recientes (seguridad y layout de S3) dejaron una base razonable.
 
-Lo que más pesa: **no hay tests** (M11), **vulnerabilidades altas y críticas en dependencias de producción** sin resolver (M16; la puerta `npm run quality` falla por ellas), un **login que se cuelga** sin contraseña (A7), **varios fallos latentes en el flujo de versionado** (A1, A2, A4) y **dos endpoints públicos más abiertos de lo necesario** (M2, M3). Además hay 9 discrepancias abiertas con el frontend (ver [más abajo](#discrepancias-con-el-frontend)).
+Lo que más pesa: **no hay tests** (M11), un **login que se cuelga** sin contraseña (A7), **varios fallos latentes en el flujo de versionado** (A1, A2, A4) y **dos endpoints públicos más abiertos de lo necesario** (M2, M3). Las vulnerabilidades de dependencias (M16) se resolvieron en gran parte el 04/10/2026 (`npm audit fix` + `bcrypt@6` + `nodemailer@10`); solo quedan moderadas y bajas. Hay 9 discrepancias abiertas con el frontend (ver [más abajo](#discrepancias-con-el-frontend)).
 
 ## Métricas
 
@@ -91,11 +91,11 @@ Devuelve `[]` ante cualquier fallo, no solo "no existe". Con un problema de perm
 | **M9** | `deleteFileFromS3` y `updateFileS3` descargan y reconvierten un Excel dentro de la petición | Con ficheros grandes la petición se alarga | Candidatos a procesamiento asíncrono si los ficheros crecen |
 | **M10** | `listFilesInS3Folder` no pagina | Más de 1000 objetos bajo un prefijo se truncan en silencio | Paginar con `ContinuationToken` |
 | **M11** | **No hay tests** ni framework de testing | Es el mayor riesgo para seguir evolucionando | Empezar por `convertExcelToJson`, `getNextVersion` y el flujo upload/confirm/delete con S3 simulado |
-| **M12** | El limitador de login no tiene `trust proxy`. `index.js` no llama a `app.set('trust proxy', ...)` **(verificado)**, y `express-rate-limit` avisa de ello cuando llega `X-Forwarded-For` | Detrás del ALB de prod, `req.ip` sería la IP del balanceador y **todos los clientes compartirían el mismo contador** de 10 intentos cada 15 minutos: cualquiera puede bloquear el login del admin, y el límite no distingue atacantes **(por confirmar en el despliegue real)** | Configurar `trust proxy` con el número de saltos real (ALB y, si lo hay, el proxy de la plataforma de Beanstalk) y comprobarlo con infra. Relacionado con D7 |
+| **M12** | ~~El limitador de login no tiene `trust proxy`~~ | **Resuelto (03/10/2026, commit `24ff014`)**: `app.set('trust proxy', 1)` añadido en `index.js`. Cadena ALB → nginx (loopback) → Express verificada en Terraform; el rate-limiter lee la IP real del cliente. | — |
 | **M13** | `index.js` arranca el servidor (`app.listen`) al importarse y no exporta la app | No se puede probar la API con `supertest` sin abrir un puerto ni cargar el entorno | Separar `app.js` (construye y exporta la app) de `index.js` (valida el entorno y escucha). Requisito para M11 |
 | **M14** | Capas mezcladas: `aws/` contiene lógica de negocio (`deleteFileFromS3` y `updateFileS3` deciden qué versión queda activa y reconvierten el Excel con `convertExcelToJson`), y `functions/getNextVersion.js` depende de S3 | La lógica de versionado no se puede probar sin simular S3, y la capa de S3 no es intercambiable | Dejar en `aws/` solo leer, escribir, listar, borrar y firmar; mover la regla de la versión activa a `functions/` (funciones puras que reciben datos) o a una capa de servicio. Ver [estructura](guias/buenas-practicas-backend.md#2-estructura-qué-va-en-cada-sitio) |
 | **M15** | `validateEnv.js` solo comprueba que las variables existan, no su valor | Un `ADMIN_PASSWORD` que no sea un hash bcrypt hace que **todos los logins den 401** sin aviso; un `JWT_SECRET` corto se acepta | Validar que `ADMIN_PASSWORD` tiene forma de hash bcrypt (`$2a$`, `$2b$` o `$2y$`), que `JWT_SECRET` tiene una longitud mínima y que `JWT_EXPIRATION` es un valor válido de `jsonwebtoken` |
-| **M16** | **Vulnerabilidades altas y críticas en dependencias de producción** sin resolver (`npm audit --omit=dev`), que `npm run quality` rechaza: `express` y `path-to-regexp` (ReDoS), `jws` (vía `jsonwebtoken`, verificación de firmas HMAC), `nodemailer` (inyección de comandos SMTP y envío a un dominio no previsto), `fast-xml-parser` (vía el SDK de AWS) e `ip-address` (vía `express-rate-limit`) **(verificado el 30/09/2026)** | Son alcanzables en producción: autenticación, correo y enrutado | `npm audit fix` (sin `--force`) resuelve `express`, `path-to-regexp`, `jws`, `fast-xml-parser` e `ip-address` sin cambios mayores; `nodemailer` exige un cambio de versión mayor y hay que revisar el uso de `sendMail`. Hay además vulnerabilidades moderadas y bajas. Aceptadas con motivo escrito: `tar`, `@mapbox/node-pre-gyp` y `brace-expansion` (ver [seguridad](guias/seguridad.md#s9-dependencias)) |
+| **M16** | ~~**Vulnerabilidades altas y críticas en dependencias de producción**~~ | **Resuelto (04/10/2026, commits `16a85c6` y `756697f`)**: `npm audit fix` + `bcrypt@6` + `nodemailer@10`. `npm run quality` pasa sin bloqueos de alta/crítica. Quedan moderadas y bajas; revisarlas al actualizar dependencias. `ACCEPTED_ADVISORIES` vacío: ninguna excepción vigente. | — |
 | **M17** | `errorHandler` devuelve `err.message` al cliente para cualquier error no mapeado, también en producción | Un error interno (un `JSON.parse` fallido, un mensaje del SDK o de `bcrypt`) revela detalles de la implementación | Para errores 5xx devolver un mensaje genérico (`Internal server error`) y registrar el detalle; conservar los mensajes de `friendlyMessage` para los casos mapeados y los 4xx |
 
 ## Calidad y detalles (B e I)
@@ -104,14 +104,14 @@ Devuelve `[]` ante cualquier fallo, no solo "no existe". Con un problema de perm
 |---|---|---|
 | **B1** | Sin cabeceras de seguridad (`helmet`) | Opcional: es una API JSON |
 | **B2** | `nodemon` está instalado pero no hay script `dev` | Añadir `"dev": "nodemon index.js"` |
-| **B3** | `package.json` no declara `engines`. Beanstalk ejecuta `Node.js 20` **(verificado en `sigmetum-infra`, `64bit Amazon Linux 2023 v6.4.0 running Node.js 20`)** | Añadir `"engines": { "node": ">=20" }` |
+| **B3** | ~~`package.json` no declara `engines`~~ | **Resuelto (03/10/2026, commit `24ff014`)**: `"engines": { "node": "22" }` — Node.js 22 es la plataforma de Beanstalk **(verificado en `sigmetum-infra`, `64bit Amazon Linux 2023 v6.11.9 running Node.js 22`)** |
 | **B4** | Usuario admin único en variables de entorno | Correcto hoy; es un límite si alguna vez hay más de un editor |
 | **B5** | Estilos de error mezclados: unas funciones de S3 lanzan y otras devuelven `{ success: false }` (`deleteImageFromS3`, `deleteTermFromS3`); las rutas tienen que tratar ambos casos | Unificar en lanzar y dejar que actúe `errorHandler` |
 | **B6** | `loginLimiter` usa la opción `max`, que en `express-rate-limit` 8 está obsoleta (se sigue aceptando) | Cambiar a `limit` |
 | **B7** | Archivos fuera de su sitio: `functions/tokenAuthentication.js` es un middleware y `functions/userAuthentication.js` un manejador de ruta, y `middleware/` solo tiene `errorHandler`. La carpeta `uploads/` está vacía y sin uso (`multer` trabaja en memoria) | Mover el middleware a `middleware/` (y el manejador de login a `routes/`) y quitar `uploads/` cuando se toque esa zona |
 | **B8** | `jwt.verify` y `jwt.sign` no fijan el algoritmo (`algorithms: ['HS256']`) | Fijarlo: no depender del valor por defecto de la librería |
 | **B9** | Los errores de S3 (`NoSuchKey`) responden 500 porque el error del SDK no trae `status` ni `statusCode` (su código HTTP está en `$metadata.httpStatusCode`), aunque `errorHandler` les da un mensaje legible **(por confirmar la forma del error)** | Mapear `NoSuchKey` a 404 en `errorHandler` |
-| **I1** | `.env.example` usa `AWS_BUCKET_NAME=sigmetum-dev`, pero el bucket de dev en `sigmetum-infra` es `sigmetum-app-dev` | Alinear el ejemplo con la infraestructura |
+| **I1** | `.env.example` usa `AWS_BUCKET_NAME=sigmetum-dev`, pero el bucket de dev en `sigmetum-infra` es `sigmetum-app-assets-dev` y la región es `eu-west-3` | Alinear el ejemplo con la infraestructura |
 
 Lo que está bien: contraseña con bcrypt, JWT con caducidad, límite de intentos en el login, CORS restringido, credenciales AWS por rol o SSO (con IAM mínimo y bucket no público, versionado y cifrado en `sigmetum-infra`), trazas de pila solo en local, `.env*` en `.gitignore`, sin `eval` ni `child_process`, y todas las rutas que modifican estado protegidas salvo `POST /log` y `POST /send-email`.
 
@@ -133,16 +133,19 @@ La fuente de verdad de lo que **espera** el frontend es su documento `../sigmetu
 
 ## Resueltos
 
-Ninguno todavía.
+| Id | Commit | Qué se hizo |
+|---|---|---|
+| **M12** | `24ff014` (03/10/2026) | `app.set('trust proxy', 1)`: el rate-limiter de login lee la IP real del cliente detrás del ALB |
+| **B3** | `24ff014` (03/10/2026) | `"engines": { "node": "22" }` en `package.json`; actualizado a 22 en `d481d84` |
+| **M16** | `16a85c6`, `756697f` (04/10/2026) | `bcrypt@6`, `nodemailer@10`, `npm audit fix`; `npm run quality` pasa sin bloqueos altos/críticos |
 
 ## Prioridades sugeridas
 
-1. **M16** (dependencias): `npm audit fix` sin `--force` y revisar `nodemailer`. Es lo que pone en rojo `npm run quality` y afecta a autenticación y correo.
-2. **A7** (login que se cuelga) y **A3** (entradas sin validar): cambios pequeños que evitan conexiones colgadas y errores 500. Cierra parte de D3.
-3. **A1** (zona horaria del versionado) y **A4** (provincia sin validar): evitan pérdida y corrupción de datos.
-4. **D1**: endpoint para abrir una versión. Solo después, **M2** (cerrar `/get-data`). Junto con **M3** (límite y validación en `/send-email`).
-5. **M12** (`trust proxy`), antes de fiarse del límite del login en prod; **M15** y **M17** (validar el entorno y no revelar errores internos).
-6. **A2** (borradores aparte) y **A6** (distinguir "no existe" de "error" en `getTextJsonS3`).
-7. **M13** y **M14** (app exportable y capas separadas), y con ellos **M11**: tests del flujo de datos, y luego los tests de contrato que recomienda el frontend.
-8. **D5/A5** y **D8**: respuestas más ligeras y sin errores falsos.
-9. **M7** y **M8**: paralelizar y cachear `/get-merged-data`.
+1. **A7** (login que se cuelga) y **A3** (entradas sin validar): cambios pequeños que evitan conexiones colgadas y errores 500. Cierra parte de D3.
+2. **A1** (zona horaria del versionado) y **A4** (provincia sin validar): evitan pérdida y corrupción de datos.
+3. **D1**: endpoint para abrir una versión. Solo después, **M2** (cerrar `/get-data`). Junto con **M3** (límite y validación en `/send-email`).
+4. **M15** y **M17** (validar el entorno y no revelar errores internos).
+5. **A2** (borradores aparte) y **A6** (distinguir "no existe" de "error" en `getTextJsonS3`).
+6. **M13** y **M14** (app exportable y capas separadas), y con ellos **M11**: tests del flujo de datos, y luego los tests de contrato que recomienda el frontend.
+7. **D5/A5** y **D8**: respuestas más ligeras y sin errores falsos.
+8. **M7** y **M8**: paralelizar y cachear `/get-merged-data`.
