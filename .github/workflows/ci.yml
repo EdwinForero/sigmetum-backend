@@ -8,8 +8,9 @@ name: CI
 
 on:
   pull_request:
+    branches: [master, feature/testing]
   push:
-    branches: [master, feature/sigmetum_v2]
+    branches: [master, feature/testing]
   schedule:
     # Cada lunes: detecta vulnerabilidades nuevas en las dependencias (npm audit) aunque no haya cambios de código.
     - cron: '0 6 * * 1'
