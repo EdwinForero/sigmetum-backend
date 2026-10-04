@@ -1,0 +1,25 @@
+# Actualizaciones de dependencias. Dependabot abre PRs y la CI las valida.
+# Las actualizaciones de seguridad se activan aparte en Settings > Code security de GitHub.
+
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      minor-y-parches:
+        update-types: [minor, patch]
+    ignore:
+      # bcrypt 6.0.0 exige Node 18+; este proyecto usa Node 20, así que es compatible, pero la instalación
+      # de bcrypt (que ejecuta @mapbox/node-pre-gyp) puede fallar en algunos CI. Si falla, revisar.
+      - dependency-name: bcrypt
+        update-types: ['version-update:semver-major']
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday

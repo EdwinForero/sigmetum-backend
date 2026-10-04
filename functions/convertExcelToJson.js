@@ -1,37 +1,53 @@
-const XLSX = require('xlsx');
+const ExcelJS = require('exceljs');
 
-const convertExcelToJson = (filePath) => {
-    const workbook = XLSX.readFile(filePath);
-    const firstSheetName = workbook.SheetNames[0];
-    const worksheet = workbook.Sheets[firstSheetName];
+const fixedColumnOrder = [
+    'Provincia',
+    'Municipio',
+    'Altitud Media',
+    'Sector Biogeográfico',
+    'Piso Bioclimático',
+    'Ombrotipo',
+    'Naturaleza del Sustrato',
+    'Tipo de Serie',
+    'Serie de Vegetación',
+    'Vegetación Potencial',
+    'Especies Características',
+];
 
-    const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+const getCellValue = (cell) => {
+    const v = cell.value;
+    if (v === null || v === undefined) return null;
+    if (typeof v === 'object' && v.richText) return v.richText.map(r => r.text).join('');
+    if (typeof v === 'object' && v.result !== undefined) return v.result;
+    return v;
+};
 
-    const fixedColumnOrder = [
-        "Provincia",
-        "Municipio",
-        "Altitud Media",
-        "Sector Biogeográfico",
-        "Piso Bioclimático",
-        "Ombrotipo",
-        "Naturaleza del Sustrato",
-        "Tipo de Serie",
-        "Serie de Vegetación",
-        "Vegetación Potencial",
-        "Especies Características"
-    ];
+const convertExcelToJson = async (input) => {
+    const workbook = new ExcelJS.Workbook();
 
-    const dataRows = jsonData.slice(1);
+    if (Buffer.isBuffer(input)) {
+        await workbook.xlsx.load(input);
+    } else {
+        await workbook.xlsx.readFile(input);
+    }
+
+    const worksheet = workbook.worksheets[0];
     const emptyFields = [];
-    const processedData = dataRows.map((row, rowIndex) => {
+    const processedData = [];
+
+    worksheet.eachRow((row, rowNumber) => {
+        if (rowNumber === 1) return;
+
         const processedRow = {};
         let hasEmptyFields = false;
 
         fixedColumnOrder.forEach((columnName, index) => {
-            const value = row[index];
-            if (value !== undefined && String(value).trim() !== '') {
-                if (typeof value === 'string' && value.includes(',')) {
-                    processedRow[columnName] = value
+            const value = getCellValue(row.getCell(index + 1));
+
+            if (value !== null && value !== undefined && String(value).trim() !== '') {
+                const strValue = String(value);
+                if (strValue.includes(',')) {
+                    processedRow[columnName] = strValue
                         .split(',')
                         .map(item => item.trim())
                         .filter(item => item !== '');
@@ -44,13 +60,10 @@ const convertExcelToJson = (filePath) => {
         });
 
         if (hasEmptyFields) {
-            emptyFields.push({
-                rowIndex: rowIndex + 2,
-                rowData: row
-            });
+            emptyFields.push({ rowIndex: rowNumber, rowData: row.values.slice(1) });
         }
 
-        return processedRow;
+        processedData.push(processedRow);
     });
 
     return { processedData, emptyFields };
