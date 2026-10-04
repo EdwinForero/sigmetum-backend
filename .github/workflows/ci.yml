@@ -57,7 +57,7 @@ jobs:
     name: Deploy a Beanstalk
     runs-on: ubuntu-latest
     needs: verify
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' && (github.ref_name == 'master' || github.ref_name == 'feature/testing')
     timeout-minutes: 20
 
     env:
