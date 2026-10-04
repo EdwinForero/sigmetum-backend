@@ -3,19 +3,19 @@
 Documento para quien mantiene `sigmetum-infra`. Explica **qué necesita este backend para arrancar y funcionar** en cada entorno. Sigue la convención de [../guias/mantenimiento.md](../guias/mantenimiento.md#6-avisar-al-frontend-y-a-la-infraestructura).
 
 - Lo verificado contra el código de Terraform está marcado **(verificado)**; lo que depende de la cuenta real de AWS, **(por confirmar)**.
-- Fecha de la verificación: 30/09/2026 (actualizado 03/10/2026). Backend: rama `feature/sigmetum_v2`. Infraestructura: rama `feature/testing`, commit `19bdde3`.
+- Fecha de la verificación: 30/09/2026 (actualizado 04/10/2026). Backend: rama `feature/sigmetum_v2`. Infraestructura: rama `feature/testing`, commit `f35dd3a`.
 - No se han leído secretos ni `terraform.tfvars`: solo nombres de variables y los `.tfvars.example`.
 
 ## 1. Resumen
 
 | Id | Problema | Efecto |
 |---|---|---|
-| **I1** | `HealthCheckPath` de Beanstalk es `/`, pero el backend solo responde `200` en `/healthcheck` (`/` no tiene ruta definida) | El entorno puede figurar como no saludable **(verificado en el código de ambos repos; por confirmar en el entorno real, porque Express podría responder algo distinto a un healthcheck fallido)** |
-| **I2** | ~~No hay `trust proxy` configurado en el backend~~ | **Resuelto (03/10/2026)**: `app.set('trust proxy', 1)` añadido en `index.js`. Cadena verificada: ALB → nginx (loopback) → Express; 1 salto externo. El rate-limiter de login ya lee la IP real del cliente. |
-| **I3** | `terraform.tfvars.example` de `dev` y `prod` **ya incluyen** `ALLOWED_ORIGIN`, `ADMIN_USERNAME` y `ADMIN_PASSWORD` **(verificado, 30/09/2026)** | El documento del frontend (`para-infra.md` de `sigmetum-frontend`, I5) decía que faltaban: **puede estar resuelto**. Confirmar con quien mantiene `sigmetum-infra` si el `terraform.tfvars` real (no el ejemplo) también las tiene aplicadas |
-| **I4** | `load_balancer_type = "single"` en dev, es decir, **sin ALB**: `backend_url` se construye como `http://${module.beanstalk.endpoint_url}` (ver `environments/dev/main.tf`) | El backend de dev se sirve por HTTP; si el frontend de dev se sirve por HTTPS (Amplify), el navegador bloquea las peticiones por contenido mixto (coincide con `frontend:I4`) |
-| **I5** | No hay regla de grupo de seguridad explícita para la salida a `smtp.gmail.com:587` en el módulo `beanstalk` | Se asume la salida por defecto del grupo de seguridad del VPC por defecto (normalmente abierta a todo el tráfico saliente), pero no está verificado en el código **(por confirmar)** |
-| **I6** | No hay ningún paso de despliegue automatizado para el backend: el README de `sigmetum-infra` dice "sube un zip por consola o CI/CD" | El despliegue es manual hoy; no hay pipeline que aplique `npm ci && npm run lint && npm run quality` antes de subir el paquete |
+| ~~**I1**~~ | ~~`HealthCheckPath` de Beanstalk es `/`~~ | **Resuelto (feature/testing de infra)**: `HealthCheckPath = "/healthcheck"` en `modules/beanstalk/main.tf` **(verificado)** |
+| ~~**I2**~~ | ~~No hay `trust proxy` configurado en el backend~~ | **Resuelto (03/10/2026)**: `app.set('trust proxy', 1)` añadido en `index.js`. Cadena verificada: nginx (loopback) → Express; 1 salto. El rate-limiter de login ya lee la IP real del cliente. |
+| ~~**I3**~~ | ~~`app_env_vars` no incluía `ALLOWED_ORIGIN`, `ADMIN_USERNAME` ni `ADMIN_PASSWORD`~~ | **Resuelto (30/09/2026)**: los `.tfvars.example` de `dev` y `prod` incluyen todas las variables obligatorias más `PORT` **(verificado)** |
+| ~~**I4**~~ | ~~dev sin HTTPS: contenido mixto con el frontend en Amplify~~ | **Resuelto (feature/testing de infra)**: `enable_cdn = true` en dev añade CloudFront como terminador HTTPS delante de Beanstalk; `backend_url` ya apunta a `module.beanstalk.backend_cdn_url` **(verificado)** |
+| **I5** | No hay regla de grupo de seguridad explícita para la salida a `smtp.gmail.com:587` | Se asume la salida por defecto del VPC por defecto (normalmente abierta), pero no está verificado en el entorno real **(por confirmar)** |
+| ~~**I6**~~ | ~~Sin pipeline de despliegue automatizado para el backend~~ | **Resuelto (04/10/2026)**: módulo `backend-ci-iam` en infra crea el rol OIDC para GitHub Actions; el workflow del backend ya despliega en Beanstalk automáticamente al hacer push a la rama de dev |
 
 ## 2. Variables de entorno
 
@@ -60,8 +60,8 @@ Nombres únicamente; nunca valores reales. Fuente: `config/validateEnv.js` **(ve
 | Puerto interno | `PORT` (8000 por defecto); Beanstalk enruta el puerto 80 externo hacia él | Sí (`app.listen(PORT)` en `index.js`, `Port = 80` en `modules/beanstalk/main.tf`) |
 | `package.json` → `engines` | `"node": "22"` declarado **(resuelto 03/10/2026, B3)** | Sí |
 | Health check | `GET /healthcheck` → `200 ok`, texto plano, sin auth ni CORS (se registra antes de esos middlewares) | Sí, en `index.js` |
-| **`HealthCheckPath` en Terraform** | `/` (no `/healthcheck`) | Sí, en `modules/beanstalk/main.tf` → **I1** |
-| Despliegue | Subir un zip del código por consola o CI/CD; sin pipeline automatizado hoy | Sí, según el README de `sigmetum-infra` → I6 |
+| `HealthCheckPath` en Terraform | `/healthcheck` **(I1 resuelto)** | Sí, en `modules/beanstalk/main.tf` |
+| Despliegue | GitHub Actions (OIDC) → zip a S3 → `CreateApplicationVersion` → `UpdateEnvironment` **(I6 resuelto)** | Sí, módulo `backend-ci-iam` en infra |
 
 ## 4. Permisos IAM sobre S3
 
@@ -104,8 +104,8 @@ Acciones que usa el código, deducidas de `aws/awsS3connect.js` **(verificado)**
 
 | Aspecto | Estado |
 |---|---|
-| `trust proxy` | **No configurado en el backend** (`index.js` no llama a `app.set('trust proxy', ...)`) → I2 |
-| HTTPS | `prod` usa ALB con `ssl_certificate_arn` (HTTPS en el 443); `dev` usa `load_balancer_type = "single"` (sin ALB, solo HTTP) → I4 |
+| `trust proxy` | `app.set('trust proxy', 1)` en `index.js` **(I2 resuelto)**. Cadena: nginx (loopback) → Express; 1 salto. |
+| HTTPS | `prod` usa ALB con `ssl_certificate_arn` (HTTPS en el 443); `dev` usa CloudFront como terminador HTTPS delante de Beanstalk (`enable_cdn = true`) **(I4 resuelto)** |
 | Salida SMTP (`smtp.gmail.com:587`) | Sin regla de grupo de seguridad específica en el módulo `beanstalk`; se asume la salida por defecto del grupo del VPC por defecto **(por confirmar)** |
 | Memoria e instancia | `t3.nano` (0.5 GiB de RAM) en los dos entornos, 1 a 3 instancias en prod, 1 fija en dev. El backend carga los Excel enteros en memoria (`multer` sin límite de tamaño, hallazgo interno M6): con `t3.nano`, un Excel grande es un riesgo real de memoria, no solo teórico |
 
@@ -115,12 +115,12 @@ Ver el resumen de la sección 1. Estado y responsable:
 
 | Id | Responsable | Acción |
 |---|---|---|
-| **I1** | ~~Infraestructura~~ | **Resuelto** (`feature/testing` de infra): `HealthCheckPath = "/healthcheck"` |
-| **I2** | ~~Infraestructura y backend~~ | **Resuelto (03/10/2026)**: `app.set('trust proxy', 1)` en `index.js` |
-| **I3** | ~~Ambos~~ | **Resuelto (03/10/2026)**: `para-backend.md` de infra confirma que `app_env_vars` incluye todas las obligatorias. Región actualizada a `eu-west-3`, bucket a `sigmetum-app-assets-*` |
-| **I4** | Infraestructura y frontend | Decidir si dev necesita HTTPS (ALB con certificado, o un dominio con proxy). Coincide con `frontend:I4` |
-| **I5** | Infraestructura | Confirmar o documentar explícitamente la regla de salida a `smtp.gmail.com:587` |
-| **I6** | Infraestructura | Valorar automatizar el despliegue del backend (zip) tras pasar `npm run lint`, `npm run quality` y `npm run docs:check` en CI. No se implanta en este documento: es una decisión de infraestructura |
+| ~~**I1**~~ | ~~Infraestructura~~ | **Resuelto (feature/testing de infra)**: `HealthCheckPath = "/healthcheck"` en `modules/beanstalk/main.tf` |
+| ~~**I2**~~ | ~~Backend~~ | **Resuelto (03/10/2026)**: `app.set('trust proxy', 1)` en `index.js` |
+| ~~**I3**~~ | ~~Ambos~~ | **Resuelto (30/09/2026)**: `app_env_vars` incluye todas las obligatorias en los `.tfvars.example` |
+| ~~**I4**~~ | ~~Infraestructura y frontend~~ | **Resuelto (feature/testing de infra)**: CloudFront (`enable_cdn = true`) termina HTTPS en dev |
+| **I5** | Infraestructura | Confirmar que el grupo de seguridad del VPC por defecto permite salida a `smtp.gmail.com:587` **(por confirmar en la cuenta real)** |
+| ~~**I6**~~ | ~~Infraestructura~~ | **Resuelto (04/10/2026)**: módulo `backend-ci-iam` + GitHub Actions workflow; el CI despliega automáticamente en Beanstalk |
 
 ## 8. Si cambias algo en la infraestructura
 
