@@ -6,26 +6,26 @@ Runtime: **Node.js** (CommonJS, `require`). Arranque con `npm start` → `node i
 
 | Paquete | Versión instalada | Uso en el proyecto |
 |---|---|---|
-| `express` | 4.21.1 | Servidor HTTP y routers |
+| `express` | 4.22.3 | Servidor HTTP y routers |
 | `cors` | 2.8.5 | Restringe el origen permitido a `ALLOWED_ORIGIN` |
-| `compression` | 1.7.5 | Compresión gzip de respuestas (los JSON de datos son grandes) |
-| `morgan` | 1.10.1 | Log de peticiones en formato `combined` |
+| `compression` | 1.8.2 | Compresión gzip de respuestas (los JSON de datos son grandes) |
+| `morgan` | 1.12.1 | Log de peticiones en formato `combined` |
 | `dotenv` | 16.4.5 | Carga `.env` en `process.env` |
 | `express-rate-limit` | 8.5.2 | Limita intentos de login (10 cada 15 min por IP) |
 | `jsonwebtoken` | 9.0.2 | Emisión y verificación de JWT |
 | `bcrypt` | 6.0.0 | Comparación de la contraseña del admin contra un hash |
 | `multer` | 1.4.5-lts.1 | Recepción de ficheros `multipart/form-data` en memoria |
 | `exceljs` | 4.4.0 | Lectura de los Excel de series de vegetación |
-| `nodemailer` | 6.9.16 | Envío del formulario de contacto vía SMTP de Gmail |
-| `@aws-sdk/client-s3` | 3.685.0 | Operaciones sobre el bucket (get, put, list, delete) |
-| `@aws-sdk/s3-request-presigner` | 3.685.0 | URLs prefirmadas para las imágenes de la galería |
+| `nodemailer` | 10.0.14 | Envío del formulario de contacto vía SMTP de Gmail |
+| `@aws-sdk/client-s3` | 3.1146.0 | Operaciones sobre el bucket (get, put, list, delete) |
+| `@aws-sdk/s3-request-presigner` | 3.1146.0 | URLs prefirmadas para las imágenes de la galería |
 | `@aws-sdk/credential-providers` | 3.1058.0 | `fromSSO` para credenciales en local |
 
 ## Dependencias de desarrollo
 
 | Paquete | Versión | Uso |
 |---|---|---|
-| `nodemon` | 3.1.7 | Recarga en caliente (no hay script configurado; usar `npx nodemon index.js`) |
+| `nodemon` | 3.1.14 | Recarga en caliente (no hay script configurado; usar `npx nodemon index.js`) |
 | `eslint` | 9.39.5 | Linter (`npm run lint`). Versión exacta, compatible con Node 20 |
 | `@eslint/js` | 9.39.5 | Reglas recomendadas de ESLint |
 | `globals` | 17.12.0 | Variables globales de Node para ESLint |

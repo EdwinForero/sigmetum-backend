@@ -49,9 +49,7 @@ const OPTIONAL_ENV = {
 
 // Vulnerabilidades altas o críticas aceptadas de forma explícita, con su justificación.
 // Solo se acepta lo que no es alcanzable en producción o no tiene arreglo. Se revisa al actualizar.
-const ACCEPTED_ADVISORIES = {
-  'brace-expansion': 'Llega por readdir-glob de archiver (que usa exceljs al escribir .xlsx). Los patrones son internos y no hay entrada del usuario (por confirmar en exceljs).',
-};
+const ACCEPTED_ADVISORIES = {};
 
 // ─── 1. Patrones prohibidos en el código ────────────────────────────────────
 
