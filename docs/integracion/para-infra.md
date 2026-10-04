@@ -93,12 +93,12 @@ Acciones que usa el código, deducidas de `aws/awsS3connect.js` **(verificado)**
 
 **`ALLOWED_ORIGIN` por entorno:**
 
-| Entorno | Debe ser |
-|---|---|
-| `dev` | El origen exacto del frontend de dev (la URL de Amplify de la rama `feature/testing`, sin barra final). Depende de lo que resuelva `sigmetum-infra`/`sigmetum-frontend` para su propio I1 (la URL de Amplify) |
-| `prod` | `https://sigmetum-a.org` o el dominio final que se asocie a la rama `master` en Amplify (aún no hay un registro DNS para el frontend, solo para `backend.sigmetum-a.org`, según `modules/dns/main.tf`) |
+`ALLOWED_ORIGIN` acepta **una lista de orígenes separados por coma**. El backend los divide, elimina espacios y permite el acceso si el origen del request está en la lista o si no hay origen (llamadas server-side). Formato: `https://a.com,https://b.com` (sin barra final, sin espacios extra).
 
-Es CORS de **un único origen exacto** (`cors({ origin: process.env.ALLOWED_ORIGIN })`): si algún día se necesita más de un origen a la vez, el backend tendría que pasar a una lista o a una función, lo cual es un cambio de código, no solo de infraestructura.
+| Entorno | Qué poner en `ALLOWED_ORIGIN` | Estado |
+|---|---|---|
+| `dev` | URL(s) de las ramas activas en Amplify, separadas por coma | Por fijar tras conocer las URLs de Amplify |
+| `prod` | El dominio del frontend en `prod` (aún no existe, infra:C9) | Por fijar tras crear el dominio |
 
 ## 6. Detrás del balanceador
 

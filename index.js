@@ -33,7 +33,16 @@ app.use('/healthcheck', (req, res) => {
 });
 
 app.use(morgan('combined'));
-app.use(cors({ origin: process.env.ALLOWED_ORIGIN }));
+app.use(cors({
+  origin: (origin, callback) => {
+    const allowed = (process.env.ALLOWED_ORIGIN || '').split(',').map(s => s.trim()).filter(Boolean);
+    if (!origin || allowed.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error(`Origin not allowed: ${origin}`));
+    }
+  },
+}));
 app.use(express.json());
 app.use(compression());
 
