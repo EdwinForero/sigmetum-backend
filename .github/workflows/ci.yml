@@ -72,12 +72,10 @@ jobs:
         run: |
           if [[ "${{ github.ref_name }}" == "master" ]]; then
             echo "role=${{ vars.AWS_ROLE_PROD }}" >> "$GITHUB_OUTPUT"
-            echo "bucket=${{ vars.S3_BUCKET_PROD }}" >> "$GITHUB_OUTPUT"
             echo "app=sigmetum-backend-prod" >> "$GITHUB_OUTPUT"
             echo "eb_env=sigmetum-backend-prod-env" >> "$GITHUB_OUTPUT"
           else
             echo "role=${{ vars.AWS_ROLE_DEV }}" >> "$GITHUB_OUTPUT"
-            echo "bucket=${{ vars.S3_BUCKET_DEV }}" >> "$GITHUB_OUTPUT"
             echo "app=sigmetum-backend-dev" >> "$GITHUB_OUTPUT"
             echo "eb_env=sigmetum-backend-dev-env" >> "$GITHUB_OUTPUT"
           fi
@@ -87,6 +85,12 @@ jobs:
         with:
           role-to-assume: ${{ steps.env.outputs.role }}
           aws-region: ${{ env.AWS_REGION }}
+
+      - name: Obtener bucket de staging de Beanstalk
+        id: bucket
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          echo "name=elasticbeanstalk-${{ env.AWS_REGION }}-${ACCOUNT_ID}" >> "$GITHUB_OUTPUT"
 
       - name: Empaquetar código fuente
         run: |
@@ -100,7 +104,7 @@ jobs:
       - name: Subir artefacto a S3
         run: |
           aws s3 cp deploy.zip \
-            s3://${{ steps.env.outputs.bucket }}/${{ github.sha }}.zip
+            s3://${{ steps.bucket.outputs.name }}/${{ github.sha }}.zip
 
       - name: Crear versión en Beanstalk
         run: |
@@ -109,7 +113,7 @@ jobs:
           aws elasticbeanstalk create-application-version \
             --application-name ${{ steps.env.outputs.app }} \
             --version-label ${{ github.sha }} \
-            --source-bundle S3Bucket=${{ steps.env.outputs.bucket }},S3Key=${{ github.sha }}.zip \
+            --source-bundle S3Bucket=${{ steps.bucket.outputs.name }},S3Key=${{ github.sha }}.zip \
             --region ${{ env.AWS_REGION }} || true
 
       - name: Desplegar en el entorno
