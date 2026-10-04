@@ -58,7 +58,7 @@ Nombres únicamente; nunca valores reales. Fuente: `config/validateEnv.js` **(ve
 | Runtime | Node.js 22 (`64bit Amazon Linux 2023 v6.11.9 running Node.js 22`) | Sí, en `modules/beanstalk/variables.tf` |
 | Comando de arranque | `npm start` (`node index.js`), el que usa Beanstalk por convención para una app Node | Por confirmar: no hay un `Procfile` en este repositorio; Beanstalk infiere `npm start` de `package.json` |
 | Puerto interno | `PORT` (8000 por defecto); Beanstalk enruta el puerto 80 externo hacia él | Sí (`app.listen(PORT)` en `index.js`, `Port = 80` en `modules/beanstalk/main.tf`) |
-| `package.json` → `engines` | `"node": "22.x"` declarado **(resuelto 03/10/2026, B3; actualizado a 22.x 03/10/2026)** | Sí |
+| `package.json` → `engines` | `"node": "22"` declarado **(resuelto 03/10/2026, B3)** | Sí |
 | Health check | `GET /healthcheck` → `200 ok`, texto plano, sin auth ni CORS (se registra antes de esos middlewares) | Sí, en `index.js` |
 | **`HealthCheckPath` en Terraform** | `/` (no `/healthcheck`) | Sí, en `modules/beanstalk/main.tf` → **I1** |
 | Despliegue | Subir un zip del código por consola o CI/CD; sin pipeline automatizado hoy | Sí, según el README de `sigmetum-infra` → I6 |
