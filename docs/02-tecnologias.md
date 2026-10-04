@@ -13,7 +13,7 @@ Runtime: **Node.js** (CommonJS, `require`). Arranque con `npm start` → `node i
 | `dotenv` | 16.4.5 | Carga `.env` en `process.env` |
 | `express-rate-limit` | 8.5.2 | Limita intentos de login (10 cada 15 min por IP) |
 | `jsonwebtoken` | 9.0.2 | Emisión y verificación de JWT |
-| `bcrypt` | 5.1.1 | Comparación de la contraseña del admin contra un hash |
+| `bcrypt` | 6.0.0 | Comparación de la contraseña del admin contra un hash |
 | `multer` | 1.4.5-lts.1 | Recepción de ficheros `multipart/form-data` en memoria |
 | `exceljs` | 4.4.0 | Lectura de los Excel de series de vegetación |
 | `nodemailer` | 6.9.16 | Envío del formulario de contacto vía SMTP de Gmail |

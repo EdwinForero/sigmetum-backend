@@ -50,9 +50,7 @@ const OPTIONAL_ENV = {
 // Vulnerabilidades altas o críticas aceptadas de forma explícita, con su justificación.
 // Solo se acepta lo que no es alcanzable en producción o no tiene arreglo. Se revisa al actualizar.
 const ACCEPTED_ADVISORIES = {
-  tar: 'Solo la usa @mapbox/node-pre-gyp, que bcrypt ejecuta al INSTALAR para descargar el binario precompilado. No se carga en tiempo de ejecución.',
-  '@mapbox/node-pre-gyp': 'Herramienta de instalación de bcrypt (descarga el binario). No se carga en tiempo de ejecución.',
-  'brace-expansion': 'Llega por minimatch: rimraf/glob en la instalación de bcrypt y readdir-glob de archiver (que usa exceljs al escribir .xlsx). Los patrones son internos y no hay entrada del usuario (por confirmar en exceljs).',
+  'brace-expansion': 'Llega por readdir-glob de archiver (que usa exceljs al escribir .xlsx). Los patrones son internos y no hay entrada del usuario (por confirmar en exceljs).',
 };
 
 // ─── 1. Patrones prohibidos en el código ────────────────────────────────────
