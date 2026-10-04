@@ -31,8 +31,8 @@ Nombres únicamente; nunca valores reales. Fuente: `config/validateEnv.js` **(ve
 | `ADMIN_PASSWORD` | Sí | **Debe ser un hash bcrypt**, nunca la contraseña en claro. Cómo generarlo: [../03-configuracion.md](../03-configuracion.md#generar-el-hash-de-admin_password) |
 | `EMAIL` | Sí | Cuenta Gmail del formulario de contacto |
 | `EMAIL_PASSWORD` | Sí | Contraseña de aplicación de Gmail, no la contraseña de la cuenta |
-| `AWS_REGION` | No | `eu-west-1` en ambos entornos **(verificado)** |
-| `AWS_BUCKET_NAME` | No | Debe coincidir con el bucket que crea `modules/storage` (`sigmetum-app-dev` / `sigmetum-app-prod`) |
+| `AWS_REGION` | No | `eu-west-3` en ambos entornos **(verificado)** |
+| `AWS_BUCKET_NAME` | No | Debe coincidir con el bucket que crea `modules/storage` (`sigmetum-app-assets-dev` / `sigmetum-app-assets-prod`) |
 | `ALLOWED_ORIGIN` | No (pero sensible: define quién puede llamar a la API) | Un único origen exacto, sin barra final; ver sección 5 |
 
 ### Solo en local (no aplica a Beanstalk)
@@ -49,16 +49,16 @@ Nombres únicamente; nunca valores reales. Fuente: `config/validateEnv.js` **(ve
 | `API_PREFIX` | `/api/v1` | No está en `app_env_vars` de ningún ejemplo; si no se define, el backend usa el valor por defecto, que es el esperado por el frontend |
 | `NODE_ENV` | (ninguno; cualquier valor que no sea `local` se trata como no-local) | No está en ningún `.tfvars.example`; conviene **no** definirlo como `local` en Beanstalk, porque activaría credenciales SSO (que no existen en la instancia) en vez del rol IAM |
 
-**Estado de `app_env_vars` en los ejemplos (30/09/2026, verificado):** `dev` y `prod` ya incluyen las 9 obligatorias más `PORT`. Ninguna discrepancia detectada en los ejemplos (ver I3 sobre si el `.tfvars` real las tiene también).
+**Estado de `app_env_vars` en los ejemplos (03/10/2026, verificado):** `dev` y `prod` incluyen las 9 obligatorias más `PORT`. I3 resuelto: el doc de infra confirma que `app_env_vars` ya incluye `ALLOWED_ORIGIN`, `ADMIN_USERNAME` y `ADMIN_PASSWORD`.
 
 ## 3. Plataforma y arranque
 
 | Aspecto | Valor | Verificado |
 |---|---|---|
-| Runtime | Node.js 20 (`64bit Amazon Linux 2023 v6.4.0 running Node.js 20`) | Sí, en `modules/beanstalk/variables.tf` |
+| Runtime | Node.js 22 (`64bit Amazon Linux 2023 v6.11.9 running Node.js 22`) | Sí, en `modules/beanstalk/variables.tf` |
 | Comando de arranque | `npm start` (`node index.js`), el que usa Beanstalk por convención para una app Node | Por confirmar: no hay un `Procfile` en este repositorio; Beanstalk infiere `npm start` de `package.json` |
 | Puerto interno | `PORT` (8000 por defecto); Beanstalk enruta el puerto 80 externo hacia él | Sí (`app.listen(PORT)` en `index.js`, `Port = 80` en `modules/beanstalk/main.tf`) |
-| `package.json` → `engines` | `"node": "20.x"` declarado **(resuelto 03/10/2026, B3)** | Sí |
+| `package.json` → `engines` | `"node": "22.x"` declarado **(resuelto 03/10/2026, B3; actualizado a 22.x 03/10/2026)** | Sí |
 | Health check | `GET /healthcheck` → `200 ok`, texto plano, sin auth ni CORS (se registra antes de esos middlewares) | Sí, en `index.js` |
 | **`HealthCheckPath` en Terraform** | `/` (no `/healthcheck`) | Sí, en `modules/beanstalk/main.tf` → **I1** |
 | Despliegue | Subir un zip del código por consola o CI/CD; sin pipeline automatizado hoy | Sí, según el README de `sigmetum-infra` → I6 |
@@ -84,8 +84,8 @@ Acciones que usa el código, deducidas de `aws/awsS3connect.js` **(verificado)**
 
 | Aspecto | Valor |
 |---|---|
-| Nombre del bucket | `sigmetum-app-dev` / `sigmetum-app-prod` (debe coincidir con `AWS_BUCKET_NAME`) |
-| Región | `eu-west-1` en los dos entornos **(verificado)** |
+| Nombre del bucket | `sigmetum-app-assets-dev` / `sigmetum-app-assets-prod` (debe coincidir con `AWS_BUCKET_NAME`) |
+| Región | `eu-west-3` en los dos entornos **(verificado)** |
 | Acceso público | Bloqueado (`block_public_acls`, `block_public_policy`, `ignore_public_acls`, `restrict_public_buckets` todos `true`) **(verificado)**. Correcto: el backend sirve todo por URL prefirmada o por la propia API, nunca por acceso directo al bucket |
 | Cifrado | AES256 en reposo **(verificado)** |
 | Versionado | Activado **(verificado)**; relevante para el hallazgo interno A1 (una versión sobrescrita por el fallo de zona horaria se podría recuperar desde el historial de versiones de S3) |
@@ -115,9 +115,9 @@ Ver el resumen de la sección 1. Estado y responsable:
 
 | Id | Responsable | Acción |
 |---|---|---|
-| **I1** | Infraestructura | Cambiar `HealthCheckPath` a `/healthcheck` en `modules/beanstalk/main.tf` |
+| **I1** | ~~Infraestructura~~ | **Resuelto** (`feature/testing` de infra): `HealthCheckPath = "/healthcheck"` |
 | **I2** | ~~Infraestructura y backend~~ | **Resuelto (03/10/2026)**: `app.set('trust proxy', 1)` en `index.js` |
-| **I3** | Ambos | Confirmar si el `terraform.tfvars` real de cada entorno ya tiene `ALLOWED_ORIGIN`, `ADMIN_USERNAME` y `ADMIN_PASSWORD` aplicados. Si es así, este documento y el del frontend (I5 de `para-infra.md`) se actualizan como resuelto |
+| **I3** | ~~Ambos~~ | **Resuelto (03/10/2026)**: `para-backend.md` de infra confirma que `app_env_vars` incluye todas las obligatorias. Región actualizada a `eu-west-3`, bucket a `sigmetum-app-assets-*` |
 | **I4** | Infraestructura y frontend | Decidir si dev necesita HTTPS (ALB con certificado, o un dominio con proxy). Coincide con `frontend:I4` |
 | **I5** | Infraestructura | Confirmar o documentar explícitamente la regla de salida a `smtp.gmail.com:587` |
 | **I6** | Infraestructura | Valorar automatizar el despliegue del backend (zip) tras pasar `npm run lint`, `npm run quality` y `npm run docs:check` en CI. No se implanta en este documento: es una decisión de infraestructura |
