@@ -108,13 +108,14 @@ jobs:
 
       - name: Crear versión en Beanstalk
         run: |
-          # Si el label ya existe (re-push del mismo commit), la llamada falla con
-          # InvalidParameterValue. Lo ignoramos y usamos la versión existente.
-          aws elasticbeanstalk create-application-version \
+          output=$(aws elasticbeanstalk create-application-version \
             --application-name ${{ steps.env.outputs.app }} \
             --version-label ${{ github.sha }} \
             --source-bundle S3Bucket=${{ steps.bucket.outputs.name }},S3Key=${{ github.sha }}.zip \
-            --region ${{ env.AWS_REGION }} || true
+            --region ${{ env.AWS_REGION }} 2>&1) || {
+            # Ignorar solo si la versión ya existe (re-push del mismo commit)
+            echo "$output" | grep -q "already exists" && echo "Versión ya existe, se reutiliza." || { echo "$output"; exit 1; }
+          }
 
       - name: Desplegar en el entorno
         run: |
