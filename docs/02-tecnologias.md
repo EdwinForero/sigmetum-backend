@@ -16,7 +16,7 @@ Runtime: **Node.js** (CommonJS, `require`). Arranque con `npm start` → `node i
 | `bcrypt` | 6.0.0 | Comparación de la contraseña del admin contra un hash |
 | `multer` | 1.4.5-lts.1 | Recepción de ficheros `multipart/form-data` en memoria |
 | `exceljs` | 4.4.0 | Lectura de los Excel de series de vegetación |
-| `nodemailer` | 10.0.14 | Envío del formulario de contacto vía SMTP de Gmail |
+| `nodemailer` | 10.2.1 | Envío del formulario de contacto vía SMTP de Gmail |
 | `@aws-sdk/client-s3` | 3.1146.0 | Operaciones sobre el bucket (get, put, list, delete) |
 | `@aws-sdk/s3-request-presigner` | 3.1146.0 | URLs prefirmadas para las imágenes de la galería |
 | `@aws-sdk/credential-providers` | 3.1058.0 | `fromSSO` para credenciales en local |
