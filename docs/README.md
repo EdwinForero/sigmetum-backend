@@ -16,7 +16,7 @@ API REST en Node.js/Express que da soporte al frontend de Sigmetum: carga y vers
 
 ### Guías de trabajo (normativas)
 
-Las guías son normas con su motivo, su forma de comprobarlas y su estado en este repositorio. Las skills de `.claude/skills/` son el procedimiento paso a paso y enlazan a ellas.
+Las guías son normas con su motivo, su forma de comprobarlas y su estado en este repositorio. Las skills son el procedimiento paso a paso y remiten a ellas; cuáles hay y dónde están: [plugins/README.md](../plugins/README.md).
 
 | Guía | Cuándo se lee |
 |---|---|
@@ -57,13 +57,35 @@ sigmetum-backend/
 │   └── errorHandler.js          # Manejador de errores centralizado
 ├── scripts/
 │   ├── docs-check.mjs           # Comprueba que docs/ coincide con el código (npm run docs:check)
-│   └── quality-check.mjs        # Puerta de calidad y seguridad (npm run quality)
+│   ├── quality-check.mjs        # Puerta de calidad y seguridad (npm run quality)
+│   └── lib/repo.mjs             # Base común de los dos controles (lectura del repositorio, rutas, variables, salida)
+├── plugins/                     # Marketplace local `locales`: núcleo ciclo-agentico y skills del proyecto por categoría (ver plugins/README.md)
 ├── eslint.config.js             # Configuración de ESLint 9 (npm run lint)
 ├── CLAUDE.md                    # Instrucciones para Claude Code (tabla de guías y definición de terminado)
 ├── .github/                     # CI, plantilla de PR y Dependabot
-├── .claude/                     # Configuración compartida de Claude Code (plugins y skills)
+├── .claude/                     # Configuración compartida de Claude Code
+│   ├── flujo.json               # Adaptador del flujo agéntico a este repositorio (ver 03-configuracion.md)
+│   └── settings.json            # Marketplaces, plugins, permisos que piden confirmación y memoria automática
 └── docs/                        # Esta documentación (guias/ e integracion/)
+    └── specs/                   # Specs, planes y avisos para PR del flujo agéntico (documentos de trabajo, fuera del índice)
 ```
+
+## Flujo agéntico
+
+Toda feature o fix puede pasar por `/ciclo <tarea>`, del plugin [ciclo-agentico](../plugins/ciclo-agentico/README.md): requisitos, arquitectura, desarrollo y verificación con documentación, con una puerta humana entre fases y sin commits del agente. La configuración de este repositorio está en `.claude/flujo.json` y `.claude/settings.json` (qué hace cada uno: [03-configuracion.md](03-configuracion.md#flujo-agéntico)). Los traspasos entre roles (specs, planes y avisos para PR) se guardan en `docs/specs/`.
+
+### Equipo nuevo
+
+El plugin no puede instalarse a sí mismo, así que en un equipo que no lo tiene el orden es este:
+
+1. Clonar el repositorio y ejecutar `npm install`.
+2. Tener Claude Code instalado y autenticado.
+3. `npm run agentes:bootstrap`: comprueba qué plugins del catálogo faltan (`plugins/ciclo-agentico/.claude-plugin/dependencias.json`, filtrado por los `perfiles` de `.claude/flujo.json`) y qué plugins del marketplace local `./plugins` (campo `marketplaceLocal`) corresponden a esos perfiles, y pregunta antes de instalar cada uno. Con `npm run agentes:bootstrap -- --dry-run` solo informa (los locales salen marcados `[local]`).
+4. Si el paso 3 no instaló los plugins locales, hacerlo a mano (`.claude/settings.json` declara los plugins del perfil `base` del [catálogo](../plugins/ciclo-agentico/.claude-plugin/dependencias.json) que funcionan en Windows, más los que ya estaban habilitados de `claude-plugins-official`; no declara los locales, que lista [plugins/README.md](../plugins/README.md)): `claude plugin marketplace add ./plugins` y `claude plugin install ciclo-agentico@locales`, más los plugins del proyecto que lista [plugins/README.md](../plugins/README.md) **(por confirmar: la ruta relativa y los ids no se han probado todavía)**.
+5. Reiniciar la sesión de Claude Code y ejecutar `/ciclo-init` para validar `.claude/flujo.json`, que en este repositorio ya existe (puede que haga falta el prefijo `/ciclo-agentico:ciclo-init` **(por confirmar)**).
+6. Verificar con `claude plugin list` que aparecen los plugins del perfil activo, y lanzar un `/ciclo` de prueba con el árbol limpio para comprobar que arranca.
+
+El consultor de segunda opinión no funciona en Windows nativo; por eso aquí `consultor` vale `ninguno` (ver B10 en [07](07-estado-y-deuda-tecnica.md#calidad-y-detalles-b-e-i)).
 
 ## Repositorios relacionados
 

@@ -31,6 +31,6 @@ Guías de trabajo (normativas):
 - [Seguridad de la API](docs/guias/seguridad.md): autenticación, autorización, claves de S3, archivos, dependencias y estado actual
 - [Mantenimiento de la documentación](docs/guias/mantenimiento.md): qué actualizar tras cada cambio
 
-Antes de dar un cambio por terminado: `npm run lint`, `npm run quality` y `npm run docs:check`.
+Antes de dar un cambio por terminado: `npm run lint`, `npm run quality`, `npm run docs:check` y, antes del commit, `npm run docs:gate` (cierre documental). El desarrollo con agentes de Claude Code (`/ciclo`) y los pasos para un equipo nuevo están en [docs/README.md](docs/README.md#flujo-agéntico).
 
 La infraestructura (Elastic Beanstalk, S3, Amplify, DNS) se gestiona en el repositorio **sigmetum-infra**.

@@ -5,26 +5,10 @@
 // Las reglas y su motivo están en docs/guias/seguridad.md y docs/guias/buenas-practicas-backend.md.
 // Sin dependencias: solo módulos de Node (y las herramientas que ya usa el proyecto: npm, git y eslint).
 
-import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
-import { join, dirname, resolve, sep } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const posix = (file) => file.split(sep).join('/');
-const read = (file) => readFileSync(join(ROOT, file), 'utf8').replace(/\r\n/g, '\n');
-const unique = (list) => [...new Set(list)];
-
-const IGNORED = new Set(['node_modules', '.git', 'uploads']);
-const walk = (dir) =>
-  readdirSync(join(ROOT, dir)).flatMap((name) => {
-    if (IGNORED.has(name)) return [];
-    const path = posix(join(dir, name));
-    return statSync(join(ROOT, path)).isDirectory() ? walk(path) : [path];
-  });
-
-const CODE_DIRS = ['routes', 'config', 'functions', 'aws', 'middleware'];
-const codeFiles = ['index.js', ...CODE_DIRS.flatMap((dir) => walk(dir)).filter((file) => file.endsWith('.js'))];
+import { ROOT, read, walk, codeFiles, routeDeclarations, usedEnvVars, declaredEnvVars, printResults } from './lib/repo.mjs';
 
 const run = (command, args) => spawnSync(command, args, { cwd: ROOT, encoding: 'utf8', shell: true });
 
@@ -78,16 +62,11 @@ const ACCEPTED_ADVISORIES = {};
 {
   const problems = [];
   const seen = new Set();
-  for (const file of codeFiles.filter((f) => f.startsWith('routes/'))) {
-    read(file).split('\n').forEach((line, index) => {
-      const match = line.match(/^\s*(router|protectedRouter)\.(post|put|patch|delete)\(\s*(['"`])([^'"`]+)\3(.*)$/);
-      if (!match) return;
-      const [, owner, method, , path, rest] = match;
-      const id = `${method.toUpperCase()} ${path}`;
-      if (owner === 'protectedRouter' || /\btokenAuth\b/.test(rest)) return;
-      seen.add(id);
-      if (!(id in PUBLIC_MUTATING_ROUTES)) problems.push(`${file}:${index + 1} ${id} modifica estado y no cuelga de protectedRouter ni usa tokenAuth`);
-    });
+  for (const route of routeDeclarations()) {
+    if (route.method === 'GET' || route.protected) continue;
+    const id = `${route.method} ${route.path}`;
+    seen.add(id);
+    if (!(id in PUBLIC_MUTATING_ROUTES)) problems.push(`${route.file}:${route.line} ${id} modifica estado y no cuelga de protectedRouter ni usa tokenAuth`);
   }
   for (const id of Object.keys(PUBLIC_MUTATING_ROUTES)) {
     if (!seen.has(id)) problems.push(`La excepción "${id}" de PUBLIC_MUTATING_ROUTES ya no existe o ya está protegida: quítala`);
@@ -99,9 +78,9 @@ const ACCEPTED_ADVISORIES = {};
 
 {
   const problems = [];
-  const validateSrc = read('config/validateEnv.js');
-  const declared = [...validateSrc.matchAll(/'([A-Z][A-Z0-9_]+)'/g)].map((m) => m[1]);
-  const used = unique(codeFiles.flatMap((file) => [...read(file).matchAll(/process\.env\.([A-Z][A-Z0-9_]*)/g)].map((m) => m[1])));
+  const { required, requiredLocal } = declaredEnvVars();
+  const declared = [...required, ...requiredLocal];
+  const used = usedEnvVars();
   for (const name of used) {
     if (!declared.includes(name) && !(name in OPTIONAL_ENV)) problems.push(`process.env.${name} se usa en el código y no está en config/validateEnv.js ni en OPTIONAL_ENV`);
   }
@@ -130,7 +109,6 @@ const ACCEPTED_ADVISORIES = {};
     'package.json',
     'README.md',
     'CLAUDE.md',
-    ...['INTEGRACION.md'].filter((file) => existsSync(join(ROOT, file))),
     ...walk('docs').filter((file) => file.endsWith('.md')),
     ...(existsSync(join(ROOT, '.claude')) ? walk('.claude') : []),
   ];
@@ -221,12 +199,6 @@ const ACCEPTED_ADVISORIES = {};
 
 // ─── Resultado ──────────────────────────────────────────────────────────────
 
-let failed = 0;
-for (const { name, problems, notes } of results) {
-  console.log(`${problems.length === 0 ? '✓' : '✗'} ${name}`);
-  problems.forEach((problem) => console.log(`    - ${problem}`));
-  notes.forEach((note) => console.log(`    · ${note}`));
-  failed += problems.length;
-}
+const failed = printResults(results);
 console.log(failed === 0 ? '\nCalidad y seguridad: sin problemas nuevos.' : `\n${failed} problema(s). Ver docs/guias/seguridad.md.`);
 process.exit(failed === 0 ? 0 : 1);

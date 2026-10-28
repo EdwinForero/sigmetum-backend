@@ -8,7 +8,10 @@
     "start": "node index.js",
     "lint": "eslint . --max-warnings 5",
     "quality": "node scripts/quality-check.mjs",
-    "docs:check": "node scripts/docs-check.mjs"
+    "docs:check": "node scripts/docs-check.mjs",
+    "docs:gate": "node plugins/ciclo-agentico/scripts/docs-gate.mjs",
+    "agentes:test": "node --test \"plugins/**/tests/**/*.test.mjs\"",
+    "agentes:bootstrap": "node plugins/ciclo-agentico/scripts/bootstrap-agentes.mjs"
   },
   "engines": {
     "node": "22"

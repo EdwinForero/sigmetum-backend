@@ -7,10 +7,13 @@ Este documento dice **qué hay que revisar y actualizar en `docs/` después de c
 1. **La documentación se actualiza en el mismo commit (o la misma PR) que el cambio.** Un cambio no está terminado hasta que pasa la lista de este documento.
 2. **Se contrasta con el código, nunca de memoria.** Si no puedes comprobar algo, márcalo como **(por confirmar)**.
 3. **Cada dato vive en un solo sitio.** Los demás documentos enlazan, no copian. Las cifras (archivos, endpoints, funciones, variables, dependencias, tests, guías) viven solo en la [tabla de métricas de 07](../07-estado-y-deuda-tecnica.md#métricas).
-4. **Antes de dar el trabajo por terminado** deben pasar `npm run lint`, `npm run quality` y `npm run docs:check` y, cuando existan tests (hallazgo M11 de [07](../07-estado-y-deuda-tecnica.md)), `npm test`. Si `quality` falla por algo que **ya estaba** (por ejemplo, las vulnerabilidades de M16), no se oculta ni se acepta para que pase: se dice en la PR.
-5. **Las guías mandan.** Las normas de [buenas-practicas-backend.md](buenas-practicas-backend.md) y [seguridad.md](seguridad.md) se leen **antes** de escribir código; este documento se sigue **al terminar**. Si un cambio contradice una guía, se avisa y se pregunta.
+4. **Antes de dar el trabajo por terminado** deben pasar `npm run lint`, `npm run quality`, `npm run docs:check` y `npm run docs:gate` (con los cambios aún sin commit: compara con `HEAD`) y, cuando existan tests (hallazgo M11 de [07](../07-estado-y-deuda-tecnica.md)), `npm test`. Si tocaste `plugins/` (el núcleo `ciclo-agentico` o las skills de dominio, que prueba `plugins/tests/`), también `npm run agentes:test`. Si `quality` falla por algo que **ya estaba** (por ejemplo, los avisos de `npm audit` de M20), no se oculta ni se acepta para que pase: se dice en la PR.
+5. **Cierre documental obligatorio.** Toda iteración actualiza [07](../07-estado-y-deuda-tecnica.md), al menos la fecha de la línea "actualizado" y lo que haya cambiado, aunque el cambio no toque código de la API. `npm run docs:gate` lo comprueba ([sección 4](#lo-que-comprueba-npm-run-docsgate)).
+6. **Las guías mandan.** Las normas de [buenas-practicas-backend.md](buenas-practicas-backend.md) y [seguridad.md](seguridad.md) se leen **antes** de escribir código; este documento se sigue **al terminar**. Si un cambio contradice una guía, se avisa y se pregunta.
 
 ## 2. Qué documento tocar según el cambio
+
+El control mecánico (`npm run docs:gate`) usa el mapa `docsPorArea` de [.claude/flujo.json](../../.claude/flujo.json); esta tabla explica el porqué y los puntos que se comprueban a mano. Una sola fuente por dato: el mapa para la máquina, la tabla para las personas.
 
 | Si cambias... | Actualiza | Comprueba |
 |---|---|---|
@@ -34,7 +37,7 @@ Este documento dice **qué hay que revisar y actualizar en `docs/` después de c
 | Una **deuda o discrepancia nueva** | [07](../07-estado-y-deuda-tecnica.md) y, si afecta al frontend o a la infraestructura, su documento de `integracion/` | Id, prioridad, archivo y qué hay que hacer |
 | Límites de tamaño o tipo en `/upload`, `/upload-image` o el limitador de login | [04](../04-api.md) (códigos de respuesta) | **Contrato con el frontend**: mensajes de error y `accept` de sus formularios |
 | Algo que **cambia lo que necesita la infraestructura** (variables, permisos, runtime, health check) | [01](../01-arquitectura.md) (despliegue) y [03](../03-configuracion.md) | Avisar a infra (sección 6) |
-| Las **skills o plugins de Claude** (`.claude/`) | `.claude/` y la estructura de [README.md](../README.md) | Que las listas de las skills siguen siendo coherentes con este documento |
+| Los **plugins y skills de Claude** (`plugins/`, incluido el núcleo `ciclo-agentico`) o la configuración del flujo (`.claude/flujo.json`, `.claude/settings.json`) | [plugins/README.md](../../plugins/README.md) (único sitio que nombra plugins y skills), la estructura y el flujo agéntico de [README.md](../README.md) si cambian, y [07](../07-estado-y-deuda-tecnica.md) | Que las listas de las skills siguen siendo coherentes con este documento; que pasan `claude plugin validate plugins --strict`, `npm run agentes:test` y `npm run docs:gate`. Si cambia lo que configura cada archivo de `.claude/`, la sección "Flujo agéntico" de [03](../03-configuracion.md#flujo-agéntico) |
 | **Documentos** nuevos, renombrados o movidos | Índice de [README.md](../README.md) y README de la raíz | `npm run docs:check` valida los enlaces y el índice |
 
 ## 3. Listas de comprobación por tipo de cambio
@@ -107,7 +110,7 @@ El script ([scripts/docs-check.mjs](../../scripts/docs-check.mjs), sin dependenc
 
 | Comprobación | Código | Documento |
 |---|---|---|
-| Enlaces y anclas internos | Todos los `.md` | Los propios `.md` |
+| Enlaces y anclas internos (también los relativos a un repositorio hermano, que fallan si no está) | Todos los `.md` | Los propios `.md` |
 | Índice y estructura | Archivos de `docs/` y del código | [README.md](../README.md) |
 | Rutas: método, ruta, pública o protegida y fichero | `routes/*.js` e `index.js` | [04](../04-api.md) (tabla resumen y una sección por endpoint) |
 | Variables de entorno y su obligatoriedad | `config/validateEnv.js`, `.env.example` y `process.env.*` del código | [03](../03-configuracion.md) |
@@ -121,6 +124,29 @@ El script ([scripts/docs-check.mjs](../../scripts/docs-check.mjs), sin dependenc
 | Excepciones de la puerta de calidad | `ACCEPTED_ADVISORIES` y `PUBLIC_MUTATING_ROUTES` de `scripts/quality-check.mjs` | [seguridad.md](seguridad.md) |
 
 `npm run docs:check -- --metrics` imprime los valores reales para actualizar la tabla de 07.
+
+`docs:check` no cuenta como tests los de `plugins/` (la métrica "Archivos de test" es de la API; las pruebas de `plugins/` se ejecutan con `npm run agentes:test`) y no exige que los documentos de `docs/specs/` (specs, planes y avisos para PR) figuren en el índice de [README.md](../README.md); sus enlaces sí se comprueban.
+
+### Lo que comprueba `npm run docs:gate`
+
+El cierre documental del flujo agéntico (`plugins/ciclo-agentico/scripts/docs-gate.mjs`, configurado en `.claude/flujo.json`) mira los archivos que `git status` da como cambiados respecto a `HEAD` (incluidos los nuevos sin seguimiento; lo ignorado no cuenta) y **falla con código de salida 1** si:
+
+| Comprobación | De dónde sale |
+|---|---|
+| [07](../07-estado-y-deuda-tecnica.md) (y cualquier otro documento obligatorio) no aparece modificado | `estado` y `docsObligatorios` |
+| La fecha "actualizado DD/MM/AAAA" de la cabecera de 07 no es la de hoy | `estadoFecha` |
+| Un archivo cambiado coincide con un área y no se modificó **ninguno** de sus documentos (gana el patrón más específico) | `docsPorArea` |
+| Se tocó un área de contrato y no hay aviso para PR | `areasContrato` y `avisoPR` (`docs/specs/*-aviso-pr.md`) |
+| Se tocó un área de contrato y no cambió ningún documento de `integracion/` **ni** el aviso para PR (uno que esté entre los cambios) tiene una línea que empiece literalmente por `Integración: sin impacto — ` seguida del motivo | `areasContrato`, `integracion` y `avisoPR`. Si `flujo.json` no define `integracion`, solo vale la línea |
+
+Como compara con `HEAD`, mide una iteración: se ejecuta antes del commit y con el árbol limpio de iteraciones anteriores; si se mezclan, el resultado no vale. Por eso no figura en [Antes de fusionar la rama](#antes-de-fusionar-la-rama) ni en la [plantilla de PR](#8-plantilla-para-la-pr): tras el commit el árbol está limpio y la fecha de 07 ya no es la de hoy, así que fallaría siempre. Las dos fechas no se contradicen: cada iteración deja en 07 la fecha del día en que se hizo (lo que mira `docs:gate`), y al fusionar se pone la de la fusión con su commit. `node plugins/ciclo-agentico/scripts/docs-gate.mjs --solo-validar` solo valida `.claude/flujo.json`.
+
+Lo que `docs:gate` **no** puede comprobar:
+
+| Qué | Cómo |
+|---|---|
+| Que lo escrito en los documentos tocados **es cierto** o suficiente: solo ve que el archivo cambió | La revisión manual de [lo que el script no puede comprobar](#lo-que-el-script-no-puede-comprobar) y la del rol `tester-documentador` |
+| Que el documento de `integracion/` que cambió es **el que tocaba**, o que la línea `Integración: sin impacto — motivo` es verdad: solo ve que uno cambió o que la línea está | Lo revisa el rol `tester-documentador` (y la [sección 6](#6-avisar-al-frontend-y-a-la-infraestructura) fuera del ciclo) |
 
 ### Cruce con el frontend (solo avisa)
 
@@ -191,20 +217,12 @@ Si cambias algo de la columna izquierda, revisa la sección 7 ("Si cambias algo 
 
 ## 8. Plantilla para la PR
 
-```markdown
-## Calidad, seguridad y documentación
-- [ ] `npm run lint`, `npm run quality` y `npm run docs:check` en verde (y `npm test`, si hay tests)
-- [ ] Guías leídas: buenas-practicas-backend.md (siempre) y seguridad.md (si toca autenticación, rutas, S3, archivos, CORS, correo, dependencias, secretos o logs)
-- [ ] Nueva excepción en `ACCEPTED_ADVISORIES`, `PUBLIC_MUTATING_ROUTES` u `OPTIONAL_ENV`: sí / no. Si sí, el motivo
-- [ ] Documentos actualizados: (lista)
-- [ ] Afecta al frontend: sí / no. Si sí, qué debe cambiar y dónde (sección 7 de su para-backend.md)
-- [ ] Afecta a la infraestructura: sí / no. Si sí, qué necesita
-- [ ] Hallazgos resueltos o nuevos en docs/07: (ids)
-```
+La plantilla es [.github/pull_request_template.md](../../.github/pull_request_template.md): GitHub la carga al abrir la PR. No se copia aquí para que no haya dos versiones.
 
 ## 9. Mantener este documento
 
 - Se actualiza cuando aparece un tipo de cambio que no está en la tabla de la sección 2.
 - Si una comprobación manual de la sección 4 se puede automatizar, se añade a `scripts/docs-check.mjs` y se mueve a la primera tabla.
 - El script y este documento se revisan juntos: que un documento figure en la tabla 2 y no tenga comprobación automática es aceptable, pero debe ser una decisión consciente.
-- Las skills de `.claude/skills/` remiten a este documento; si se cambia una lista aquí, revisa que la skill no se contradiga.
+- Las skills del proyecto ([plugins/README.md](../../plugins/README.md)) remiten a este documento; si se cambia una lista aquí, revisa que la skill no se contradiga.
+- La definición de terminado se repite a propósito (es pedagógica): al cambiar la lista de comprobaciones, revisa [CLAUDE.md](../../CLAUDE.md), [.github/pull_request_template.md](../../.github/pull_request_template.md), la sección 1 de [buenas-practicas-backend.md](buenas-practicas-backend.md) y `verificacion` de `.claude/flujo.json`.

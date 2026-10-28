@@ -37,7 +37,7 @@ module.exports = [
   },
   {
     // Scripts de mantenimiento (ESM): pueden escribir en consola
-    files: ['scripts/**/*.mjs'],
+    files: ['scripts/**/*.mjs', 'plugins/**/*.mjs'],
     languageOptions: { ecmaVersion: 'latest', sourceType: 'module', globals: { ...globals.node } },
     rules: {
       'no-console': 'off',

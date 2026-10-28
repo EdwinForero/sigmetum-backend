@@ -20,8 +20,18 @@ El servidor escucha en `PORT` (8000 por defecto). Comprobación rápida: `GET ht
 | `npm run lint` | ESLint 9: falla con errores o si los avisos superan el tope de `--max-warnings` de `package.json` |
 | `npm run quality` | Puerta de calidad y seguridad: patrones prohibidos, rutas sin autenticación, variables sin declarar, secretos, `npm audit` de producción y ESLint (ver [seguridad.md](guias/seguridad.md)) |
 | `npm run docs:check` | Comprueba que `docs/` coincide con el código (ver [mantenimiento.md](guias/mantenimiento.md)). Con `-- --metrics` imprime las métricas reales |
+| `npm run docs:gate` | Cierre documental del flujo agéntico: comprueba que los archivos cambiados respecto a `HEAD` llevan sus documentos, que [07](07-estado-y-deuda-tecnica.md) está modificado y con la fecha de hoy, y que hay aviso para PR si se tocó un área de contrato. Mide una iteración contra `HEAD`, así que se ejecuta con el árbol limpio de iteraciones previas (ver [mantenimiento.md](guias/mantenimiento.md#lo-que-comprueba-npm-run-docsgate)) |
+| `npm run agentes:test` | Pruebas de `plugins/` (núcleo `ciclo-agentico` y marketplace local) con `node:test`. No son tests de la API (M11 sigue abierto) |
+| `npm run agentes:bootstrap` | En un equipo nuevo, comprueba con `claude plugin list --json` qué plugins del catálogo del flujo agéntico faltan y pregunta antes de instalar cada uno. Con `-- --dry-run` solo informa |
 
 Para recarga en caliente no hay script: usa `npx nodemon index.js` (hallazgo B2 en [07](07-estado-y-deuda-tecnica.md)).
+
+## Flujo agéntico
+
+El desarrollo con agentes de Claude Code sigue el plugin `ciclo-agentico` (`plugins/ciclo-agentico/`); la instalación y los pasos de un equipo nuevo están en [README.md](README.md#equipo-nuevo). Dos archivos lo configuran en este repositorio:
+
+- `.claude/flujo.json`: adaptador del ciclo al proyecto (guías, documento de estado y su fecha, comandos de verificación, qué documentos corresponden a cada área de código, áreas de contrato, consultor y estilo). Se valida con `node plugins/ciclo-agentico/scripts/docs-gate.mjs --solo-validar`.
+- `.claude/settings.json`: marketplaces y plugins compartidos del proyecto, permisos que piden confirmación antes de `git commit`, `git push`, `git add` y `git stash`, y la memoria automática configurada con `autoMemoryEnabled: false`; que de verdad se deje de cargar está **(por confirmar)** (Tarea 10, M18 de [07](07-estado-y-deuda-tecnica.md)).
 
 ## Variables de entorno
 
@@ -62,4 +72,4 @@ Nunca se usan `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` en el código.
 
 ## Añadir una variable nueva
 
-Seguir la skill `.claude/skills/env-var-change`: añadirla a `validateEnv.js`, a `.env.example` y al entorno de Beanstalk en sigmetum-infra.
+Seguir la skill `env-var-change` (ver [plugins/README.md](../plugins/README.md)): añadirla a `validateEnv.js`, a `.env.example` y al entorno de Beanstalk en sigmetum-infra.

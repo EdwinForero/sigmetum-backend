@@ -4,7 +4,7 @@ Normas de trabajo para escribir código en este repositorio. No son teoría gene
 
 - Seguridad: [seguridad.md](seguridad.md). Qué documentar después de cada cambio: [mantenimiento.md](mantenimiento.md).
 - Los hallazgos con id (A, M, B, D, I) están en [07](../07-estado-y-deuda-tecnica.md).
-- Las normas y su motivo viven aquí; el procedimiento paso a paso, en las skills de `.claude/skills/`, que enlazan a las secciones de esta guía.
+- Las normas y su motivo viven aquí; el procedimiento paso a paso, en las skills del proyecto ([plugins/README.md](../../plugins/README.md)), que remiten a esta guía.
 - Si una regla choca con lo que te piden, **avisa y pregunta** antes de saltártela.
 - Marcas de certeza: **(verificado)** lo comprobado contra el código o ejecutándolo; **(por confirmar)** lo deducido.
 
@@ -185,7 +185,7 @@ Cómo validar: **una función de validación por forma de entrada**, con una lis
 - Los avisos (variables sin usar, `console.log`, `eqeqeq` y las de `security/*`) son deuda visible: no bloquean, pero **no pueden crecer**.
 - **Cuando corrijas avisos, baja el tope** al nuevo número. `npm run quality` falla si el tope es mayor que los avisos reales.
 - No uses `// eslint-disable` sin un comentario que explique el motivo.
-- Una regla relajada o desactivada se justifica **en `eslint.config.js`** y se anota aquí. Hoy hay dos excepciones: `security/detect-object-injection` desactivada en `config/validateEnv.js` y `functions/convertExcelToJson.js` (el índice sale de listas fijas del código), y las reglas de `security/*` desactivadas en `scripts/*.mjs` (herramientas de desarrollo que no atienden peticiones).
+- Una regla relajada o desactivada se justifica **en `eslint.config.js`** y se anota aquí. Hoy hay dos excepciones: `security/detect-object-injection` desactivada en `config/validateEnv.js` y `functions/convertExcelToJson.js` (el índice sale de listas fijas del código), y tres reglas de `security/*` (rutas de fichero, expresiones regulares no literales e inyección de objetos) desactivadas en `scripts/**/*.mjs` y `plugins/**/*.mjs` (herramientas de desarrollo que no atienden peticiones; el plugin `ciclo-agentico` comparte el bloque de los scripts de mantenimiento, y sus pruebas usan `node:test`, sin dependencias nuevas).
 - Avisos reales hoy (los que cuenta el tope): una variable sin usar en `aws/awsS3connect.js` (el `catch` de `getTextJsonS3`, relacionado con A6), el `console.log` de arranque y tres de `security/detect-object-injection` en `routes/data.js` (`grouped[provincia]`, relacionado con A4: una provincia llamada `__proto__` daría un 500).
 
 ## 15. Anti-patrones que ya están en el código

@@ -1,0 +1,8 @@
+{
+  "name": "dominio-api-express",
+  "version": "0.1.0",
+  "description": "Skills específicas del dominio API con Express: lista de comprobación para rutas nuevas o modificadas.",
+  "author": {
+    "name": "EdwinForero"
+  }
+}

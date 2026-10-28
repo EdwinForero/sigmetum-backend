@@ -32,7 +32,9 @@ Runtime: **Node.js** (CommonJS, `require`). Arranque con `npm start` → `node i
 | `eslint-plugin-security` | 4.1.0 | Reglas de seguridad de ESLint (inyección de objetos, expresiones regulares y rutas de fichero no literales) |
 | `eslint-plugin-n` | 17.24.0 | Reglas de Node para ESLint: módulos que faltan o sobran, APIs obsoletas, `child_process` |
 
-Las herramientas de calidad van con **versión exacta** (sin `^`) para que el tope de avisos no cambie solo. La configuración está en `eslint.config.js` y las reglas en [buenas prácticas](guias/buenas-practicas-backend.md#14-eslint-y-el-tope-de-avisos).
+Las herramientas de calidad van con **versión exacta** (sin `^`) para que el tope de avisos no cambie solo. La configuración está en `eslint.config.js` y las reglas en [buenas prácticas](guias/buenas-practicas-backend.md#14-eslint-y-el-tope-de-avisos); los `.mjs` de `plugins/` se lintean con las mismas reglas que los scripts de mantenimiento.
+
+Las pruebas de `plugins/` (núcleo `ciclo-agentico` y marketplace local; `npm run agentes:test`) usan `node:test`, integrado en Node, sin dependencias nuevas. Es el único uso de un ejecutor de pruebas: la API sigue sin tests (M11).
 
 ## Servicios externos
 
@@ -45,7 +47,7 @@ Las herramientas de calidad van con **versión exacta** (sin `^`) para que el to
 ## Lo que no hay
 
 - Base de datos.
-- Tests ni framework de testing (`npm test` es el placeholder de `npm init`).
+- Tests de la API ni framework de testing (`npm test` es el placeholder de `npm init`; `node:test` solo se usa para el plugin).
 - Formateador (Prettier u otro). Sí hay linter: ESLint.
 - TypeScript.
 - Documentación OpenAPI/Swagger.

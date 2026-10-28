@@ -1,0 +1,33 @@
+{
+  "name": "locales",
+  "description": "Marketplace local del repositorio: el núcleo ciclo-agentico y las skills del proyecto, categorizadas en generales y de dominio.",
+  "owner": {
+    "name": "EdwinForero"
+  },
+  "plugins": [
+    {
+      "name": "ciclo-agentico",
+      "source": "./ciclo-agentico",
+      "description": "Ciclo agéntico con roles y puertas de aprobación para desarrollar con agentes de forma controlada.",
+      "tags": ["perfil:base"]
+    },
+    {
+      "name": "backend-general",
+      "source": "./backend-general",
+      "description": "Skills generales de backend que se usan siempre: cambio de variables de entorno y seguridad antes de fusionar.",
+      "tags": ["perfil:backend"]
+    },
+    {
+      "name": "dominio-api-express",
+      "source": "./dominio-api-express",
+      "description": "Skills específicas del dominio API con Express: lista de comprobación para rutas nuevas o modificadas.",
+      "tags": ["perfil:api-express"]
+    },
+    {
+      "name": "dominio-aws-s3",
+      "source": "./dominio-aws-s3",
+      "description": "Skills específicas del dominio AWS S3: revisión de operaciones sobre el bucket, versionado y URL prefirmadas.",
+      "tags": ["perfil:aws-s3"]
+    }
+  ]
+}

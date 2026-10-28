@@ -2,7 +2,7 @@
 
 Normas para no introducir vulnerabilidades en este repositorio, con el estado real de cada una. Cada regla dice **por qué**, **cómo se comprueba** y **cómo está hoy**.
 
-- Complementa a [buenas-practicas-backend.md](buenas-practicas-backend.md). El procedimiento de revisión paso a paso está en la skill `.claude/skills/security-pre-merge`; las normas y su motivo, aquí.
+- Complementa a [buenas-practicas-backend.md](buenas-practicas-backend.md). El procedimiento de revisión paso a paso está en la skill `security-pre-merge` ([plugins/README.md](../../plugins/README.md)); las normas y su motivo, aquí.
 - Lo que depende de la infraestructura está en `sigmetum-infra`; lo que depende del frontend, en `../sigmetum-frontend/docs/integracion/para-backend.md`.
 - Los hallazgos con id (A, M, B, D, I) están en [07](../07-estado-y-deuda-tecnica.md). Esta guía **no los repite**: los referencia y los convierte en reglas.
 - Si un cambio contradice una regla de esta guía, **avisa y pregunta** antes de hacerlo.
