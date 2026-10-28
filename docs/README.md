@@ -56,7 +56,8 @@ sigmetum-backend/
 ├── aws/
 │   └── awsS3connect.js          # Todas las operaciones contra S3
 ├── middleware/
-│   └── errorHandler.js          # Manejador de errores centralizado
+│   ├── errorHandler.js          # Manejador de errores centralizado
+│   └── notFound.js              # 404 con envoltorio para rutas y métodos no definidos
 ├── scripts/
 │   ├── docs-check.mjs           # Comprueba que docs/ coincide con el código (npm run docs:check)
 │   ├── quality-check.mjs        # Puerta de calidad y seguridad (npm run quality)

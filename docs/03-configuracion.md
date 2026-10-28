@@ -43,8 +43,8 @@ El desarrollo con agentes de Claude Code sigue el plugin `ciclo-agentico` (`plug
 | `NODE_ENV` | No | `local` | Con `local`: credenciales SSO, stack traces en logs y `AWS_PROFILE` pasa a ser obligatoria |
 | `PORT` | No | `8000` | Puerto HTTP |
 | `API_PREFIX` | No | `/api/v1` | Prefijo de todas las rutas (salvo `/healthcheck`) |
-| `AWS_REGION` | Sí | `eu-west-1` | Región del bucket |
-| `AWS_BUCKET_NAME` | Sí | `sigmetum-app-dev` | Bucket de la aplicación |
+| `AWS_REGION` | Sí | `eu-west-3` | Región del bucket |
+| `AWS_BUCKET_NAME` | Sí | `sigmetum-app-assets-dev` | Bucket de la aplicación |
 | `AWS_PROFILE` | Sólo si `NODE_ENV=local` | `my-sso-profile` | Perfil SSO de AWS CLI |
 | `JWT_SECRET` | Sí | — | Secreto de firma de los JWT |
 | `JWT_EXPIRATION` | Sí | `8h` | Caducidad del token (formato de `jsonwebtoken`) |

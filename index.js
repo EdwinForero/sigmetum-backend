@@ -17,6 +17,7 @@ const cors = require('cors');
 const compression = require('compression');
 const morgan = require('morgan');
 const errorHandler = require('./middleware/errorHandler');
+const notFound = require('./middleware/notFound');
 
 const authRoutes = require('./routes/auth');
 const dataRoutes = require('./routes/data');
@@ -50,6 +51,8 @@ const API_PREFIX = process.env.API_PREFIX || '/api/v1';
 app.use(API_PREFIX, authRoutes);
 app.use(API_PREFIX, dataRoutes);
 app.use(API_PREFIX, contentRoutes);
+
+app.use(notFound);
 
 app.use(errorHandler);
 

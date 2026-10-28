@@ -61,6 +61,7 @@ Nombres únicamente; nunca valores reales. Fuente: `config/validateEnv.js` **(ve
 | `package.json` → `engines` | `"node": "22"` declarado **(resuelto 03/10/2026, B3)** | Sí |
 | Health check | `GET /healthcheck` → `200 ok`, texto plano, sin auth ni CORS (se registra antes de esos middlewares) | Sí, en `index.js` |
 | `HealthCheckPath` en Terraform | `/healthcheck` **(I1 resuelto)** | Sí, en `modules/beanstalk/main.tf` |
+| Rutas no definidas (M21, entrega 3, 28/10/2026) | Todo lo que ningún router resuelve (incluida `/`) responde `404` JSON `{ success: false, error: "Not found" }` en vez del `404` HTML de Express: mismo estado. `/healthcheck` no cambia (se atiende antes). El `para-infra.md` del frontend aún cita `HealthCheckPath = "/"` (I6, resuelto en infra); si algún entorno desplegado siguiera apuntando a `/`, seguiría viendo `404`, ahora en JSON; que solo mire el código de estado y no el cuerpo está **(por confirmar con infra)**. No bloquea | Revisión, sin cambios |
 | Despliegue | GitHub Actions (OIDC) → zip a S3 → `CreateApplicationVersion` → `UpdateEnvironment` **(I6 resuelto)** | Sí, módulo `backend-ci-iam` en infra |
 
 ## 4. Permisos IAM sobre S3

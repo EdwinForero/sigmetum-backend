@@ -1,7 +1,8 @@
 // Verificación repetible de las rutas (M21: rutas públicas y protegidas) y de la validación de /send-email y imageKey.
 // Uso: node scripts/verificar-rutas.mjs   (o: npm run verificar:rutas)
-// Reproduce la pila de producción de index.js (auth, data y content bajo el mismo prefijo, con el errorHandler
-// al final) con S3 y SMTP sustituidos por espías: no hay red ni credenciales reales.
+// Reproduce la pila de producción de index.js (/healthcheck, cors, express.json, auth, data y content bajo el mismo
+// prefijo, con el errorHandler al final) con S3 y SMTP sustituidos por espías: no hay red ni credenciales reales.
+// /healthcheck y cors son una réplica de index.js (no se monta morgan).
 // Criterio 1: las ocho rutas públicas responden sin token (nunca 401).
 // Criterios 2 a 5: límite y validación de POST /send-email (anónimo) y validación de imageKey (GET y DELETE).
 // Criterio 6: las nueve rutas protegidas dan 401 sin token, con token inválido y con token caducado, también
@@ -9,8 +10,9 @@
 // Criterio 7: todas las rutas mutantes de la pila real dan 401 y no llaman a S3 ni a SMTP (salvo POST /log y POST /send-email).
 // Criterio 8: estructura. Tabla de clasificación contra la pila real (app._router.stack), tokenAuth como primer manejador
 //   de cada ruta protegida, ausente en las públicas, sin use(tokenAuth) a nivel de router, y lectura ESTÁTICA de index.js.
-// Criterio 9: Authorization inválido o caducado en las rutas abiertas responde igual que sin token; rutas inexistentes y
-//   métodos no definidos dan el 404 por defecto de Express (estado transitorio hasta la entrega 3: 404 con envoltorio).
+// Criterio 9: Authorization inválido o caducado en las rutas abiertas responde igual que sin token; rutas inexistentes
+//   (también fuera del prefijo) y métodos no definidos dan 404 con envoltorio { success: false, error: 'Not found' } fijo,
+//   sin 405; /healthcheck, OPTIONS, Origin no permitido y JSON mal formado conservan su respuesta.
 // Sale con código 0 si todo pasa, 1 si algún caso falla y 2 si el propio script falla.
 
 import { createRequire } from 'node:module';
@@ -65,8 +67,10 @@ injectInCache('nodemailer', {
 });
 
 const express = require('express');
+const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const errorHandler = require('../middleware/errorHandler');
+const notFound = require('../middleware/notFound');
 const { tokenAuth } = require('../functions/tokenAuthentication');
 
 const PREFIX = '/api/v1';
@@ -78,16 +82,32 @@ const startApp = async () => {
   delete require.cache[contentPath];
   const app = express();
   app.set('trust proxy', 1);
+  // Réplica de index.js: /healthcheck y cors con la misma lógica de origen permitido.
+  app.use('/healthcheck', (req, res) => {
+    res.status(200).send('ok');
+  });
+  app.use(cors({
+    origin: (origin, callback) => {
+      const allowed = (process.env.ALLOWED_ORIGIN || '').split(',').map((s) => s.trim()).filter(Boolean);
+      if (!origin || allowed.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error(`Origin not allowed: ${origin}`));
+      }
+    },
+  }));
   app.use(express.json());
   app.use(PREFIX, require('../routes/auth'));
   app.use(PREFIX, require('../routes/data'));
   app.use(PREFIX, require('../routes/content.js'));
+  app.use(notFound);
   app.use(errorHandler);
   const server = await new Promise((resolve) => {
     const s = app.listen(0, '127.0.0.1', () => resolve(s));
   });
   servers.push(server);
-  return { app, base: `http://127.0.0.1:${server.address().port}${PREFIX}` };
+  const root = `http://127.0.0.1:${server.address().port}`;
+  return { app, root, base: `${root}${PREFIX}` };
 };
 
 const validToken = jwt.sign({ userId: 1 }, TEST_SECRET, { expiresIn: '1h' });
@@ -114,7 +134,7 @@ const call = async (base, method, path, { token, body, ip, headers: extra, rawBo
   const res = await fetch(`${base}${path}`, { method, headers, body: payload });
   let json = null;
   try { json = await res.json(); } catch { json = null; }
-  return { status: res.status, json };
+  return { status: res.status, json, contentType: res.headers.get('content-type') ?? '', headers: res.headers };
 };
 
 // ─── Registro de resultados por criterio ─────────────────────────────────────
@@ -177,8 +197,8 @@ const declaredRoutes = (app) => {
   return { routes, routerLevelAuth };
 };
 
-// Lectura estática de index.js: los montajes deben ser authRoutes, dataRoutes, contentRoutes y errorHandler, en ese
-// orden, y no debe haber otros app.use/app.all con rutas (solo /healthcheck, que es público). Los montajes
+// Lectura estática de index.js: los montajes deben ser authRoutes, dataRoutes, contentRoutes, notFound y errorHandler,
+// en ese orden, y no debe haber otros app.use/app.all con rutas (solo /healthcheck, que es público). Los montajes
 // construidos dinámicamente en variables no se ven (límite conocido de la comprobación estática).
 const checkIndexStatic = () => {
   const problems = [];
@@ -196,6 +216,8 @@ const checkIndexStatic = () => {
       order.push('mount');
     } else if (/^\s*errorHandler\s*\)/.test(rest)) {
       order.push('errorHandler');
+    } else if (/^\s*notFound\s*\)/.test(rest)) {
+      order.push('notFound');
     } else if (/^\s*(morgan|cors|compression)\(/.test(rest) || /^\s*express\.json\(\)/.test(rest)) {
       order.push('middleware');
     } else {
@@ -204,7 +226,10 @@ const checkIndexStatic = () => {
   }
   if (mounts.join(',') !== 'authRoutes,dataRoutes,contentRoutes') problems.push(`Montajes de index.js: ${mounts.join(', ') || 'ninguno'} (esperado: authRoutes, dataRoutes, contentRoutes)`);
   if (order.filter((o) => o === 'errorHandler').length !== 1 || order[order.length - 1] !== 'errorHandler') problems.push('errorHandler debe montarse una vez y al final de index.js');
-  for (const [name, file] of [['authRoutes', './routes/auth'], ['dataRoutes', './routes/data'], ['contentRoutes', './routes/content']]) {
+  // Solo montajes de routers, notFound y errorHandler, en su orden de aparición: exactamente mount x3, notFound, errorHandler.
+  const secuencia = order.filter((o) => ['mount', 'notFound', 'errorHandler'].includes(o)).join(',');
+  if (secuencia !== 'mount,mount,mount,notFound,errorHandler') problems.push(`notFound debe montarse una vez, tras los tres routers y justo antes de errorHandler (secuencia: ${secuencia || 'ninguna'})`);
+  for (const [name, file] of [['authRoutes', './routes/auth'], ['dataRoutes', './routes/data'], ['contentRoutes', './routes/content'], ['notFound', './middleware/notFound']]) {
     if (!source.includes(`const ${name} = require('${file}');`)) problems.push(`index.js no importa ${name} desde ${file}`);
   }
   return problems;
@@ -434,13 +459,16 @@ const criterio8 = (app) => {
     else record(8, `${id} pública sin tokenAuth`, !route.handlers.includes(tokenAuth), 'lleva tokenAuth');
   }
   record(8, 'sin use(tokenAuth) a nivel de router', routerLevelAuth.length === 0, `hay ${routerLevelAuth.length} en ${routerLevelAuth.join(', ')}`);
+  const ultimas = app._router.stack.slice(-2).map((layer) => layer.handle);
+  record(8, 'pila: notFound y errorHandler son las dos últimas capas (en ese orden)', ultimas[0] === notFound && ultimas[1] === errorHandler,
+    'las dos últimas capas de la pila no son notFound y errorHandler');
   const problemasIndex = checkIndexStatic();
   record(8, 'index.js (estático): montajes y orden', problemasIndex.length === 0, problemasIndex.join('; '));
 };
 
 // ─── Criterio 9: tokens en las rutas abiertas y rutas inexistentes ───────────
 
-const criterio9 = async (base) => {
+const criterio9 = async (base, root) => {
   const abiertas = [['POST', '/send-email', {}], ['GET', '/get-image?imageKey=foto.jpg'], ['GET', '/list-images'], ['GET', '/list-terms']];
   for (const [method, path, body] of abiertas) {
     const sinToken = await call(base, method, path, { body, ip: nextIp() });
@@ -449,19 +477,57 @@ const criterio9 = async (base) => {
       record(9, `${estado} ${method} ${path} responde como sin token`, r.status !== 401 && r.status === sinToken.status, `${r.status} (sin token: ${sinToken.status})`);
     }
   }
-  // Estado transitorio hasta la entrega 3: el 404 es el de Express por defecto (HTML, sin envoltorio).
-  for (const [method, path] of [['GET', '/no-existe'], ['DELETE', '/list-terms'], ['POST', '/no-existe']]) {
-    for (const [estado, token] of [['sin token', undefined], ['token válido', validToken]]) {
-      const r = await call(base, method, path, { token, body: method === 'GET' ? undefined : {} });
-      record(9, `${estado} ${method} ${path} da 404`, r.status === 404, String(r.status));
+  const estados = [['sin token', undefined], ['token válido', validToken], ['token inválido', invalidToken], ['token caducado', expiredToken]];
+  const es404 = (r) => r.status === 404 && /application\/json/.test(r.contentType) && r.json?.success === false && r.json?.error === 'Not found';
+  const resumen = (r) => `${r.status} ${r.contentType} ${JSON.stringify(r.json)}`;
+  const cuerpo = (method) => (method === 'GET' ? undefined : {});
+
+  // a. Rutas inexistentes bajo el prefijo, con todos los métodos y estados de token.
+  for (const method of ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']) {
+    for (const [estado, token] of estados) {
+      const r = await call(base, method, '/no-existe', { token, body: cuerpo(method) });
+      record(9, `a. ${estado} ${method} /no-existe da 404 con envoltorio`, es404(r), resumen(r));
     }
   }
+  // b. Método no definido en una ruta existente: 404, no 405, sin cabecera Allow.
+  for (const [method, path] of [['DELETE', '/list-terms'], ['POST', '/list-images'], ['GET', '/upload']]) {
+    for (const [estado, token] of estados) {
+      const r = await call(base, method, path, { token, body: cuerpo(method) });
+      record(9, `b. ${estado} ${method} ${path} da 404 con envoltorio`, es404(r) && !r.headers.has('allow'), `${resumen(r)} allow=${r.headers.get('allow')}`);
+    }
+  }
+  // c. Mensaje fijo: no refleja ruta, método ni consulta.
+  const c1 = await call(base, 'GET', '/no-existe/%3Cscript%3Ealert(1)%3C%2Fscript%3E?x=1');
+  const c2 = await call(base, 'POST', '/otra-ruta-distinta', { body: {} });
+  record(9, 'c. el error es idéntico en dos rutas distintas', es404(c1) && es404(c2) && c1.json.error === c2.json.error, `${resumen(c1)} | ${resumen(c2)}`);
+  record(9, 'c. el error no refleja la ruta ni la consulta', typeof c1.json?.error === 'string' && !/script|no-existe|x=1/i.test(c1.json.error), resumen(c1));
+  // d. Fuera del prefijo.
+  for (const path of ['/', '/otra', '/api/v2/x']) {
+    const r = await call(root, 'GET', path);
+    record(9, `d. GET ${path} (fuera del prefijo) da 404 con envoltorio`, es404(r), resumen(r));
+  }
+  // e. Sin cambios: /healthcheck, OPTIONS, Origin permitido y no permitido.
+  const health = await fetch(`${root}/healthcheck`);
+  const healthText = await health.text();
+  record(9, 'e. GET /healthcheck da 200 ok (texto, no JSON)', health.status === 200 && healthText === 'ok' && !/json/.test(health.headers.get('content-type') ?? ''), `${health.status} ${healthText}`);
+  const preflight = await call(base, 'OPTIONS', '/no-existe', { headers: { Origin: 'http://localhost', 'Access-Control-Request-Method': 'GET' } });
+  record(9, 'e. OPTIONS con Origin permitido da 204 con CORS', preflight.status === 204 && preflight.headers.get('access-control-allow-origin') === 'http://localhost',
+    `${preflight.status} acao=${preflight.headers.get('access-control-allow-origin')}`);
+  const conOrigin = await call(base, 'GET', '/no-existe', { headers: { Origin: 'http://localhost' } });
+  record(9, 'e. GET /no-existe con Origin permitido lleva la cabecera CORS', conOrigin.headers.get('access-control-allow-origin') === 'http://localhost',
+    String(conOrigin.headers.get('access-control-allow-origin')));
+  const otroOrigen = await call(base, 'GET', '/list-terms', { headers: { Origin: 'http://otro.example' } });
+  record(9, 'e. Origin no permitido da 500 Origin not allowed (no Not found)',
+    otroOrigen.status === 500 && otroOrigen.json?.success === false && /^Origin not allowed/.test(otroOrigen.json?.error ?? '') && otroOrigen.json.error !== 'Not found', resumen(otroOrigen));
+  // f. JSON mal formado sigue dando 400 con envoltorio.
+  const malformado = await call(base, 'POST', '/send-email', { rawBody: '{', headers: { 'Content-Type': 'application/json' }, ip: nextIp() });
+  record(9, 'f. JSON mal formado da 400 con envoltorio (no Not found)', malformado.status === 400 && isEnvelopeError(malformado) && malformado.json.error !== 'Not found', resumen(malformado));
 };
 
 // ─── Ejecución ───────────────────────────────────────────────────────────────
 
 const main = async () => {
-  const { app, base } = await startApp();
+  const { app, root, base } = await startApp();
   await criterio1(base);
   await criterio2();
   await criterio3();
@@ -469,7 +535,7 @@ const main = async () => {
   await criterio6(base);
   await criterio7(base, app);
   criterio8(app);
-  await criterio9(base);
+  await criterio9(base, root);
 
   let fallos = 0;
   for (const id of Object.keys(criteria).sort()) {

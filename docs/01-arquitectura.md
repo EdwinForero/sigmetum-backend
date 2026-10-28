@@ -18,6 +18,7 @@ Monolito Express pequeño, sin base de datos. S3 actúa como única capa de pers
      │   ├─ routes/auth.js              │
      │   ├─ routes/data.js              │
      │   ├─ routes/content.js           │
+     │   ├─ notFound (404)              │
      │   └─ errorHandler                │
      └───────┬───────────────┬──────────┘
              │ AWS SDK v3    │ SMTP (Gmail)
@@ -33,7 +34,7 @@ Monolito Express pequeño, sin base de datos. S3 actúa como única capa de pers
 | Rutas (controladores) | `routes/` | Validan entrada, orquestan llamadas, dan forma a la respuesta |
 | Lógica auxiliar | `functions/` | Autenticación, parseo de Excel, nombres y versiones de fichero |
 | Acceso a datos | `aws/awsS3connect.js` | Único punto de contacto con S3 |
-| Errores | `middleware/errorHandler.js` | Traduce excepciones a respuestas JSON uniformes |
+| Errores | `middleware/errorHandler.js`, `middleware/notFound.js` | `errorHandler` traduce excepciones a respuestas JSON uniformes; `notFound` responde el 404 con el mismo envoltorio |
 
 Las rutas no hablan con S3 directamente: siempre pasan por `awsS3connect.js`. Las rutas de S3 (prefijos) no se escriben a mano: salen de `config/s3Paths.js`.
 
@@ -45,7 +46,8 @@ Las rutas no hablan con S3 directamente: siempre pasan por `awsS3connect.js`. La
 4. El router correspondiente (bajo `API_PREFIX`, por defecto `/api/v1`) procesa la ruta.
    - Rutas públicas: se atienden directamente.
    - Rutas protegidas: pasan antes por `tokenAuth` (cabecera `Authorization: Bearer <jwt>`).
-5. Si algo falla, el handler llama a `next(error)` y `errorHandler` responde `{ success: false, error }` con el status adecuado.
+5. Si ningún router resuelve la petición (ruta inexistente o método no definido), `notFound` responde `404` `{ success: false, error: "Not found" }`.
+6. Si algo falla, el handler llama a `next(error)` y `errorHandler` responde `{ success: false, error }` con el status adecuado.
 
 `/healthcheck` se registra **antes** de los middlewares para que el health check del balanceador no genere logs ni dependa de CORS.
 
@@ -64,7 +66,7 @@ Las rutas no hablan con S3 directamente: siempre pasan por `awsS3connect.js`. La
 
 ## Despliegue
 
-Definido en el repo **sigmetum-infra** (Terraform, región `eu-west-1`):
+Definido en el repo **sigmetum-infra** (Terraform, región `eu-west-3`):
 
 | | Dev | Prod |
 |---|---|---|
@@ -72,7 +74,7 @@ Definido en el repo **sigmetum-infra** (Terraform, región `eu-west-1`):
 | Instancias | 1 × t3.nano, sin balanceador | 1–3 × t3.nano con ALB y auto scaling |
 | HTTPS | No | Sí (ACM) |
 | DNS | — | `backend.sigmetum-a.org` |
-| Bucket | `sigmetum-app-dev` | `sigmetum-app-prod` |
+| Bucket | `sigmetum-app-assets-dev` | `sigmetum-app-assets-prod` |
 
 En Beanstalk el SDK de AWS obtiene credenciales del IAM role de la instancia (sin claves en el entorno). En local se usa un perfil SSO (ver [03-configuracion.md](03-configuracion.md)).
 

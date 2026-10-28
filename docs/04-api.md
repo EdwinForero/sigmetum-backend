@@ -6,7 +6,7 @@ Todas las rutas van bajo `API_PREFIX` (por defecto `/api/v1`), salvo `/healthche
 - Respuesta de éxito: `{ "success": true, "data": ... }`
 - Respuesta de error: `{ "success": false, "error": "mensaje" }`
 - Las rutas 🔓 se alcanzan **sin** cabecera `Authorization` y la ignoran: con un token inválido o caducado responden igual que sin token. Las rutas 🔒 llevan `tokenAuth` como primer manejador de la propia ruta y responden `401` sin token (`No token provided`), con token inválido (`Invalid token`) o caducado (`Token expired`) (M21, entrega 2, 28/10/2026; ver [07](07-estado-y-deuda-tecnica.md)).
-- **Estado transitorio (hasta la entrega 3 de M21)**: una ruta inexistente (`GET /no-existe`) o un método no definido (`DELETE /list-terms`) responde el `404` por defecto de Express (HTML, **sin** el envoltorio `{ success, error }`), con o sin token. Antes respondían `401` con envoltorio. La entrega 3 los pasará a un `404` con envoltorio.
+- **Rutas inexistentes y métodos no definidos** (M21, entrega 3, 28/10/2026): una ruta que ningún router resuelve (`GET /api/v1/no-existe`, también fuera del prefijo: `GET /`, `GET /otra`) o un método no definido en una ruta existente (`DELETE /list-terms`, `HEAD` incluido) responde `404` con `{ "success": false, "error": "Not found" }`, texto fijo que no refleja la ruta, el método ni la consulta, con o sin token (los ignora). No hay `405` ni cabecera `Allow`. `/healthcheck` queda a salvo (`200 ok`, texto). Un `Origin` no permitido sigue dando el error de CORS por `errorHandler`, no el 404.
 
 ## Resumen
 

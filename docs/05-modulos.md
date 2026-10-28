@@ -15,6 +15,7 @@ Orden de ejecución:
    - `/healthcheck` (antes de todo lo demás)
    - `morgan('combined')`, `cors({ origin: ALLOWED_ORIGIN })`, `express.json()`, `compression()`
    - `authRoutes`, `dataRoutes`, `contentRoutes` bajo `API_PREFIX`
+   - `notFound` (tras los tres routers)
    - `errorHandler` (último)
 5. `app.listen(PORT)`.
 
@@ -221,6 +222,16 @@ Crea un único cliente `S3` (clase agregada de SDK v3) con `AWS_REGION` y, en lo
 | Función | Parámetros | Notas |
 |---|---|---|
 | `updateFileS3` | `filePath` (`data/{prov}/{fecha}_vN.xlsx`) | Descarga el Excel, lo convierte y sobreescribe `data/active/{prov}.json` |
+
+---
+
+## `middleware/notFound.js`
+
+| Elemento | Descripción |
+|---|---|
+| `notFound(req, res)` | Responde `404` con `{ success: false, error: 'Not found' }`. Texto fijo: no lee ni refleja ruta, método ni consulta, y no escribe nada en consola (`morgan` sigue registrando la petición). No pasa por `errorHandler` ni usa `next`. Se exporta con `module.exports = notFound` |
+
+Se monta con `app.use(notFound)` después de los tres routers y antes de `errorHandler`: atiende toda petición que ningún router resolvió, incluidas las de fuera de `API_PREFIX`. Un error de CORS (`Origin` no permitido) no llega aquí: lo para antes `cors` y sale por `errorHandler`.
 
 ---
 
