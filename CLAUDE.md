@@ -49,7 +49,7 @@ Cambios **compatibles** no necesitan versión nueva; cambios **incompatibles** s
 ## Lo que nunca se hace (resumen; el detalle y el motivo están en las guías)
 
 - Escribir secretos, tokens o contraseñas en el repositorio, en `.env.example`, en la documentación o en un log.
-- Añadir una ruta que modifique estado (`POST`, `PUT`, `PATCH`, `DELETE`) fuera de `protectedRouter`, salvo una excepción registrada y justificada.
+- Añadir una ruta que modifique estado (`POST`, `PUT`, `PATCH`, `DELETE`) sin `tokenAuth` como primer manejador de la propia ruta, salvo una excepción registrada y justificada.
 - Construir una clave de S3 o de un objeto con texto del cliente o de un Excel sin validarlo antes contra una lista de permitidos.
 - Dejar un manejador `async` sin `try/catch` y `next(error)`, o devolver al cliente el `err.message` de un error interno.
 - Usar `eval`, `new Function` o `child_process`.
@@ -70,7 +70,7 @@ Cambios **compatibles** no necesitan versión nueva; cambios **incompatibles** s
 
 - Los fallos se corrigen con TDD: primero un test que falle **por el motivo correcto**, después el cambio mínimo (cuando exista la base de tests, M11).
 - Cada ruta responde `{ success: true, data }` o `{ success: false, error }`; los fallos se pasan con `next(error)` a `middleware/errorHandler.js`.
-- Las rutas protegidas cuelgan del `protectedRouter` con `tokenAuth`.
+- Las rutas protegidas llevan `tokenAuth` como primer manejador de la propia ruta.
 - Las claves de S3 salen de `config/s3Paths.js`; las variables de entorno, de `config/validateEnv.js` y `.env.example`.
 - Este repositorio no corrige nada del frontend ni de `sigmetum-infra`: si un cambio los afecta, se documenta y se avisa en la PR.
 - No guardes secretos en `.env.example` ni en la documentación.

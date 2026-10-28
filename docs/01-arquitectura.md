@@ -53,7 +53,7 @@ Las rutas no hablan con S3 directamente: siempre pasan por `awsS3connect.js`. La
 
 - **Formato de respuesta**: siempre `{ success: true, data }` o `{ success: false, error }`.
 - **Errores**: `try/catch` + `next(error)`. Validaciones de entrada responden 400 directamente.
-- **Rutas protegidas**: cada router define un `protectedRouter` con `protectedRouter.use(tokenAuth)` y lo monta al final con `router.use(protectedRouter)`.
+- **Rutas protegidas**: `tokenAuth` es el primer manejador de cada ruta protegida, en la propia declaración (`router.post('/x', tokenAuth, ...)`); no hay `router.use(tokenAuth)` sin ruta, así que las rutas públicas y las inexistentes no pasan por él.
 - **Subidas**: `multer` con `memoryStorage` (el fichero nunca toca disco; va de memoria a S3).
 
 ## Manejo de procesos

@@ -46,14 +46,14 @@ Toda la seguridad real está aquí: el frontend solo evita errores y no facilita
 ### S3. Autorización
 
 - **Por qué:** `tokenAuth` es la única barrera. Hay un solo rol: cualquier token válido es el administrador.
-- **Reglas:** toda ruta `POST`, `PUT`, `PATCH` o `DELETE` cuelga de `protectedRouter` (o lleva `tokenAuth`). Una ruta pública que modifica estado es una **excepción registrada y justificada**.
-- **Cómo:** `npm run quality` falla con una ruta mutante sin autenticación que no esté en `PUBLIC_MUTATING_ROUTES` (y con una excepción que ya no exista).
+- **Reglas:** toda ruta `POST`, `PUT`, `PATCH` o `DELETE` lleva `tokenAuth` como **primer manejador de la propia ruta** (`router.post('/x', tokenAuth, ...)`, y antes de `multer` en las subidas). No se usa `router.use(tokenAuth)` sin ruta: intercepta peticiones de otras rutas (M21). Una ruta pública que modifica estado es una **excepción registrada y justificada**.
+- **Cómo:** `npm run quality` falla con una ruta mutante cuyo `tokenAuth` no sea el primer manejador y que no esté en `PUBLIC_MUTATING_ROUTES` (y con una excepción que ya no exista). Además ejecuta `scripts/verificar-rutas.mjs`, que recorre la pila real de Express: falla con una ruta sin clasificar, una protegida sin `tokenAuth` como primer manejador, una pública con `tokenAuth` o un `use(tokenAuth)` a nivel de router, y comprueba el `401` de las nueve protegidas, incluido `GET /auth`. La detección estática no ve `router.route()`, `router.all`, `router.use` ni rutas en variables: solo la pila real las cubre. Tampoco ve una declaración partida en varias líneas (limitación en el lado inseguro: una mutante así no se marcaría como sin proteger); por eso `quality` suma como problema, con `unparsedRouteLines()` de `scripts/lib/repo.mjs`, toda línea de `routes/` que empieza por `router.`, `protectedRouter.` o `app.` seguido de `get|post|put|patch|delete|all|use|route(` y no casa con el patrón completo, y esa ruta hay que escribirla en una sola línea. El script monta los routers reales con S3 y nodemailer simulados pero no carga el `index.js` real (`cors`, `compression` y `morgan` no se ejercitan; `index.js` se lee estáticamente), así que no equivale a verificar la pila de producción.
 - **Estado:** cumple **(verificado)**. Excepciones vigentes:
 
 | Ruta | Por qué es pública | Condición para mantenerla |
 |---|---|---|
 | `POST /log` | Es el login | Límite de intentos y arreglar A7 y M12 |
-| `POST /send-email` | Formulario de contacto | Límite de peticiones y validación (M3). Los tiene desde el 28/10/2026: 5 por 15 minutos por IP (almacén en memoria) y validación de los cuatro campos |
+| `POST /send-email` | Formulario de contacto: no exige token (ni lo ejecuta, desde la entrega 2 de M21) | Límite de peticiones y validación (M3). Los tiene desde el 28/10/2026: 5 por 15 minutos por IP (almacén en memoria; cuenta también el tráfico anónimo y los 400) y validación de los cuatro campos. El límite depende de que `trust proxy 1` cuente bien los saltos delante de Express **(por confirmar con infra)** |
 
 Rutas de **lectura** públicas (los datos del portal son públicos): `GET /list-files`, `GET /get-data/:path`, `GET /get-merged-data`, `GET /list-images`, `GET /get-image`, `GET /list-terms` y `GET /healthcheck`. Una lectura nueva se hace pública **a propósito**. `GET /get-data/:path` es la excepción problemática: lee cualquier clave del bucket (M2, y D1 antes de cerrarlo).
 
@@ -178,7 +178,7 @@ Solo nombres de categoría; el detalle de cada riesgo está en la fuente.
 Márcala **siempre** que el cambio toque autenticación, rutas, subida de archivos, S3, CORS, correo, dependencias, secretos o logs.
 
 - [ ] `npm run lint`, `npm run quality` y `npm run docs:check` en verde.
-- [ ] Toda ruta nueva que modifica estado cuelga de `protectedRouter`; si es pública, está justificada en `PUBLIC_MUTATING_ROUTES` y en la tabla de S3.
+- [ ] Toda ruta nueva que modifica estado lleva `tokenAuth` como primer manejador; si es pública, está justificada en `PUBLIC_MUTATING_ROUTES` y en la tabla de S3.
 - [ ] Toda entrada (cuerpo, parámetros, consulta, `req.file`) se valida en tipo y forma **antes** de usarse; ninguna clave de S3 se construye con un valor sin validar.
 - [ ] Todo manejador `async` captura sus errores y llama a `next(error)`.
 - [ ] No se escribe ningún dato sensible en un log, ni se devuelve `err.message` de un error interno al cliente.

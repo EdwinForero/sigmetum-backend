@@ -62,10 +62,7 @@ router.get('/get-merged-data', async (req, res, next) => {
 
 // ─── Protected routes ────────────────────────────────────────────────────────
 
-const protectedRouter = express.Router();
-protectedRouter.use(tokenAuth);
-
-protectedRouter.post('/upload', upload.single('file'), async (req, res, next) => {
+router.post('/upload', tokenAuth, upload.single('file'), async (req, res, next) => {
     try {
         if (!req.file) {
             return res.status(400).json({ success: false, error: 'File is required' });
@@ -115,7 +112,7 @@ protectedRouter.post('/upload', upload.single('file'), async (req, res, next) =>
     }
 });
 
-protectedRouter.post('/upload/confirm', async (req, res, next) => {
+router.post('/upload/confirm', tokenAuth, async (req, res, next) => {
     try {
         const { confirmed, draftKey } = req.body;
 
@@ -138,7 +135,7 @@ protectedRouter.post('/upload/confirm', async (req, res, next) => {
     }
 });
 
-protectedRouter.post('/update-file', async (req, res, next) => {
+router.post('/update-file', tokenAuth, async (req, res, next) => {
     try {
         const { fileName } = req.body;
         if (typeof fileName !== 'string' || !fileName) {
@@ -152,7 +149,7 @@ protectedRouter.post('/update-file', async (req, res, next) => {
     }
 });
 
-protectedRouter.post('/delete-file', async (req, res, next) => {
+router.post('/delete-file', tokenAuth, async (req, res, next) => {
     try {
         const { fileName } = req.body;
         if (typeof fileName !== 'string' || !fileName) {
@@ -165,7 +162,5 @@ protectedRouter.post('/delete-file', async (req, res, next) => {
         next(error);
     }
 });
-
-router.use(protectedRouter);
 
 module.exports = router;

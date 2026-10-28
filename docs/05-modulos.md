@@ -49,7 +49,7 @@ Exporta: `validateEnv` (función por defecto).
 
 ## `routes/`
 
-Todos los routers siguen el mismo patrón: un `router` con rutas públicas y un `protectedRouter` con `tokenAuth`, montado al final con `router.use(protectedRouter)`. Como se monta sin ruta propia, `tokenAuth` también se ejecuta para las peticiones que `data.js` no resuelve y que deberían llegar a `content.js` (M21 de [07](07-estado-y-deuda-tecnica.md)).
+Todos los routers declaran sus rutas en un único `router`. `tokenAuth` es el **primer manejador de cada ruta protegida**, en la propia línea de la declaración (`router.post('/upload', tokenAuth, upload.single('file'), ...)`, antes de `multer`); las públicas no lo llevan. No hay `router.use(tokenAuth)` a nivel de router, así que la protección no depende del orden de montaje en `index.js` (M21, entrega 2, ver [07](07-estado-y-deuda-tecnica.md)). `npm run quality` lo vigila con `scripts/verificar-rutas.mjs` y con `scripts/lib/repo.mjs`: `routeDeclarations()` lee las declaraciones de una línea y `unparsedRouteLines()` lista las líneas de `routes/` que parecen una declaración (`router.`/`protectedRouter.`/`app.` con `get|post|put|patch|delete|all|use|route(`) y no casan con el patrón completo, p. ej. partidas en varias líneas; `quality` las cuenta como problema. El script monta los routers reales, no el `index.js` real.
 
 ### `auth.js`
 
@@ -79,7 +79,7 @@ Todos los routers siguen el mismo patrón: un `router` con rutas públicas y un 
 | `upload` | Instancia `multer` en memoria |
 | `transporter` | `nodemailer.createTransport` contra `smtp.gmail.com:587` (`secure: false` → STARTTLS) con `EMAIL`/`EMAIL_PASSWORD` |
 | `sendEmailLimiter` | `rateLimit({ windowMs: 15 min, max: 5 })` con cabeceras estándar; al superarlo responde 429 con `{ success: false, error }`. Almacén en memoria (se reinicia al reiniciar y se multiplica por instancia). Copia de `loginLimiter`, que usa `max` (obsoleto en `express-rate-limit` 8, B6) |
-| `POST /send-email` | `sendEmailLimiter` → `validateContactMessage(req.body)`; si devuelve `error`, 400; si no, construye `mailOptions` con los valores recortados (from/to = `EMAIL`, `replyTo` = email del usuario) y `transporter.sendMail`. Todo el cuerpo va dentro de `try/catch` con `next(error)`. El limitador cuenta antes de validar; hoy `tokenAuth` (M21) corre antes que el limitador |
+| `POST /send-email` | `sendEmailLimiter` → `validateContactMessage(req.body)`; si devuelve `error`, 400; si no, construye `mailOptions` con los valores recortados (from/to = `EMAIL`, `replyTo` = email del usuario) y `transporter.sendMail`. Todo el cuerpo va dentro de `try/catch` con `next(error)`. Ruta pública (sin `tokenAuth`). El limitador es el primer manejador, cuenta antes de validar y cuenta también el tráfico anónimo |
 | `GET /list-images` | `getPresignedUrlsFromS3Folder(GALLERY_PATH)` |
 | `GET /get-image` | 400 si `imageKey` falta, está vacío o no es cadena; 400 `imageKey is not valid` si `isValidImageKey` lo rechaza; si no, `getPresignedUrlFromS3(GALLERY_PATH, imageKey)` |
 | `GET /list-terms` | `getTextJsonS3(TERMS_FILE, TERMS_PATH)` |

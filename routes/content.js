@@ -100,10 +100,7 @@ router.get('/list-terms', async (req, res, next) => {
 
 // ─── Protected routes ────────────────────────────────────────────────────────
 
-const protectedRouter = express.Router();
-protectedRouter.use(tokenAuth);
-
-protectedRouter.post('/upload-image', upload.single('file'), async (req, res, next) => {
+router.post('/upload-image', tokenAuth, upload.single('file'), async (req, res, next) => {
     try {
         const file = req.file;
         const title = req.body.title;
@@ -123,7 +120,7 @@ protectedRouter.post('/upload-image', upload.single('file'), async (req, res, ne
     }
 });
 
-protectedRouter.delete('/delete-image', async (req, res, next) => {
+router.delete('/delete-image', tokenAuth, async (req, res, next) => {
     const { imageKey } = req.body;
 
     if (typeof imageKey !== 'string' || !imageKey) {
@@ -145,7 +142,7 @@ protectedRouter.delete('/delete-image', async (req, res, next) => {
     }
 });
 
-protectedRouter.post('/upload-term', async (req, res, next) => {
+router.post('/upload-term', tokenAuth, async (req, res, next) => {
     try {
         const { term } = req.body;
         if (typeof term !== 'string') {
@@ -162,7 +159,7 @@ protectedRouter.post('/upload-term', async (req, res, next) => {
     }
 });
 
-protectedRouter.delete('/delete-term', async (req, res, next) => {
+router.delete('/delete-term', tokenAuth, async (req, res, next) => {
     const { term } = req.body;
 
     if (typeof term !== 'string' || !term) {
@@ -180,7 +177,5 @@ protectedRouter.delete('/delete-term', async (req, res, next) => {
         next(error);
     }
 });
-
-router.use(protectedRouter);
 
 module.exports = router;

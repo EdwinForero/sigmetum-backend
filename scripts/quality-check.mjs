@@ -1,16 +1,17 @@
 // Puerta de calidad y seguridad del backend.
 // Uso: npm run quality
 // Comprueba: patrones prohibidos en el código, rutas que modifican estado sin autenticación, variables de
-// entorno sin declarar, secretos, vulnerabilidades de las dependencias de producción y ESLint.
+// entorno sin declarar, secretos, vulnerabilidades de las dependencias de producción, ESLint y las rutas contra
+// la pila real de Express (scripts/verificar-rutas.mjs).
 // Las reglas y su motivo están en docs/guias/seguridad.md y docs/guias/buenas-practicas-backend.md.
 // Sin dependencias: solo módulos de Node (y las herramientas que ya usa el proyecto: npm, git y eslint).
 
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { ROOT, read, walk, codeFiles, routeDeclarations, usedEnvVars, declaredEnvVars, printResults } from './lib/repo.mjs';
+import { ROOT, read, walk, codeFiles, routeDeclarations, unparsedRouteLines, usedEnvVars, declaredEnvVars, printResults } from './lib/repo.mjs';
 
-const run = (command, args) => spawnSync(command, args, { cwd: ROOT, encoding: 'utf8', shell: true });
+const run = (command, args, options = {}) => spawnSync(command, args, { cwd: ROOT, encoding: 'utf8', shell: true, ...options });
 
 const results = [];
 const check = (name, problems, notes = []) => results.push({ name, problems, notes });
@@ -21,7 +22,7 @@ const check = (name, problems, notes = []) => results.push({ name, problems, not
 // Rutas que modifican estado (POST, PUT, PATCH, DELETE) y NO exigen token. Es una lista cerrada.
 const PUBLIC_MUTATING_ROUTES = {
   'POST /log': 'Es el login: no puede exigir un token que todavía no existe. Lleva limitador de intentos.',
-  'POST /send-email': 'Formulario de contacto público. Lleva límite de 5 peticiones cada 15 minutos por IP y validación de sus cuatro campos (M3).',
+  'POST /send-email': 'Formulario de contacto público: no exige token. Lleva límite de 5 peticiones cada 15 minutos por IP (cuenta también el tráfico anónimo y los 400) y validación de sus cuatro campos (M3).',
 };
 
 // Variables que el código lee pero que NO son obligatorias (no están en config/validateEnv.js).
@@ -66,8 +67,9 @@ const ACCEPTED_ADVISORIES = {};
     if (route.method === 'GET' || route.protected) continue;
     const id = `${route.method} ${route.path}`;
     seen.add(id);
-    if (!(id in PUBLIC_MUTATING_ROUTES)) problems.push(`${route.file}:${route.line} ${id} modifica estado y no cuelga de protectedRouter ni usa tokenAuth`);
+    if (!(id in PUBLIC_MUTATING_ROUTES)) problems.push(`${route.file}:${route.line} ${id} modifica estado y no lleva tokenAuth como primer manejador de la ruta`);
   }
+  for (const u of unparsedRouteLines()) problems.push(`${u.file}:${u.line} declaración de ruta que la detección estática no interpreta (¿partida en varias líneas?): ${u.text}`);
   for (const id of Object.keys(PUBLIC_MUTATING_ROUTES)) {
     if (!seen.has(id)) problems.push(`La excepción "${id}" de PUBLIC_MUTATING_ROUTES ya no existe o ya está protegida: quítala`);
   }
@@ -195,6 +197,20 @@ const ACCEPTED_ADVISORIES = {};
     lint.status === 0 ? extra : [`npm run lint falla ${total.trim()}`, ...errors.map((line) => line.trim())],
     notes
   );
+}
+
+// ─── 7. Rutas: pila real de Express (scripts/verificar-rutas.mjs) ───────────
+
+{
+  const problems = [];
+  const verify = run('node', ['scripts/verificar-rutas.mjs'], { timeout: 60000 });
+  if (verify.status !== 0) {
+    const reason = verify.error?.code === 'ETIMEDOUT' ? 'superó el tiempo máximo de 60 s' : `terminó con código ${verify.status} (1: fallan criterios, 2: error del propio script)`;
+    problems.push(`scripts/verificar-rutas.mjs ${reason}. Cola de la salida:`);
+    const tail = `${verify.stdout ?? ''}\n${verify.stderr ?? ''}`.split('\n').filter((line) => line.trim() !== '').slice(-15);
+    tail.forEach((line) => problems.push(`  ${line.trim()}`));
+  }
+  check('Rutas protegidas y públicas (pila real de Express, scripts/verificar-rutas.mjs)', problems);
 }
 
 // ─── Resultado ──────────────────────────────────────────────────────────────

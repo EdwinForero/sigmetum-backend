@@ -5,7 +5,8 @@ Todas las rutas van bajo `API_PREFIX` (por defecto `/api/v1`), salvo `/healthche
 - 🔓 = pública · 🔒 = requiere `Authorization: Bearer <token>`
 - Respuesta de éxito: `{ "success": true, "data": ... }`
 - Respuesta de error: `{ "success": false, "error": "mensaje" }`
-- **Aviso (M21 de [07](07-estado-y-deuda-tecnica.md))**: el código contradice la columna 🔓 de `POST /send-email`, `GET /list-images`, `GET /get-image` y `GET /list-terms`: `tokenAuth` se ejecuta antes de llegar a `content.js` y, sin token, responden `401 No token provided` (verificado con una petición real a un servidor local; en producción **por confirmar**). La columna refleja la intención, no el comportamiento. Por eso los `400` de `/send-email` y `/get-image` de más abajo solo se alcanzan hoy con un token válido.
+- Las rutas 🔓 se alcanzan **sin** cabecera `Authorization` y la ignoran: con un token inválido o caducado responden igual que sin token. Las rutas 🔒 llevan `tokenAuth` como primer manejador de la propia ruta y responden `401` sin token (`No token provided`), con token inválido (`Invalid token`) o caducado (`Token expired`) (M21, entrega 2, 28/10/2026; ver [07](07-estado-y-deuda-tecnica.md)).
+- **Estado transitorio (hasta la entrega 3 de M21)**: una ruta inexistente (`GET /no-existe`) o un método no definido (`DELETE /list-terms`) responde el `404` por defecto de Express (HTML, **sin** el envoltorio `{ success, error }`), con o sin token. Antes respondían `401` con envoltorio. La entrega 3 los pasará a un `404` con envoltorio.
 
 ## Resumen
 
@@ -132,7 +133,7 @@ Límite: **5 peticiones cada 15 minutos por IP** (`express-rate-limit`, almacén
 `, `` y `	` en el mensaje) y `email is not valid` (comprobación básica de formato, no RFC: `algo@dominio.tld` sin espacios, comas, punto y coma, dos puntos, ángulos, paréntesis, comillas ni barra invertida, y con un punto en el dominio; `a@b` se rechaza aunque `type="email"` del navegador lo admita; también se rechaza un correo con apóstrofo como `o'brien@example.com`, válido en RFC pero poco habitual, **(por confirmar)** si preocupa).
 - `429` → `Too many messages. Please try again in 15 minutes.` (envoltorio `{ success: false, error }`; no se envía correo).
 
-Se guardan y se envían los valores recortados. En ningún `400` ni `429` se envía correo (M3 resuelto, ver [07](07-estado-y-deuda-tecnica.md)). Hoy estos códigos solo se alcanzan con un token válido (ver el aviso M21 de arriba): sin token la respuesta sigue siendo `401 No token provided`.
+Se guardan y se envían los valores recortados. En ningún `400` ni `429` se envía correo (M3 resuelto, ver [07](07-estado-y-deuda-tecnica.md)). Estos códigos (`200`, `400`, `429`, `500`) se alcanzan sin token desde la entrega 2 de M21; el límite cuenta también el tráfico anónimo.
 
 ### `GET /list-images`
 Devuelve todas las imágenes de `gallery/` con URL prefirmada (válida 1 hora):
@@ -141,7 +142,7 @@ Devuelve todas las imágenes de `gallery/` con URL prefirmada (válida 1 hora):
 ```
 
 ### `GET /get-image?imageKey=Encinar.jpg`
-`data: { imageUrl }` — URL prefirmada (1 hora) de una imagen concreta. `400` `imageKey is required` si falta, está vacío o no es una cadena (por ejemplo `?imageKey=a&imageKey=b`); antes respondía `200` con una URL a `gallery/undefined`. `400` `imageKey is not valid` si la clave no cumple la lista de permitidos compartida con `DELETE /delete-image` (regla en [06](06-almacenamiento-s3.md#regla-de-imagekey)), antes de llamar a S3. Hoy solo es alcanzable con token (aviso M21 de arriba); sin token da `401`.
+`data: { imageUrl }` — URL prefirmada (1 hora) de una imagen concreta. `400` `imageKey is required` si falta, está vacío o no es una cadena (por ejemplo `?imageKey=a&imageKey=b`); antes respondía `200` con una URL a `gallery/undefined`. `400` `imageKey is not valid` si la clave no cumple la lista de permitidos compartida con `DELETE /delete-image` (regla en [06](06-almacenamiento-s3.md#regla-de-imagekey)), antes de llamar a S3. Se alcanza sin token (M21, entrega 2); firma cualquier clave bajo `gallery/` que cumpla la regla, exista o no en el listado.
 
 ### `GET /list-terms`
 Devuelve el glosario `data/terms/noLatinTerms.json`: `[ { "term": "..." } ]`. Si no existe devuelve `[]`.
