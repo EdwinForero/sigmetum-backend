@@ -1,9 +1,12 @@
 const express = require('express');
 const multer = require('multer');
 const nodemailer = require('nodemailer');
+const rateLimit = require('express-rate-limit');
 const router = express.Router();
 
 const { tokenAuth } = require('../functions/tokenAuthentication');
+const { validateContactMessage } = require('../functions/validateContactMessage');
+const { isValidImageKey } = require('../functions/validateImageKey');
 const {
     getPresignedUrlsFromS3Folder,
     getPresignedUrlFromS3,
@@ -27,26 +30,31 @@ const transporter = nodemailer.createTransport({
     },
 });
 
+const sendEmailLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 5,
+    message: { success: false, error: 'Too many messages. Please try again in 15 minutes.' },
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+
 // ─── Public routes ───────────────────────────────────────────────────────────
 
-router.post('/send-email', async (req, res, next) => {
-    const { username, email, subject, message } = req.body;
-    const fields = [username, email, subject, message];
-    if (fields.some(f => typeof f !== 'string' || !f.trim())) {
-        return res.status(400).json({
-            success: false,
-            error: 'username, email, subject and message are required and must be strings',
-        });
-    }
-
-    const mailOptions = {
-        from: process.env.EMAIL,
-        to: process.env.EMAIL,
-        replyTo: email,
-        subject: `${subject} - enviado por ${username}<${email}>`,
-        text: message,
-    };
+router.post('/send-email', sendEmailLimiter, async (req, res, next) => {
     try {
+        const { error, value } = validateContactMessage(req.body);
+        if (error) {
+            return res.status(400).json({ success: false, error });
+        }
+        const { username, email, subject, message } = value;
+
+        const mailOptions = {
+            from: process.env.EMAIL,
+            to: process.env.EMAIL,
+            replyTo: email,
+            subject: `${subject} - enviado por ${username}<${email}>`,
+            text: message,
+        };
         await transporter.sendMail(mailOptions);
         res.status(200).json({ success: true, data: 'Email sent successfully.' });
     } catch (error) {
@@ -68,6 +76,10 @@ router.get('/get-image', async (req, res, next) => {
         const { imageKey } = req.query;
         if (typeof imageKey !== 'string' || !imageKey) {
             return res.status(400).json({ success: false, error: 'imageKey is required' });
+        }
+
+        if (!isValidImageKey(imageKey)) {
+            return res.status(400).json({ success: false, error: 'imageKey is not valid' });
         }
 
         const imageUrl = await getPresignedUrlFromS3(GALLERY_PATH, imageKey);
@@ -116,6 +128,9 @@ protectedRouter.delete('/delete-image', async (req, res, next) => {
 
     if (typeof imageKey !== 'string' || !imageKey) {
         return res.status(400).json({ success: false, error: 'imageKey is required' });
+    }
+    if (!isValidImageKey(imageKey)) {
+        return res.status(400).json({ success: false, error: 'imageKey is not valid' });
     }
 
     try {

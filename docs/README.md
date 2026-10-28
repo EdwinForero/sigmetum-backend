@@ -50,7 +50,9 @@ sigmetum-backend/
 │   ├── tokenAuthentication.js   # Middleware de verificación JWT
 │   ├── convertExcelToJson.js    # Parser de Excel con columnas fijas
 │   ├── formatFileName.js        # Nombre de fichero versionado por fecha
-│   └── getNextVersion.js        # Cálculo de la siguiente versión del día
+│   ├── getNextVersion.js        # Cálculo de la siguiente versión del día
+│   ├── validateImageKey.js      # Lista de permitidos del imageKey (GET /get-image, DELETE /delete-image)
+│   └── validateContactMessage.js # Validación del cuerpo de POST /send-email
 ├── aws/
 │   └── awsS3connect.js          # Todas las operaciones contra S3
 ├── middleware/

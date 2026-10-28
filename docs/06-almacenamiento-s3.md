@@ -80,6 +80,19 @@ Las filas con celdas vacías confirmadas aparecen sin esas claves.
 
 `gallery/{título}{extensión}`. Se sirven siempre por URL prefirmada de 1 hora; el bucket no necesita ser público.
 
+### Regla de `imageKey`
+
+`GET /get-image` y `DELETE /delete-image` construyen la clave como `gallery/{imageKey}` con texto del cliente, así que antes de llamar a S3 lo validan con `isValidImageKey` (`functions/validateImageKey.js`, constantes en `config/s3Paths.js`). Un `imageKey` es válido si:
+
+- Es una cadena de 1 a 200 caracteres.
+- Son uno o más segmentos separados por un único `/`. Cada segmento empieza por una letra o número Unicode (`\p{L}`, `\p{N}`, tildes y ñ incluidas) o por uno de `_ - ( ) +`, y sigue con letras, números, marcas combinantes (`\p{M}`, para nombres en forma NFD, por ejemplo los que genera macOS) y los signos `. _ - ( ) +`.
+- Termina en `.jpg`, `.jpeg`, `.png`, `.gif` o `.webp`, sin distinguir mayúsculas (las del selector del panel del frontend; `gif` está porque el frontend lo acepta).
+- No contiene `..`, ni `/` inicial, ni `//`, ni un segmento que empiece por `.` o por una marca combinante, ni barra invertida, espacios o caracteres de control.
+
+El patrón está escrito en forma plana con lookaheads (`(?!.*\/\/)(?!.*\/[.\p{M}])`) en vez de segmentos anidados: la versión anidada disparaba `security/detect-unsafe-regex`. La comprobación de `..` es aparte, como defensa en profundidad.
+
+No se exige que la clave exista en el listado de la galería. **Límite conocido**: `\p{N}` incluye dígitos y letras numéricas de ancho completo (fullwidth); se aceptan y no se normalizan. **Riesgo residual aceptado**: se pueden firmar (y borrar, con token) objetos bajo `gallery/` que cumplan la regla aunque `GET /list-images` no los liste. `POST /upload-image` aún no valida el MIME ni el nombre (M5), así que pueden existir en S3 claves que la regla rechaza (por ejemplo, con espacios o con otra extensión): quedarían sin poder pedirse ni borrarse con estas dos rutas. Comprobación contra el listado real de la galería: **(por confirmar)**, ver M21 en [07](07-estado-y-deuda-tecnica.md).
+
 ## Glosario
 
 `data/terms/noLatinTerms.json`, array `[{ "term": "..." }]`. Alta y baja con read-modify-write sobre el fichero completo.

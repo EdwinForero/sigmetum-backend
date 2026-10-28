@@ -104,6 +104,10 @@ El control mecánico (`npm run docs:gate`) usa el mapa `docsPorArea` de [.claude
 
 Las reglas y su motivo están en [buenas-practicas-backend.md](buenas-practicas-backend.md) y [seguridad.md](seguridad.md). Sin conexión, `npm audit` se omite con un aviso: se ejecuta con red antes de fusionar. Las excepciones (`ACCEPTED_ADVISORIES`, `PUBLIC_MUTATING_ROUTES`, `OPTIONAL_ENV`) viven al principio de `scripts/quality-check.mjs`, cada una con su motivo.
 
+### Script de verificación de M21 (entrega 1)
+
+`node scripts/verificar-m21-entrega1.mjs` (sin entrada en `package.json`; no forma parte de `lint`, `quality` ni `docs:check`) comprueba el límite y las validaciones de `POST /send-email`, `GET /get-image` y `DELETE /delete-image` con la pila de producción: monta los routers reales de `routes/data.js` y `routes/content.js` en un `express()` propio, con `JWT_SECRET` ficticio, y sustituye `aws/awsS3connect` y `nodemailer` por espías, así que no usa S3 ni SMTP reales. Imprime un resultado por criterio y sale con código distinto de 0 si algo falla. No es una base de tests de la API (M11). Se vuelve a ejecutar al tocar `routes/content.js`, `functions/validateImageKey.js`, `functions/validateContactMessage.js` o la regla de `imageKey` de `config/s3Paths.js`. Se retirará o se adaptará con las entregas 2 y 3 de M21, que cambian lo que comprueba (rutas sin token).
+
 ### Lo que comprueba `npm run docs:check`
 
 El script ([scripts/docs-check.mjs](../../scripts/docs-check.mjs), sin dependencias) compara el código con la documentación y **falla con código de salida 1** si algo no coincide:

@@ -63,15 +63,15 @@ Qué validar y dónde, con el estado real de cada ruta:
 | `POST /upload/confirm` | `draftKey`, `confirmed` | `draftKey` cadena no vacía (400) | Que `draftKey` tenga el formato `data/{provincia}/AAAA-MM-DD_vN.xlsx` y que `confirmed` sea booleano (M4) |
 | `POST /update-file`, `POST /delete-file` | `fileName` | Cadena no vacía (400) | Formato de clave `data/{provincia}/AAAA-MM-DD_vN.xlsx` (M4) |
 | `GET /get-data/:path(*)` | `path` | Nada | Restringir a `data/active/` (M2) |
-| `GET /get-image` | `imageKey` | Cadena no vacía (400; cubre `?imageKey=a&imageKey=b`) | Que sea un nombre simple (M4, M5): la clave se construye con texto del cliente |
+| `GET /get-image` | `imageKey` | Cadena no vacía (400; cubre `?imageKey=a&imageKey=b`) y lista de permitidos `isValidImageKey` (400 `imageKey is not valid`, antes de llamar a S3) | Que la clave exista en el listado (no se exige: riesgo residual aceptado) |
 | `POST /upload-image` | `file`, `title` | `file` presente y `title` cadena no vacía (400); `MulterError` a 400 | Tipo MIME y extensión, tamaño, saneo completo del título (M5, M6) |
-| `DELETE /delete-image` | `imageKey` | Cadena no vacía (400) | Que sea un nombre simple (M4, M5) |
+| `DELETE /delete-image` | `imageKey` | Cadena no vacía (400) y `isValidImageKey` (400 `imageKey is not valid`, antes de llamar a S3) | Nada de forma pendiente; el resto de M4/M5 está en `/upload-image` y en las rutas de versiones |
 | `POST /upload-term`, `DELETE /delete-term` | `term` | Cadena (400 `Term must be a string` en `/upload-term`) y no vacía (400) | Longitud máxima |
-| `POST /send-email` | `username`, `email`, `subject`, `message` | Los cuatro son cadenas no vacías tras `trim()` (400, no se envía correo) | Formato de correo, longitudes y límite de peticiones (M3) |
+| `POST /send-email` | `username`, `email`, `subject`, `message` | `validateContactMessage`: cuatro cadenas no vacías tras `trim()`, longitudes (100, 150, 2000, 254), comprobación básica del formato del correo (no RFC), sin caracteres de control en nombre, correo y asunto y sin controles (salvo salto de línea y tabulador) en el mensaje (400, no se envía correo); límite de 5 por 15 minutos por IP (429) | Nada pendiente (M3 resuelto) |
 
 Cómo validar: **una función de validación por forma de entrada**, con una lista de permitidos (no de prohibidos), sin dependencias nuevas salvo que compense (ver sección 12). Las expresiones regulares de claves de S3 y de nombres de fichero se definen **una vez** en `config/` y las usan la ruta y los tests.
 
-**Choque con la iteración A7/A3 (28/10/2026)**: la regla de arriba pide una función de validación por forma de entrada, pero el plan aprobado de esa iteración usa comprobaciones en línea (`typeof x !== 'string'`) en cada manejador y no crea `functions/validateInput.js`, para no añadir un módulo sin ahorrar código. Por eso la tabla de arriba describe lo que valida cada ruta tal como está, no una función compartida. La regla sigue vigente y se decide con el usuario si se extrae un validador (por ejemplo, junto con M4 y M5), cuando haya más de unas pocas comprobaciones repetidas.
+**Choque con la iteración A7/A3 (28/10/2026)**: la regla de arriba pide una función de validación por forma de entrada, pero el plan aprobado de esa iteración usa comprobaciones en línea (`typeof x !== 'string'`) en cada manejador y no crea `functions/validateInput.js`, para no añadir un módulo sin ahorrar código. Por eso la tabla de arriba describe lo que valida cada ruta tal como está, no una función compartida. La regla sigue vigente y se decide con el usuario si se extrae un validador (por ejemplo, junto con M4 y M5), cuando haya más de unas pocas comprobaciones repetidas. Desde la entrega 1 de M21 (28/10/2026) `POST /send-email` (`functions/validateContactMessage.js`) y el `imageKey` (`functions/validateImageKey.js`, constantes en `config/s3Paths.js`) sí siguen la regla: una función pura por forma de entrada.
 
 ## 5. S3: una sola convención
 

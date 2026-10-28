@@ -21,7 +21,7 @@ const check = (name, problems, notes = []) => results.push({ name, problems, not
 // Rutas que modifican estado (POST, PUT, PATCH, DELETE) y NO exigen token. Es una lista cerrada.
 const PUBLIC_MUTATING_ROUTES = {
   'POST /log': 'Es el login: no puede exigir un token que todavía no existe. Lleva limitador de intentos.',
-  'POST /send-email': 'Formulario de contacto público. Falta límite de peticiones y validación (hallazgo M3 de docs/07).',
+  'POST /send-email': 'Formulario de contacto público. Lleva límite de 5 peticiones cada 15 minutos por IP y validación de sus cuatro campos (M3).',
 };
 
 // Variables que el código lee pero que NO son obligatorias (no están en config/validateEnv.js).

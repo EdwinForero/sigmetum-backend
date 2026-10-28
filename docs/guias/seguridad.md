@@ -53,7 +53,7 @@ Toda la seguridad real está aquí: el frontend solo evita errores y no facilita
 | Ruta | Por qué es pública | Condición para mantenerla |
 |---|---|---|
 | `POST /log` | Es el login | Límite de intentos y arreglar A7 y M12 |
-| `POST /send-email` | Formulario de contacto | Límite de peticiones y validación (M3). Hoy no los tiene |
+| `POST /send-email` | Formulario de contacto | Límite de peticiones y validación (M3). Los tiene desde el 28/10/2026: 5 por 15 minutos por IP (almacén en memoria) y validación de los cuatro campos |
 
 Rutas de **lectura** públicas (los datos del portal son públicos): `GET /list-files`, `GET /get-data/:path`, `GET /get-merged-data`, `GET /list-images`, `GET /get-image`, `GET /list-terms` y `GET /healthcheck`. Una lectura nueva se hace pública **a propósito**. `GET /get-data/:path` es la excepción problemática: lee cualquier clave del bucket (M2, y D1 antes de cerrarlo).
 
@@ -66,10 +66,10 @@ Rutas de **lectura** públicas (los datos del portal son públicos): `GET /list-
 |---|---|---|
 | Versión de datos | `data/{provincia}/AAAA-MM-DD_vN.xlsx`, con `provincia` sin `/`, distinta de `active`, `terms` y `__proto__` | `/update-file`, `/delete-file`, `/upload/confirm`, `/get-data` |
 | JSON activo | `data/active/{provincia}.json` | `/get-data` |
-| Imagen | Un nombre simple (sin `/`) bajo `gallery/` | `/get-image`, `/delete-image`, `/upload-image` |
+| Imagen | `imageKey` según la [regla de 06](../06-almacenamiento-s3.md#regla-de-imagekey): segmentos de letras, números y marcas combinantes Unicode y `. _ - ( ) +` con `/` simple, hasta 200 caracteres y extensión jpg, jpeg, png, gif o webp | `/get-image`, `/delete-image`, `/upload-image` |
 
 - **Cómo:** hoy no hay comprobación automática; se revisa y se cubrirá con tests de entrada.
-- **Estado:** **no cumple**. `provincia` sale de la primera fila del Excel: un valor `active` o `terms` escribe dentro de `data/active/`, y `__proto__` rompe `GET /list-files` con un `TypeError` **(verificado ejecutándolo)** (A4). `fileName` no se valida en `/update-file` ni `/delete-file` (M4). `/get-data` lee cualquier clave (M2). El `title` de las imágenes solo sustituye espacios (M5).
+- **Estado:** **no cumple**. `provincia` sale de la primera fila del Excel: un valor `active` o `terms` escribe dentro de `data/active/`, y `__proto__` rompe `GET /list-files` con un `TypeError` **(verificado ejecutándolo)** (A4). `fileName` no se valida en `/update-file` ni `/delete-file` (M4). `/get-data` lee cualquier clave (M2). `GET /get-image` y `DELETE /delete-image` ya validan `imageKey` (28/10/2026, `isValidImageKey`; riesgo residual aceptado: se pueden firmar objetos no listados bajo `gallery/`); `POST /upload-image` sigue sin validar el nombre y el `title` solo sustituye espacios (M5). El `imageKey` frente al listado real de la galería está **(por confirmar)**.
 
 ### S5. Subida de archivos
 
@@ -88,8 +88,8 @@ Rutas de **lectura** públicas (los datos del portal son públicos): `GET /list-
 | CORS con **un único origen** por entorno (`ALLOWED_ORIGIN`) | Solo el frontend debe poder llamar desde un navegador | `quality` prohíbe `origin: '*'` y `cors()` sin opciones | Cumple |
 | Límite del cuerpo JSON explícito | `express.json()` usa el valor por defecto de `body-parser` (100 kb) **(verificado en 1.20.3)**: suficiente hoy, pero implícito | Revisión | Cumple por defecto |
 | Cabeceras de seguridad (`helmet`) | Limitan el daño si algo falla (por ejemplo, `nosniff` en las respuestas) | Revisión | **No cumple** (B1) |
-| **Límite de peticiones** en los endpoints públicos que cuestan (`/send-email`; valorar `/get-merged-data`) | Sin límite, cualquiera puede agotar la cuota de Gmail o la CPU | Revisión | Solo el login lo tiene (M3) |
-| `/send-email` valida **todos** los campos: que existan, que sean cadenas, el formato de `email` y longitudes máximas | `subject`, `username` y `email` entran en el asunto y en `replyTo`; sin validar pueden colarse saltos de línea o direcciones distintas. `nodemailer` normaliza muchas de estas cosas, pero **no confíes en ello** (por confirmar) | Revisión | **No cumple** (M3) |
+| **Límite de peticiones** en los endpoints públicos que cuestan (`/send-email`; valorar `/get-merged-data`) | Sin límite, cualquiera puede agotar la cuota de Gmail o la CPU | Revisión | Cumple en el login y en `/send-email` (5 por 15 minutos por IP, M3 resuelto el 28/10/2026; almacén en memoria, IP real tras el proxy **(por confirmar con infra)**). `/get-merged-data` sin límite |
+| `/send-email` valida **todos** los campos: que existan, que sean cadenas, el formato básico de `email`, longitudes máximas y ausencia de caracteres de control | `subject`, `username` y `email` entran en el asunto y en `replyTo`; sin validar pueden colarse saltos de línea o direcciones distintas. `nodemailer` normaliza muchas de estas cosas, pero **no confíes en ello** (por confirmar) | Revisión | Cumple desde el 28/10/2026 (`validateContactMessage`; M3) |
 | `nodemailer` actualizado | El aviso alto de `nodemailer` incluye **inyección de comandos SMTP** y envío a un dominio no previsto, y el destinatario de respuesta (`replyTo`) sale del usuario | `npm run quality` | **No cumple** (M16) |
 | Sin ejecución de código ni de procesos a partir de la entrada | Es la vulnerabilidad más grave posible | `quality` y ESLint prohíben `eval`, `new Function` y `child_process` | Cumple **(verificado)** |
 | Sin peticiones del servidor a URLs que da el cliente | Evita SSRF | Revisión | Cumple: el servidor solo habla con S3 y SMTP **(verificado)** |
@@ -167,7 +167,7 @@ Solo nombres de categoría; el detalle de cada riesgo está en la fuente.
 | `npm audit` de producción (alta o crítica) | **Pasa**: sin avisos altos o críticos y sin excepciones aceptadas. Solo queda el moderado de `uuid` vía `exceljs` (M20) |
 | ESLint | Sin errores; avisos en el tope (ver [buenas prácticas](buenas-practicas-backend.md#14-eslint-y-el-tope-de-avisos)) |
 | Login con el usuario correcto y sin contraseña | La petición **no recibe respuesta** (A7) |
-| `trust proxy`, `helmet`, límite de `multer`, límite en `/send-email` | Ninguno configurado (M12, B1, M6, M3) |
+| `trust proxy`, `helmet`, límite de `multer`, límite en `/send-email` | `trust proxy` y el límite de `/send-email` configurados; `helmet` y el límite de `multer` no (B1, M6) |
 | Validación de la entrada de las rutas | Parcial: ver la tabla de [buenas prácticas](buenas-practicas-backend.md#4-validación-de-entrada) |
 | `errorHandler` y mensajes al cliente | Sin trazas en producción; devuelve `err.message` sin filtrar (M17) |
 | Bucket: acceso público bloqueado, cifrado y versionado; IAM mínimo | Sí **(verificado en `sigmetum-infra`)** |

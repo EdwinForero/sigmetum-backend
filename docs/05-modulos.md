@@ -42,6 +42,8 @@ Exporta: `validateEnv` (función por defecto).
 | `TERMS_PATH` | `data/terms` | Carpeta del glosario |
 | `TERMS_FILE` | `noLatinTerms.json` | Fichero del glosario |
 | `RESERVED_SEGMENTS` | `['active', 'terms']` | Subcarpetas de `data/` que no son provincias |
+| `IMAGE_KEY_MAX_LENGTH` | `200` | Longitud máxima de un `imageKey` |
+| `IMAGE_KEY_PATTERN` | expresión regular (banderas `u` e `i`, sin `g`) | Forma permitida de un `imageKey`; se aplica con `isValidImageKey` (regla en [06](06-almacenamiento-s3.md#regla-de-imagekey)). Va en forma plana, con dos lookaheads (`(?!.*\/\/)` y `(?!.*\/[.\p{M}])`, que impide que un segmento tras `/` empiece por `.` o por una marca combinante), para no disparar `security/detect-unsafe-regex` |
 
 ---
 
@@ -76,12 +78,13 @@ Todos los routers siguen el mismo patrón: un `router` con rutas públicas y un 
 |---|---|
 | `upload` | Instancia `multer` en memoria |
 | `transporter` | `nodemailer.createTransport` contra `smtp.gmail.com:587` (`secure: false` → STARTTLS) con `EMAIL`/`EMAIL_PASSWORD` |
-| `POST /send-email` | 400 si `username`, `email`, `subject` o `message` no son cadenas o están vacías tras `trim()`; si no, construye `mailOptions` (from/to = `EMAIL`, `replyTo` = email del usuario) y `transporter.sendMail` |
+| `sendEmailLimiter` | `rateLimit({ windowMs: 15 min, max: 5 })` con cabeceras estándar; al superarlo responde 429 con `{ success: false, error }`. Almacén en memoria (se reinicia al reiniciar y se multiplica por instancia). Copia de `loginLimiter`, que usa `max` (obsoleto en `express-rate-limit` 8, B6) |
+| `POST /send-email` | `sendEmailLimiter` → `validateContactMessage(req.body)`; si devuelve `error`, 400; si no, construye `mailOptions` con los valores recortados (from/to = `EMAIL`, `replyTo` = email del usuario) y `transporter.sendMail`. Todo el cuerpo va dentro de `try/catch` con `next(error)`. El limitador cuenta antes de validar; hoy `tokenAuth` (M21) corre antes que el limitador |
 | `GET /list-images` | `getPresignedUrlsFromS3Folder(GALLERY_PATH)` |
-| `GET /get-image` | 400 si `imageKey` falta, está vacío o no es cadena; si no, `getPresignedUrlFromS3(GALLERY_PATH, imageKey)` |
+| `GET /get-image` | 400 si `imageKey` falta, está vacío o no es cadena; 400 `imageKey is not valid` si `isValidImageKey` lo rechaza; si no, `getPresignedUrlFromS3(GALLERY_PATH, imageKey)` |
 | `GET /list-terms` | `getTextJsonS3(TERMS_FILE, TERMS_PATH)` |
 | `POST /upload-image` | 400 si falta el fichero o `title` no es cadena o está vacío. Sustituye espacios del `title` por `_`, añade la extensión del fichero original, `uploadImageToS3` |
-| `DELETE /delete-image` | 400 si `imageKey` falta o no es cadena; `deleteImageFromS3`; si devuelve `success: false` responde 500 |
+| `DELETE /delete-image` | 400 si `imageKey` falta o no es cadena; 400 `imageKey is not valid` si `isValidImageKey` lo rechaza; `deleteImageFromS3`; si devuelve `success: false` responde 500 |
 | `POST /upload-term` | 400 si `term` no es cadena o está vacío tras `trim()`; `uploadTextToJsonS3(term, ...)` |
 | `DELETE /delete-term` | 400 si `term` falta, está vacío o no es cadena; `deleteTermFromS3`; si devuelve `success: false` responde 500 |
 
@@ -110,6 +113,14 @@ Middleware.
 - Sin token → 401 `No token provided`.
 - `jwt.verify` con `JWT_SECRET`: error → 401 `Token expired` o `Invalid token`.
 - Éxito → `req.user = payload` y `next()`.
+
+### `validateImageKey.js` → `isValidImageKey(key)`
+
+Función pura (no lee el entorno ni llama a S3) que decide si un `imageKey` del cliente puede usarse para construir la clave `gallery/{imageKey}`. Devuelve `true` solo si `key` es una cadena, mide entre 1 y `IMAGE_KEY_MAX_LENGTH` (comprobación previa a ejecutar la expresión), cumple `IMAGE_KEY_PATTERN` y no contiene `..`. La comprobación de `..` es defensa en profundidad: `a../b.jpg` (lo que llega tras decodificar `a%2e%2e/b.jpg`) cumple el patrón. La usan `GET /get-image` y `DELETE /delete-image`. Regla completa: [06](06-almacenamiento-s3.md#regla-de-imagekey).
+
+### `validateContactMessage.js` → `validateContactMessage(body)`
+
+Función pura que valida el cuerpo de `POST /send-email` (`body` puede ser `undefined`). Devuelve `{ error }` con un texto fijo en inglés que nombra el campo y la regla, sin reflejar el valor recibido, o `{ value: { username, email, subject, message } }` con los cuatro campos recortados. Reglas, en este orden: los cuatro son cadenas no vacías tras `trim()`; `username` ≤ 100, `subject` ≤ 150, `message` ≤ 2000 y `email` ≤ 254 caracteres (tras recortar); sin ningún carácter de control (`\p{Cc}`: `\r`, `\n`, NUL...) ni U+2028/U+2029 en `username`, `email` ni `subject` (error `username, email and subject must not contain control characters or line breaks`); `message` rechaza `\p{Cc}` salvo `\n`, `\r` y `\t` (error `message must not contain control characters`); `email` pasa una comprobación básica de formato, no un análisis RFC 5322: `^[^\s@,;:<>()'"\\]+@[^\s@,;:<>()'"\\]+\.[^\s@,;:<>()'"\\]+$`. **Límite conocido**: se rechaza un correo con apóstrofo (`o'brien@example.com`), válido en RFC pero poco habitual; si preocupa, **(por confirmar)**. Los límites son constantes del propio archivo.
 
 ### `convertExcelToJson.js` → `convertExcelToJson(input)`
 

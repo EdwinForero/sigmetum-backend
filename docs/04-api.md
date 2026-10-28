@@ -125,7 +125,14 @@ Body: `{ "fileName": "data/Malaga/2026-01-10_v1.xlsx" }` — borra esa versión.
 ### `POST /send-email`
 Body: `{ "username", "email", "subject", "message" }`. Envía un correo desde y hacia `EMAIL`, con `replyTo` al email del usuario y asunto `"{subject} - enviado por {username}<{email}>"`.
 
-`400` `username, email, subject and message are required and must be strings` si falta alguno de los cuatro, no es una cadena o está vacío tras quitar espacios; no se envía correo (antes se enviaba con "undefined"). No se valida el formato del email ni las longitudes, ni hay límite de peticiones (M3). Ver el aviso M21 de arriba.
+Límite: **5 peticiones cada 15 minutos por IP** (`express-rate-limit`, almacén en memoria; también cuentan las peticiones con cuerpo inválido). Respuestas:
+- `200` → `data: "Email sent successfully."`
+- `400` → `username, email, subject and message are required and must be strings` si falta alguno de los cuatro, no es una cadena o está vacío tras quitar espacios (antes se enviaba con "undefined").
+- `400` → mensaje fijo que nombra el campo y la regla, sin reflejar el valor recibido: `username must be at most 100 characters`, `subject must be at most 150 characters`, `message must be at most 2000 characters`, `email must be at most 254 characters` (medidos tras recortar), `username, email and subject must not contain control characters or line breaks` (cualquier carácter de control, U+2028 y U+2029), `message must not contain control characters` (se admiten `
+`, `` y `	` en el mensaje) y `email is not valid` (comprobación básica de formato, no RFC: `algo@dominio.tld` sin espacios, comas, punto y coma, dos puntos, ángulos, paréntesis, comillas ni barra invertida, y con un punto en el dominio; `a@b` se rechaza aunque `type="email"` del navegador lo admita; también se rechaza un correo con apóstrofo como `o'brien@example.com`, válido en RFC pero poco habitual, **(por confirmar)** si preocupa).
+- `429` → `Too many messages. Please try again in 15 minutes.` (envoltorio `{ success: false, error }`; no se envía correo).
+
+Se guardan y se envían los valores recortados. En ningún `400` ni `429` se envía correo (M3 resuelto, ver [07](07-estado-y-deuda-tecnica.md)). Hoy estos códigos solo se alcanzan con un token válido (ver el aviso M21 de arriba): sin token la respuesta sigue siendo `401 No token provided`.
 
 ### `GET /list-images`
 Devuelve todas las imágenes de `gallery/` con URL prefirmada (válida 1 hora):
@@ -134,7 +141,7 @@ Devuelve todas las imágenes de `gallery/` con URL prefirmada (válida 1 hora):
 ```
 
 ### `GET /get-image?imageKey=Encinar.jpg`
-`data: { imageUrl }` — URL prefirmada (1 hora) de una imagen concreta. `400` `imageKey is required` si falta, está vacío o no es una cadena (por ejemplo `?imageKey=a&imageKey=b`); antes respondía `200` con una URL a `gallery/undefined`. La clave se sigue construyendo con texto del cliente sin lista de permitidos (M4, M5). Ver el aviso M21 de arriba.
+`data: { imageUrl }` — URL prefirmada (1 hora) de una imagen concreta. `400` `imageKey is required` si falta, está vacío o no es una cadena (por ejemplo `?imageKey=a&imageKey=b`); antes respondía `200` con una URL a `gallery/undefined`. `400` `imageKey is not valid` si la clave no cumple la lista de permitidos compartida con `DELETE /delete-image` (regla en [06](06-almacenamiento-s3.md#regla-de-imagekey)), antes de llamar a S3. Hoy solo es alcanzable con token (aviso M21 de arriba); sin token da `401`.
 
 ### `GET /list-terms`
 Devuelve el glosario `data/terms/noLatinTerms.json`: `[ { "term": "..." } ]`. Si no existe devuelve `[]`.
@@ -143,7 +150,7 @@ Devuelve el glosario `data/terms/noLatinTerms.json`: `[ { "term": "..." } ]`. Si
 `multipart/form-data` con `file` y `title`. Guarda en `gallery/{title_con_guiones_bajos}{extensión}`. `400` `File and title are required` si falta el fichero o `title` no es una cadena o está vacío (antes, un `title` no cadena daba 500). Un campo multipart con nombre incorrecto da `400` `File upload error: ...` (antes 500).
 
 ### `DELETE /delete-image` 🔒
-Body: `{ "imageKey": "Encinar.jpg" }`. `400` `imageKey is required` si falta o no es una cadena.
+Body: `{ "imageKey": "Encinar.jpg" }`. `400` `imageKey is required` si falta o no es una cadena; `400` `imageKey is not valid` si no cumple la lista de permitidos (misma regla que `GET /get-image`, ver [06](06-almacenamiento-s3.md#regla-de-imagekey)), sin llamar a S3.
 
 ### `POST /upload-term` 🔒
 Body: `{ "term": "texto" }`. Añade el término al glosario. `400` `Term must be a string` si falta o no es una cadena (antes 500); `400` `Term cannot be empty` si está vacío o solo tiene espacios.
