@@ -122,7 +122,7 @@ Rutas de **lectura** públicas (los datos del portal son públicos): `GET /list-
   - Se confirma `package-lock.json` y se instala con `npm ci`.
   - Se corrige con `npm audit fix`, **nunca con `--force`** (subiría `nodemailer` a otra versión mayor sin avisar).
   - **Solo se acepta** lo que no es alcanzable en producción o no tiene arreglo, con la justificación escrita. Que exista un arreglo con cambios mayores **no** es motivo para aceptar un aviso alcanzable.
-  - Antes de añadir una librería: mantenimiento, licencia, tamaño y que funcione con Node 20.
+  - Antes de añadir una librería: mantenimiento, licencia, tamaño y que funcione con Node 22 (`engines` de `package.json`).
 - **Excepciones vigentes** (en `ACCEPTED_ADVISORIES`):
 
 | Dependencia | Gravedad | Por qué se acepta |
@@ -131,7 +131,7 @@ Rutas de **lectura** públicas (los datos del portal son públicos): `GET /list-
 | `@mapbox/node-pre-gyp` | Alta | Herramienta de instalación de `bcrypt`. No se carga en ejecución |
 | `brace-expansion` | Alta | Llega por `minimatch`, en la instalación de `bcrypt` y en `archiver` (que usa `exceljs` al escribir `.xlsx`). Los patrones son internos y no hay entrada del usuario (por confirmar en `exceljs`) |
 
-- **Sin aceptar, alcanzables en producción (M16):** `express` y `path-to-regexp`, `jws` (vía `jsonwebtoken`), `nodemailer`, `fast-xml-parser` (vía el SDK de AWS) e `ip-address` (vía `express-rate-limit`). La puerta de calidad **falla** por ellas hasta que se actualicen. `npm audit fix` resuelve las que no exigen un cambio mayor; `nodemailer` sí lo exige.
+- **Avisos de producción:** sin excepciones aceptadas (`ACCEPTED_ADVISORIES` vacío). M16 y M20 están resueltos; solo queda el moderado de `uuid` vía `exceljs` (M20), cuyo único arreglo exige `--force`. `npm audit fix` resuelve lo que no exige un cambio mayor.
 
 ### S10. Privacidad
 
@@ -164,7 +164,7 @@ Solo nombres de categoría; el detalle de cada riesgo está en la fuente.
 | `.env` versionado / `package-lock.json` versionado | **No** / **Sí** |
 | Rutas que modifican estado sin autenticación | Solo `POST /log` y `POST /send-email` (excepciones registradas) |
 | Variables de entorno que usa el código y no están declaradas | **Ninguna** |
-| `npm audit` de producción (alta o crítica) | **Falla**: `express`, `path-to-regexp`, `jws`, `nodemailer`, `fast-xml-parser` e `ip-address` sin aceptar (M16). `tar`, `@mapbox/node-pre-gyp` y `brace-expansion` aceptadas |
+| `npm audit` de producción (alta o crítica) | **Pasa**: sin avisos altos o críticos y sin excepciones aceptadas. Solo queda el moderado de `uuid` vía `exceljs` (M20) |
 | ESLint | Sin errores; avisos en el tope (ver [buenas prácticas](buenas-practicas-backend.md#14-eslint-y-el-tope-de-avisos)) |
 | Login con el usuario correcto y sin contraseña | La petición **no recibe respuesta** (A7) |
 | `trust proxy`, `helmet`, límite de `multer`, límite en `/send-email` | Ninguno configurado (M12, B1, M6, M3) |
