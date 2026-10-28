@@ -63,7 +63,7 @@ Contra la sección 2 de `../sigmetum-frontend/docs/integracion/para-backend.md` 
 | Autenticación | Cabecera `Authorization: Bearer <token>` en toda ruta protegida (🔒 en [../04-api.md](../04-api.md)) |
 | Cuerpo de las peticiones | JSON con `Content-Type: application/json`, salvo `POST /upload`, `POST /upload/confirm` (multipart) y `POST /upload-image` (multipart) |
 | Campos multipart | `POST /upload`: campo `file`. `POST /upload-image`: campos `file` y `title` |
-| Tipo de fichero en `/upload` | Solo `.xlsx`. Desde el 28/10/2026 el backend responde `400` `File is required` sin fichero y `400` `Only .xlsx files are allowed` si la extensión no es `.xlsx` o el MIME no es el de xlsx, `application/octet-stream` o vacío. El frontend debería restringir el selector (`accept` de `FileUpload`) a `.xlsx` (D3). Un `.xlsx` que el navegador envíe sin tipo MIME podría recibir `400` **(por confirmar con un navegador real)** |
+| Tipo de fichero en `/upload` | Solo `.xlsx`. Desde el 28/10/2026 el backend responde `400` `File is required` sin fichero y `400` `Only .xlsx files are allowed` si la extensión no es `.xlsx` (sin distinguir mayúsculas). El MIME no se comprueba: un `.xlsx` llega aunque el navegador lo etiquete como `application/vnd.ms-excel`, `application/x-zip-compressed`, `text/plain` o sin tipo (compatible, se acepta más). **Cambio visible**: `.xls` y `.xlsm` (y `.csv`, `.txt`) dan `400` por extensión desde el 28/10/2026, con cualquier MIME. El frontend debería restringir el selector (`accept` de `FileUpload`) a `.xlsx` (D3) |
 | `GET /get-data` | **No usarlo para abrir un Excel de versión** (F1): hoy intenta `JSON.parse` de un binario. Úsese solo para leer un JSON ya existente bajo `data/active/` |
 | Límite de peticiones | `POST /log` corta a 10 intentos cada 15 minutos por IP y responde `429` con `{ success: false, error }`. El frontend debería distinguir ese código del resto (`frontend:D7`) |
 | CORS | El origen debe coincidir **exactamente** con `ALLOWED_ORIGIN` del entorno; sin barra final |
@@ -76,7 +76,7 @@ Clasificación de `D1` a `D9` de `../sigmetum-frontend/docs/integracion/para-bac
 |---|---|---|
 | `frontend:D1` (F1) | Backend y frontend | Crear un endpoint que convierta un Excel de versión en registros (`convertExcelToJson`), limitado a claves `data/{provincia}/AAAA-MM-DD_vN.xlsx`. No cerrar `GET /get-data` hasta entonces |
 | `frontend:D2` | Solo frontend | Ninguna; el formato `AAAA-MM-DD_vN.xlsx` no cambia sin aviso |
-| `frontend:D3` | Frontend y backend | Parte de backend resuelta el 28/10/2026 (`req.file` y extensión `.xlsx` en `POST /upload`, 400). Pendiente solo el `accept` de `FileUpload` en el frontend |
+| `frontend:D3` | Frontend y backend | Parte de backend resuelta el 28/10/2026 (`req.file` y solo extensión `.xlsx` en `POST /upload`, 400; `.xls` y `.xlsm` se rechazan por extensión). Pendiente solo el `accept` de `FileUpload` en el frontend |
 | `frontend:D4` | Solo frontend | Ninguna |
 | `frontend:D5` (F3) | Backend | Devolver `[]` en vez de 500 cuando la galería está vacía |
 | `frontend:D6` | Solo frontend | Ninguna |

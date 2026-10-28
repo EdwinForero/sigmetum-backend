@@ -65,8 +65,7 @@ Todos los routers siguen el mismo patrón: un `router` con rutas públicas y un 
 | `GET /list-files` | `listFilesInS3Folder('data/')`, agrupa por el segundo segmento de la clave descartando `RESERVED_SEGMENTS` |
 | `GET /get-data/:path(*)` | `getFileFromS3(path)` |
 | `GET /get-merged-data` | `getMergedDataInS3Folder(ACTIVE_PATH)` |
-| `ALLOWED_XLSX_MIMES` | MIME aceptados en `/upload`: el de xlsx, `application/octet-stream` y vacío (el cliente manda el MIME; la extensión es la comprobación real) |
-| `POST /upload` | Sin `req.file` → 400; extensión distinta de `.xlsx` o MIME fuera de `ALLOWED_XLSX_MIMES` → 400. Después `convertExcelToJson` → `getNextVersion` → `formatFileName` → `uploadFileToS3` (Excel) → si no hay vacíos, `uploadFileToS3` (JSON activo); si hay vacíos, 400 con `draftKey` |
+| `POST /upload` | Sin `req.file` → 400; extensión distinta de `.xlsx` → 400 (el MIME no se comprueba en esta ruta: lo manda el cliente). Después `convertExcelToJson` → `getNextVersion` → `formatFileName` → `uploadFileToS3` (Excel) → si no hay vacíos, `uploadFileToS3` (JSON activo); si hay vacíos, 400 con `draftKey` |
 | `POST /upload/confirm` | 400 si `draftKey` falta o no es cadena. `confirmed` falso → `deleteFileFromS3(draftKey)`; verdadero → `updateFileS3(draftKey)` |
 | `POST /update-file` | 400 si `fileName` falta o no es cadena; `updateFileS3(fileName)` |
 | `POST /delete-file` | 400 si `fileName` falta o no es cadena; `deleteFileFromS3(fileName)` |

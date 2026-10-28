@@ -76,7 +76,7 @@ Rutas de **lectura** públicas (los datos del portal son públicos): `GET /list-
 | Regla | Por qué | Estado |
 |---|---|---|
 | `multer` con `limits.fileSize` | `memoryStorage` guarda el fichero entero en RAM: un fichero enorme tumba el proceso | **No cumple** (M6) |
-| Se valida la **extensión y el tipo**: `.xlsx` para datos; `image/jpeg`, `image/png`, `image/webp` para la galería | El backend solo procesa `.xlsx`; el `ContentType` de las imágenes lo pone el cliente | **No cumple** (D3, M5) |
+| Se valida la **extensión y el tipo**: para datos (`/upload`), la extensión `.xlsx`, sin comprobar el MIME porque lo manda el cliente; `image/jpeg`, `image/png`, `image/webp` para la galería | El backend solo procesa `.xlsx`; el `ContentType` de las imágenes lo pone el cliente. Un fichero con nombre `.xlsx` se carga entero en memoria y `exceljs` lo descomprime sin límite (M6, M9); la ruta exige JWT y es solo del administrador | **No cumple** (D3, M5) |
 | Un `.xlsx` es un zip: se trata como **no confiable** (zip bomb, libros con millones de filas) | `exceljs` lo carga entero en memoria y no hay límite de descompresión **(por confirmar)** | Sin límites (M9). Mitigado porque solo el administrador sube ficheros |
 | El procesamiento pesado sale de la petición si el volumen crece | Una conversión larga bloquea el event loop | M9 |
 | Se comprueba que la subida llegó a S3 antes de dar el éxito | Un fallo parcial deja datos a medias | Cumple: se espera a cada `putObject` |

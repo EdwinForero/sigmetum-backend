@@ -84,7 +84,7 @@ Concatena en un único array todos los JSON de `data/active/`. Es el endpoint qu
 
 Validación antes de procesar:
 - Sin fichero → `400` `File is required`.
-- Extensión distinta de `.xlsx` (sin distinguir mayúsculas) o MIME fuera de {el de xlsx, `application/octet-stream`, vacío} → `400` `Only .xlsx files are allowed`. La extensión es la comprobación real; el MIME lo manda el cliente y se tolera. Un `.xlsx` sin tipo MIME podría llegar como `text/plain` y recibir 400 **(por confirmar con un navegador real)**.
+- Extensión distinta de `.xlsx` (sin distinguir mayúsculas; `.xls`, `.xlsm`, `.csv` y `.txt` entre ellas) → `400` `Only .xlsx files are allowed`, con cualquier MIME. En `/upload` el MIME no se comprueba (desde el 28/10/2026) porque lo manda el cliente; la extensión es la única comprobación de tipo. Un fichero que no es un libro válido pero se llama `.xlsx` llega a `convertExcelToJson` y responde `500` con el `err.message` de `exceljs` (M17), por ejemplo `Can't find end of central directory…` si no es un zip, o `Cannot read properties of undefined (reading 'eachRow')` si el libro está vacío. `/upload-image` sí sigue confiando en el MIME (M5).
 - Campo multipart con otro nombre (`MulterError`, p. ej. `Unexpected field`) → `400` `File upload error: ...` (antes 500).
 
 1. Convierte el Excel a JSON (`convertExcelToJson`).

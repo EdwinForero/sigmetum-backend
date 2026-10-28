@@ -19,13 +19,6 @@ const { DATA_PATH, ACTIVE_PATH, RESERVED_SEGMENTS } = require('../config/s3Paths
 
 const upload = multer({ storage: multer.memoryStorage() });
 
-// The client sends the MIME type and some browsers omit it, so it is tolerant; the extension is the real check.
-const ALLOWED_XLSX_MIMES = [
-    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    'application/octet-stream',
-    '',
-];
-
 // ─── Public routes ───────────────────────────────────────────────────────────
 
 router.get('/list-files', async (req, res, next) => {
@@ -78,8 +71,9 @@ protectedRouter.post('/upload', upload.single('file'), async (req, res, next) =>
             return res.status(400).json({ success: false, error: 'File is required' });
         }
 
+        // The client sends the MIME type, so it is not checked; the extension is the real check.
         const isXlsx = path.extname(req.file.originalname).toLowerCase() === '.xlsx';
-        if (!isXlsx || !ALLOWED_XLSX_MIMES.includes(req.file.mimetype)) {
+        if (!isXlsx) {
             return res.status(400).json({ success: false, error: 'Only .xlsx files are allowed' });
         }
 

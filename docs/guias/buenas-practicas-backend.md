@@ -59,7 +59,7 @@ Qué validar y dónde, con el estado real de cada ruta:
 | Ruta | Entrada | Valida hoy | Falta |
 |---|---|---|---|
 | `POST /log` | `username`, `password` | Que ambos sean cadenas (400); después usuario y contraseña (401) | Nada pendiente de tipo (A7 resuelto) |
-| `POST /upload` | `file` (multipart) | Que exista (400); extensión `.xlsx` y MIME en {xlsx, `application/octet-stream`, vacío} (400); `MulterError` a 400 | Tamaño máximo (M6); la provincia del Excel (A4). El MIME es tolerante porque lo manda el cliente |
+| `POST /upload` | `file` (multipart) | Que exista (400); extensión `.xlsx` (400); `MulterError` a 400 | Tamaño máximo (M6); la provincia del Excel (A4). En esta ruta el MIME no se comprueba porque lo manda el cliente y no es fiable |
 | `POST /upload/confirm` | `draftKey`, `confirmed` | `draftKey` cadena no vacía (400) | Que `draftKey` tenga el formato `data/{provincia}/AAAA-MM-DD_vN.xlsx` y que `confirmed` sea booleano (M4) |
 | `POST /update-file`, `POST /delete-file` | `fileName` | Cadena no vacía (400) | Formato de clave `data/{provincia}/AAAA-MM-DD_vN.xlsx` (M4) |
 | `GET /get-data/:path(*)` | `path` | Nada | Restringir a `data/active/` (M2) |
