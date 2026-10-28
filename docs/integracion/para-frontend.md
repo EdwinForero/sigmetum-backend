@@ -14,7 +14,9 @@ Documento para quien mantiene `sigmetum-frontend`. Sigue la convención de [../g
 | **F1** | `GET /get-data/:path(*)` es público y lee cualquier clave del bucket, pero es el único endpoint que puede abrir una versión histórica | El frontend lo usa para abrir un Excel de versión, que hoy da error (`frontend:D1`). No se puede cerrar sin dar antes un sustituto |
 | **F2** | `POST /upload` responde el `processedData` completo en el 400 de fila vacía | Con un Excel grande, la respuesta pesa más de lo necesario; el frontend no lo usa (`frontend:D8`) |
 | **F3** | `GET /list-images` responde 500 si la galería está vacía, en vez de `[]` | El frontend trata ese 500 como "error al cargar" en lugar de "sin imágenes" (`frontend:D5`) |
-| **F4** | El login (`POST /log`) puede quedarse sin responder si falta `password` | Una petición del frontend sin ese campo no recibiría respuesta (hallazgo interno A7, no reportado por el frontend) |
+| **F4** | ~~El login (`POST /log`) puede quedarse sin responder si falta `password`~~ **Resuelto el 28/10/2026**: ahora responde `400` si `username` o `password` no son cadenas | El frontend puede no distinguir un `400` de un `401` en el login **(por confirmar)**; antes la petición no recibía respuesta (hallazgo interno A7) |
+| **F5** | `GET /get-image` sin `imageKey` pasa de `200` (URL a `gallery/undefined`) a `400` `imageKey is required` (28/10/2026) | Que el frontend no la llame sin clave está **(por confirmar)** |
+| **F6** | `tokenAuth` se ejecuta también para `POST /send-email`, `GET /get-image`, `GET /list-images` y `GET /list-terms`, que [../04-api.md](../04-api.md) marca como públicas: sin token responden `401 No token provided` **(verificado con una petición real a un servidor local; en producción por confirmar)** | Si ocurre en producción, el formulario de contacto y la galería no funcionan sin sesión. Hallazgo interno M21; decidir con el frontend si deben ser públicas |
 
 ## 2. Qué garantiza el backend
 
@@ -24,7 +26,7 @@ Documento para quien mantiene `sigmetum-frontend`. Sigue la convención de [../g
 |---|---|
 | Envoltorio único | Toda respuesta es `{ success: true, data }` o `{ success: false, error }` **(verificado)** |
 | Éxito | `response.ok` (2xx) y `success: true` van siempre juntos |
-| Códigos usados hoy | `200` éxito, `400` entrada inválida (parcial: ver F4 y el hallazgo interno A3), `401` sin token o inválido, `429` límite de intentos del login, `500` fallo interno o de S3 |
+| Códigos usados hoy | `200` éxito, `400` entrada inválida (desde el 28/10/2026 también `POST /log` sin `username` o `password` de tipo cadena, `/upload`, `/upload/confirm`, `/update-file`, `/delete-file`, `/upload-term`, `/upload-image`, `/delete-image`, `/delete-term`, `GET /get-image` sin `imageKey`, `POST /send-email` con campos ausentes y errores de multipart; hallazgo A3), `401` sin token o inválido, `429` límite de intentos del login, `500` fallo interno o de S3 |
 | No usados hoy, pero reservados por la garantía de versionado | `403`, `404` explícitos (hoy varios casos devuelven 500; ver la nota de la sección 5) |
 | Mensaje de error | `error` es un texto en inglés, pensado para depurar, no para mostrar tal cual al usuario (coincide con lo que ya hace `services/api.js`) |
 
@@ -61,7 +63,7 @@ Contra la sección 2 de `../sigmetum-frontend/docs/integracion/para-backend.md` 
 | Autenticación | Cabecera `Authorization: Bearer <token>` en toda ruta protegida (🔒 en [../04-api.md](../04-api.md)) |
 | Cuerpo de las peticiones | JSON con `Content-Type: application/json`, salvo `POST /upload`, `POST /upload/confirm` (multipart) y `POST /upload-image` (multipart) |
 | Campos multipart | `POST /upload`: campo `file`. `POST /upload-image`: campos `file` y `title` |
-| Tipo de fichero en `/upload` | Solo `.xlsx` (`workbook.xlsx.load`); el backend no valida hoy la extensión, así que un fichero de otro tipo no da un error claro (hallazgo interno A3/D3: el frontend debería restringir el selector a `.xlsx`, no solo mostrar más tipos de los que el backend acepta) |
+| Tipo de fichero en `/upload` | Solo `.xlsx`. Desde el 28/10/2026 el backend responde `400` `File is required` sin fichero y `400` `Only .xlsx files are allowed` si la extensión no es `.xlsx` o el MIME no es el de xlsx, `application/octet-stream` o vacío. El frontend debería restringir el selector (`accept` de `FileUpload`) a `.xlsx` (D3). Un `.xlsx` que el navegador envíe sin tipo MIME podría recibir `400` **(por confirmar con un navegador real)** |
 | `GET /get-data` | **No usarlo para abrir un Excel de versión** (F1): hoy intenta `JSON.parse` de un binario. Úsese solo para leer un JSON ya existente bajo `data/active/` |
 | Límite de peticiones | `POST /log` corta a 10 intentos cada 15 minutos por IP y responde `429` con `{ success: false, error }`. El frontend debería distinguir ese código del resto (`frontend:D7`) |
 | CORS | El origen debe coincidir **exactamente** con `ALLOWED_ORIGIN` del entorno; sin barra final |
@@ -74,7 +76,7 @@ Clasificación de `D1` a `D9` de `../sigmetum-frontend/docs/integracion/para-bac
 |---|---|---|
 | `frontend:D1` (F1) | Backend y frontend | Crear un endpoint que convierta un Excel de versión en registros (`convertExcelToJson`), limitado a claves `data/{provincia}/AAAA-MM-DD_vN.xlsx`. No cerrar `GET /get-data` hasta entonces |
 | `frontend:D2` | Solo frontend | Ninguna; el formato `AAAA-MM-DD_vN.xlsx` no cambia sin aviso |
-| `frontend:D3` | Frontend y backend | Validar `req.file` y la extensión en `POST /upload` (hoy da 500 sin fichero) |
+| `frontend:D3` | Frontend y backend | Parte de backend resuelta el 28/10/2026 (`req.file` y extensión `.xlsx` en `POST /upload`, 400). Pendiente solo el `accept` de `FileUpload` en el frontend |
 | `frontend:D4` | Solo frontend | Ninguna |
 | `frontend:D5` (F3) | Backend | Devolver `[]` en vez de 500 cuando la galería está vacía |
 | `frontend:D6` | Solo frontend | Ninguna |

@@ -14,21 +14,29 @@ const users = [
   }
 ];
 
-const userAuth = async (req, res) => {
-  const { username, password } = req.body;
-  const user = users.find(u => u.username === username);
-  if (!user) {
-    return res.status(401).json({ success: false, error: 'Invalid credentials' });
+const userAuth = async (req, res, next) => {
+  try {
+    const { username, password } = req.body;
+    if (typeof username !== 'string' || typeof password !== 'string') {
+      return res.status(400).json({ success: false, error: 'Username and password are required and must be strings' });
+    }
+
+    const user = users.find(u => u.username === username);
+    if (!user) {
+      return res.status(401).json({ success: false, error: 'Invalid credentials' });
+    }
+
+    const isPasswordValid = await bcrypt.compare(password, user.password);
+    if (!isPasswordValid) {
+      return res.status(401).json({ success: false, error: 'Invalid credentials' });
+    }
+
+    const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: JWT_EXPIRATION });
+
+    res.json({ success: true, data: { token } });
+  } catch (error) {
+    next(error);
   }
-
-  const isPasswordValid = await bcrypt.compare(password, user.password);
-  if (!isPasswordValid) {
-    return res.status(401).json({ success: false, error: 'Invalid credentials' });
-  }
-
-  const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: JWT_EXPIRATION });
-
-  res.json({ success: true, data: { token } });
 };
 
 module.exports = { userAuth };

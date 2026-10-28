@@ -31,6 +31,14 @@ const transporter = nodemailer.createTransport({
 
 router.post('/send-email', async (req, res, next) => {
     const { username, email, subject, message } = req.body;
+    const fields = [username, email, subject, message];
+    if (fields.some(f => typeof f !== 'string' || !f.trim())) {
+        return res.status(400).json({
+            success: false,
+            error: 'username, email, subject and message are required and must be strings',
+        });
+    }
+
     const mailOptions = {
         from: process.env.EMAIL,
         to: process.env.EMAIL,
@@ -57,7 +65,12 @@ router.get('/list-images', async (req, res, next) => {
 
 router.get('/get-image', async (req, res, next) => {
     try {
-        const imageUrl = await getPresignedUrlFromS3(GALLERY_PATH, req.query.imageKey);
+        const { imageKey } = req.query;
+        if (typeof imageKey !== 'string' || !imageKey) {
+            return res.status(400).json({ success: false, error: 'imageKey is required' });
+        }
+
+        const imageUrl = await getPresignedUrlFromS3(GALLERY_PATH, imageKey);
         res.json({ success: true, data: { imageUrl } });
     } catch (error) {
         next(error);
@@ -83,7 +96,7 @@ protectedRouter.post('/upload-image', upload.single('file'), async (req, res, ne
         const file = req.file;
         const title = req.body.title;
 
-        if (!file || !title) {
+        if (!file || typeof title !== 'string' || !title) {
             return res.status(400).json({ success: false, error: 'File and title are required' });
         }
 
@@ -101,7 +114,7 @@ protectedRouter.post('/upload-image', upload.single('file'), async (req, res, ne
 protectedRouter.delete('/delete-image', async (req, res, next) => {
     const { imageKey } = req.body;
 
-    if (!imageKey) {
+    if (typeof imageKey !== 'string' || !imageKey) {
         return res.status(400).json({ success: false, error: 'imageKey is required' });
     }
 
@@ -120,7 +133,10 @@ protectedRouter.delete('/delete-image', async (req, res, next) => {
 protectedRouter.post('/upload-term', async (req, res, next) => {
     try {
         const { term } = req.body;
-        if (!term || !term.trim()) {
+        if (typeof term !== 'string') {
+            return res.status(400).json({ success: false, error: 'Term must be a string' });
+        }
+        if (!term.trim()) {
             return res.status(400).json({ success: false, error: 'Term cannot be empty' });
         }
 
@@ -134,7 +150,7 @@ protectedRouter.post('/upload-term', async (req, res, next) => {
 protectedRouter.delete('/delete-term', async (req, res, next) => {
     const { term } = req.body;
 
-    if (!term) {
+    if (typeof term !== 'string' || !term) {
         return res.status(400).json({ success: false, error: 'Term is required' });
     }
 

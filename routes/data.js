@@ -1,5 +1,6 @@
 const express = require('express');
 const multer = require('multer');
+const path = require('path');
 const router = express.Router();
 
 const { tokenAuth } = require('../functions/tokenAuthentication');
@@ -17,6 +18,13 @@ const {
 const { DATA_PATH, ACTIVE_PATH, RESERVED_SEGMENTS } = require('../config/s3Paths');
 
 const upload = multer({ storage: multer.memoryStorage() });
+
+// The client sends the MIME type and some browsers omit it, so it is tolerant; the extension is the real check.
+const ALLOWED_XLSX_MIMES = [
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/octet-stream',
+    '',
+];
 
 // ─── Public routes ───────────────────────────────────────────────────────────
 
@@ -66,6 +74,15 @@ protectedRouter.use(tokenAuth);
 
 protectedRouter.post('/upload', upload.single('file'), async (req, res, next) => {
     try {
+        if (!req.file) {
+            return res.status(400).json({ success: false, error: 'File is required' });
+        }
+
+        const isXlsx = path.extname(req.file.originalname).toLowerCase() === '.xlsx';
+        if (!isXlsx || !ALLOWED_XLSX_MIMES.includes(req.file.mimetype)) {
+            return res.status(400).json({ success: false, error: 'Only .xlsx files are allowed' });
+        }
+
         const { processedData, emptyFields } = await convertExcelToJson(req.file.buffer);
 
         if (!processedData || !Array.isArray(processedData)) {
@@ -108,7 +125,7 @@ protectedRouter.post('/upload/confirm', async (req, res, next) => {
     try {
         const { confirmed, draftKey } = req.body;
 
-        if (!draftKey) {
+        if (typeof draftKey !== 'string' || !draftKey) {
             return res.status(400).json({ success: false, error: 'draftKey is required' });
         }
 
@@ -130,6 +147,10 @@ protectedRouter.post('/upload/confirm', async (req, res, next) => {
 protectedRouter.post('/update-file', async (req, res, next) => {
     try {
         const { fileName } = req.body;
+        if (typeof fileName !== 'string' || !fileName) {
+            return res.status(400).json({ success: false, error: 'fileName is required' });
+        }
+
         await updateFileS3(fileName);
         res.json({ success: true, data: 'Active version updated successfully.' });
     } catch (error) {
@@ -140,6 +161,10 @@ protectedRouter.post('/update-file', async (req, res, next) => {
 protectedRouter.post('/delete-file', async (req, res, next) => {
     try {
         const { fileName } = req.body;
+        if (typeof fileName !== 'string' || !fileName) {
+            return res.status(400).json({ success: false, error: 'fileName is required' });
+        }
+
         await deleteFileFromS3(fileName);
         res.json({ success: true, data: 'File deleted successfully.' });
     } catch (error) {

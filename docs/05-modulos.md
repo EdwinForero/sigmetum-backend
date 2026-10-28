@@ -47,7 +47,7 @@ Exporta: `validateEnv` (función por defecto).
 
 ## `routes/`
 
-Todos los routers siguen el mismo patrón: un `router` con rutas públicas y un `protectedRouter` con `tokenAuth`, montado al final con `router.use(protectedRouter)`.
+Todos los routers siguen el mismo patrón: un `router` con rutas públicas y un `protectedRouter` con `tokenAuth`, montado al final con `router.use(protectedRouter)`. Como se monta sin ruta propia, `tokenAuth` también se ejecuta para las peticiones que `data.js` no resuelve y que deberían llegar a `content.js` (M21 de [07](07-estado-y-deuda-tecnica.md)).
 
 ### `auth.js`
 
@@ -65,10 +65,11 @@ Todos los routers siguen el mismo patrón: un `router` con rutas públicas y un 
 | `GET /list-files` | `listFilesInS3Folder('data/')`, agrupa por el segundo segmento de la clave descartando `RESERVED_SEGMENTS` |
 | `GET /get-data/:path(*)` | `getFileFromS3(path)` |
 | `GET /get-merged-data` | `getMergedDataInS3Folder(ACTIVE_PATH)` |
-| `POST /upload` | `convertExcelToJson` → `getNextVersion` → `formatFileName` → `uploadFileToS3` (Excel) → si no hay vacíos, `uploadFileToS3` (JSON activo); si hay vacíos, 400 con `draftKey` |
-| `POST /upload/confirm` | `confirmed` falso → `deleteFileFromS3(draftKey)`; verdadero → `updateFileS3(draftKey)` |
-| `POST /update-file` | `updateFileS3(fileName)` |
-| `POST /delete-file` | `deleteFileFromS3(fileName)` |
+| `ALLOWED_XLSX_MIMES` | MIME aceptados en `/upload`: el de xlsx, `application/octet-stream` y vacío (el cliente manda el MIME; la extensión es la comprobación real) |
+| `POST /upload` | Sin `req.file` → 400; extensión distinta de `.xlsx` o MIME fuera de `ALLOWED_XLSX_MIMES` → 400. Después `convertExcelToJson` → `getNextVersion` → `formatFileName` → `uploadFileToS3` (Excel) → si no hay vacíos, `uploadFileToS3` (JSON activo); si hay vacíos, 400 con `draftKey` |
+| `POST /upload/confirm` | 400 si `draftKey` falta o no es cadena. `confirmed` falso → `deleteFileFromS3(draftKey)`; verdadero → `updateFileS3(draftKey)` |
+| `POST /update-file` | 400 si `fileName` falta o no es cadena; `updateFileS3(fileName)` |
+| `POST /delete-file` | 400 si `fileName` falta o no es cadena; `deleteFileFromS3(fileName)` |
 
 ### `content.js`
 
@@ -76,24 +77,26 @@ Todos los routers siguen el mismo patrón: un `router` con rutas públicas y un 
 |---|---|
 | `upload` | Instancia `multer` en memoria |
 | `transporter` | `nodemailer.createTransport` contra `smtp.gmail.com:587` (`secure: false` → STARTTLS) con `EMAIL`/`EMAIL_PASSWORD` |
-| `POST /send-email` | Construye `mailOptions` (from/to = `EMAIL`, `replyTo` = email del usuario) y `transporter.sendMail` |
+| `POST /send-email` | 400 si `username`, `email`, `subject` o `message` no son cadenas o están vacías tras `trim()`; si no, construye `mailOptions` (from/to = `EMAIL`, `replyTo` = email del usuario) y `transporter.sendMail` |
 | `GET /list-images` | `getPresignedUrlsFromS3Folder(GALLERY_PATH)` |
-| `GET /get-image` | `getPresignedUrlFromS3(GALLERY_PATH, imageKey)` |
+| `GET /get-image` | 400 si `imageKey` falta, está vacío o no es cadena; si no, `getPresignedUrlFromS3(GALLERY_PATH, imageKey)` |
 | `GET /list-terms` | `getTextJsonS3(TERMS_FILE, TERMS_PATH)` |
-| `POST /upload-image` | Sustituye espacios del `title` por `_`, añade la extensión del fichero original, `uploadImageToS3` |
-| `DELETE /delete-image` | `deleteImageFromS3`; si devuelve `success: false` responde 500 |
-| `POST /upload-term` | `uploadTextToJsonS3(term, ...)` |
-| `DELETE /delete-term` | `deleteTermFromS3`; si devuelve `success: false` responde 500 |
+| `POST /upload-image` | 400 si falta el fichero o `title` no es cadena o está vacío. Sustituye espacios del `title` por `_`, añade la extensión del fichero original, `uploadImageToS3` |
+| `DELETE /delete-image` | 400 si `imageKey` falta o no es cadena; `deleteImageFromS3`; si devuelve `success: false` responde 500 |
+| `POST /upload-term` | 400 si `term` no es cadena o está vacío tras `trim()`; `uploadTextToJsonS3(term, ...)` |
+| `DELETE /delete-term` | 400 si `term` falta, está vacío o no es cadena; `deleteTermFromS3`; si devuelve `success: false` responde 500 |
 
 ---
 
 ## `functions/`
 
-### `userAuthentication.js` → `userAuth(req, res)`
+### `userAuthentication.js` → `userAuth(req, res, next)`
 
-Handler de login (no middleware: no llama a `next`).
+Handler de login (no es middleware: solo llama a `next(error)` ante un fallo inesperado).
 
 - Construye en memoria un array `users` con un único usuario `{ id: 1, username: ADMIN_USERNAME, password: ADMIN_PASSWORD }`.
+- Todo el cuerpo va dentro de `try/catch`; un fallo inesperado llega a `errorHandler` con `next(error)`.
+- Si `username` o `password` no son cadenas (ausentes, número, objeto, `null`) → 400 `Username and password are required and must be strings`.
 - Busca por `username`; si no existe → 401.
 - `bcrypt.compare(password, user.password)`; si falla → 401. **`ADMIN_PASSWORD` debe ser un hash bcrypt.**
 - Firma `jwt.sign({ userId }, JWT_SECRET, { expiresIn: JWT_EXPIRATION })` y responde `{ token }`.
@@ -217,4 +220,4 @@ Crea un único cliente `S3` (clase agregada de SDK v3) con `AWS_REGION` y, en lo
 |---|---|
 | `isDev` | `NODE_ENV === 'local'` |
 | `friendlyMessage(err)` | Mapea `err.name` / `err.code` / `err.Code` a mensajes legibles (tabla en [04-api.md](04-api.md#errores-comunes)) |
-| `errorHandler(err, req, res, next)` | Status = `err.status \|\| err.statusCode \|\| 500`. En local loguea el stack; en otros entornos sólo el mensaje. Responde `{ success: false, error }` |
+| `errorHandler(err, req, res, next)` | Status = `err.status \|\| err.statusCode`, o 400 si `err.name === 'MulterError'`, o 500. En local loguea el stack; en otros entornos sólo el mensaje. Responde `{ success: false, error }` |

@@ -16,7 +16,7 @@ const friendlyMessage = (err) => {
 };
 
 const errorHandler = (err, req, res, next) => {
-    const status = err.status || err.statusCode || 500;
+    const status = err.status || err.statusCode || (err.name === 'MulterError' ? 400 : 500);
     const message = friendlyMessage(err);
 
     if (isDev) {

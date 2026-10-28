@@ -40,8 +40,8 @@ Nombres: archivos en `camelCase` (`awsS3connect.js` es la excepción con minúsc
 |---|---|---|---|
 | Toda ruta responde `{ success: true, data }` o `{ success: false, error }` | El frontend solo considera éxito `response.ok` **y** `success === true` (contrato en `../sigmetum-frontend/docs/integracion/para-backend.md`) | Revisión; `docs:check` comprueba la documentación | Cumple |
 | Los fallos inesperados se pasan con `next(error)` a `middleware/errorHandler.js`; las validaciones de entrada responden 400 directamente | Un único sitio da forma a los errores y decide qué se loguea | Skill `new-endpoint` | Cumple en las rutas de S3 y de contenido |
-| **Todo manejador `async` captura sus errores** (`try/catch` + `next`) | Express 4 **no** captura las promesas rechazadas: la petición se queda colgada y el error acaba en `unhandledRejection` | Revisión | **No cumple**: `userAuth` no tiene `try/catch`. Con el usuario correcto y sin contraseña, `bcrypt.compare` rechaza y la petición no recibe respuesta **(verificado ejecutándolo)** (A7) |
-| Códigos HTTP correctos: **400** entrada inválida, **401** sin token o token inválido, **404** recurso inexistente, **429** límite de peticiones, **500** solo fallos propios | El frontend y quien use la API distinguen el caso por el código | Tests de cada ruta (cuando existan) | **No cumple**: `POST /upload` sin fichero da 500 (A3); `NoSuchKey` de S3 da 500 porque el error del SDK no trae `status` (B9, por confirmar) |
+| **Todo manejador `async` captura sus errores** (`try/catch` + `next`) | Express 4 **no** captura las promesas rechazadas: la petición se queda colgada y el error acaba en `unhandledRejection` | Revisión | Cumple en el código tocado el 28/10/2026 (A7 resuelto: `userAuth` ya captura y llama a `next(error)`). Queda por revisar el resto de manejadores |
+| Códigos HTTP correctos: **400** entrada inválida, **401** sin token o token inválido, **404** recurso inexistente, **429** límite de peticiones, **500** solo fallos propios | El frontend y quien use la API distinguen el caso por el código | Tests de cada ruta (cuando existan) | **Cumple en las rutas de A3 resueltas el 28/10/2026** (entrada ausente o de tipo incorrecto responde 400; `MulterError` también); `NoSuchKey` de S3 da 500 porque el error del SDK no trae `status` (B9, por confirmar) |
 | El mensaje de error al cliente es **controlado**, no `err.message` tal cual | Un error interno puede revelar rutas, claves o nombres de librerías | Revisión de `errorHandler.js` | **No cumple**: `friendlyMessage` devuelve `err.message` para cualquier error no mapeado, también en producción (M17) |
 | No cambies la forma de una respuesta sin revisar el contrato con el frontend | Rompe la web sin avisar | [mantenimiento.md](mantenimiento.md), sección 6 | — |
 | Los mensajes de la API se añaden en inglés y estables. Si el frontend necesita distinguirlos, se acuerda un `code` | El frontend **no muestra** el texto del servidor | Revisión | Hoy no existe `code` |
@@ -58,18 +58,20 @@ Qué validar y dónde, con el estado real de cada ruta:
 
 | Ruta | Entrada | Valida hoy | Falta |
 |---|---|---|---|
-| `POST /log` | `username`, `password` | Comprueba usuario y contraseña | Que sean cadenas. Sin `password` la petición se cuelga (A7) |
-| `POST /upload` | `file` (multipart) | Nada | Que exista, que sea `.xlsx`, tamaño máximo (A3, D3, M6); la provincia del Excel (A4) |
-| `POST /upload/confirm` | `draftKey`, `confirmed` | `draftKey` presente | Que `draftKey` tenga el formato `data/{provincia}/AAAA-MM-DD_vN.xlsx` y que `confirmed` sea booleano (M4) |
-| `POST /update-file`, `POST /delete-file` | `fileName` | Nada | Existencia, tipo y formato de clave (M4). Sin `fileName`, `filePath.split` lanza `TypeError` (500) |
+| `POST /log` | `username`, `password` | Que ambos sean cadenas (400); después usuario y contraseña (401) | Nada pendiente de tipo (A7 resuelto) |
+| `POST /upload` | `file` (multipart) | Que exista (400); extensión `.xlsx` y MIME en {xlsx, `application/octet-stream`, vacío} (400); `MulterError` a 400 | Tamaño máximo (M6); la provincia del Excel (A4). El MIME es tolerante porque lo manda el cliente |
+| `POST /upload/confirm` | `draftKey`, `confirmed` | `draftKey` cadena no vacía (400) | Que `draftKey` tenga el formato `data/{provincia}/AAAA-MM-DD_vN.xlsx` y que `confirmed` sea booleano (M4) |
+| `POST /update-file`, `POST /delete-file` | `fileName` | Cadena no vacía (400) | Formato de clave `data/{provincia}/AAAA-MM-DD_vN.xlsx` (M4) |
 | `GET /get-data/:path(*)` | `path` | Nada | Restringir a `data/active/` (M2) |
-| `GET /get-image` | `imageKey` | Nada | Que exista y sea un nombre simple. Sin él se firma la clave `gallery/undefined` y responde 200 con una URL que dará 404 |
-| `POST /upload-image` | `file`, `title` | Ambos presentes | Tipo MIME y extensión, tamaño, saneo completo del título (M5, M6) |
-| `DELETE /delete-image` | `imageKey` | Presente | Que sea un nombre simple |
-| `POST /upload-term`, `DELETE /delete-term` | `term` | Presente y no vacío | Que sea una cadena (con un número, `term.trim()` lanza `TypeError` y responde 500) y longitud máxima |
-| `POST /send-email` | `username`, `email`, `subject`, `message` | Nada | Que existan, sean cadenas, formato de correo y longitudes. Sin campos se envía un correo con "undefined" (M3) |
+| `GET /get-image` | `imageKey` | Cadena no vacía (400; cubre `?imageKey=a&imageKey=b`) | Que sea un nombre simple (M4, M5): la clave se construye con texto del cliente |
+| `POST /upload-image` | `file`, `title` | `file` presente y `title` cadena no vacía (400); `MulterError` a 400 | Tipo MIME y extensión, tamaño, saneo completo del título (M5, M6) |
+| `DELETE /delete-image` | `imageKey` | Cadena no vacía (400) | Que sea un nombre simple (M4, M5) |
+| `POST /upload-term`, `DELETE /delete-term` | `term` | Cadena (400 `Term must be a string` en `/upload-term`) y no vacía (400) | Longitud máxima |
+| `POST /send-email` | `username`, `email`, `subject`, `message` | Los cuatro son cadenas no vacías tras `trim()` (400, no se envía correo) | Formato de correo, longitudes y límite de peticiones (M3) |
 
 Cómo validar: **una función de validación por forma de entrada**, con una lista de permitidos (no de prohibidos), sin dependencias nuevas salvo que compense (ver sección 12). Las expresiones regulares de claves de S3 y de nombres de fichero se definen **una vez** en `config/` y las usan la ruta y los tests.
+
+**Choque con la iteración A7/A3 (28/10/2026)**: la regla de arriba pide una función de validación por forma de entrada, pero el plan aprobado de esa iteración usa comprobaciones en línea (`typeof x !== 'string'`) en cada manejador y no crea `functions/validateInput.js`, para no añadir un módulo sin ahorrar código. Por eso la tabla de arriba describe lo que valida cada ruta tal como está, no una función compartida. La regla sigue vigente y se decide con el usuario si se extrae un validador (por ejemplo, junto con M4 y M5), cuando haya más de unas pocas comprobaciones repetidas.
 
 ## 5. S3: una sola convención
 
@@ -194,8 +196,8 @@ No los repitas al escribir código nuevo:
 
 | Patrón | Dónde | Hallazgo |
 |---|---|---|
-| Manejador `async` sin `try/catch` | `functions/userAuthentication.js` | A7 |
-| Leer `req.file.buffer` o `term.trim()` sin validar | `routes/data.js`, `routes/content.js` | A3 |
+| Manejador `async` sin `try/catch` | (`functions/userAuthentication.js` lo tenía; corregido el 28/10/2026) | A7 resuelto |
+| Leer `req.file.buffer` o `term.trim()` sin validar | (corregido el 28/10/2026 en las rutas listadas de A3; quedan las entradas no revisadas) | A3 |
 | Dos fuentes de fecha para el versionado | `getNextVersion.js` y `formatFileName.js` | A1 |
 | Tragarse todos los errores y devolver un valor por defecto | `getTextJsonS3` | A6 |
 | Valor del Excel usado como clave de S3 y como clave de un objeto sin validar | `routes/data.js` (`grouped[provincia]`), `POST /upload` | A4 |

@@ -5,6 +5,7 @@ Todas las rutas van bajo `API_PREFIX` (por defecto `/api/v1`), salvo `/healthche
 - 🔓 = pública · 🔒 = requiere `Authorization: Bearer <token>`
 - Respuesta de éxito: `{ "success": true, "data": ... }`
 - Respuesta de error: `{ "success": false, "error": "mensaje" }`
+- **Aviso (M21 de [07](07-estado-y-deuda-tecnica.md))**: el código contradice la columna 🔓 de `POST /send-email`, `GET /list-images`, `GET /get-image` y `GET /list-terms`: `tokenAuth` se ejecuta antes de llegar a `content.js` y, sin token, responden `401 No token provided` (verificado con una petición real a un servidor local; en producción **por confirmar**). La columna refleja la intención, no el comportamiento. Por eso los `400` de `/send-email` y `/get-image` de más abajo solo se alcanzan hoy con un token válido.
 
 ## Resumen
 
@@ -49,7 +50,8 @@ Body:
 ```
 Respuestas:
 - `200` → `{ success: true, data: { token } }`
-- `401` → `Invalid credentials`
+- `400` → `Username and password are required and must be strings` (falta `username` o `password`, o no es una cadena; antes la petición se quedaba sin respuesta)
+- `401` → `Invalid credentials` (cadenas válidas, usuario o contraseña incorrectos; una cadena vacía también da 401)
 - `429` → `Too many login attempts. Please try again in 15 minutes.`
 
 El token lleva `{ userId }` y caduca según `JWT_EXPIRATION`.
@@ -80,6 +82,11 @@ Concatena en un único array todos los JSON de `data/active/`. Es el endpoint qu
 ### `POST /upload` 🔒
 `multipart/form-data` con campo `file` (Excel `.xlsx`).
 
+Validación antes de procesar:
+- Sin fichero → `400` `File is required`.
+- Extensión distinta de `.xlsx` (sin distinguir mayúsculas) o MIME fuera de {el de xlsx, `application/octet-stream`, vacío} → `400` `Only .xlsx files are allowed`. La extensión es la comprobación real; el MIME lo manda el cliente y se tolera. Un `.xlsx` sin tipo MIME podría llegar como `text/plain` y recibir 400 **(por confirmar con un navegador real)**.
+- Campo multipart con otro nombre (`MulterError`, p. ej. `Unexpected field`) → `400` `File upload error: ...` (antes 500).
+
 1. Convierte el Excel a JSON (`convertExcelToJson`).
 2. Toma la provincia de la columna `Provincia` de la primera fila (`Desconocido` si no hay).
 3. Calcula la versión del día y guarda el Excel original en `data/{provincia}/{YYYY-MM-DD}_v{n}.xlsx`.
@@ -103,13 +110,13 @@ Body: `{ "draftKey": "data/Malaga/2026-01-15_v2.xlsx", "confirmed": true }`
 
 - `confirmed: true` → activa el borrador (regenera `data/active/{provincia}.json` desde ese Excel).
 - `confirmed: false` → borra el borrador (y recalcula el activo con la última versión restante).
-- `400` si falta `draftKey`.
+- `400` `draftKey is required` si falta `draftKey` o no es una cadena (antes, un objeto daba 500). La clave no se valida contra una lista de permitidos (M4).
 
 ### `POST /update-file` 🔒
-Body: `{ "fileName": "data/Malaga/2026-01-10_v1.xlsx" }` — marca esa versión como la activa de su provincia (rollback/roll-forward).
+Body: `{ "fileName": "data/Malaga/2026-01-10_v1.xlsx" }` — marca esa versión como la activa de su provincia (rollback/roll-forward). `400` `fileName is required` si falta o no es una cadena (antes 500). La clave no se valida con la forma `data/{provincia}/AAAA-MM-DD_vN.xlsx` (M4).
 
 ### `POST /delete-file` 🔒
-Body: `{ "fileName": "data/Malaga/2026-01-10_v1.xlsx" }` — borra esa versión. Si quedan otras, activa la más reciente por nombre; si no queda ninguna, borra también el JSON activo de la provincia.
+Body: `{ "fileName": "data/Malaga/2026-01-10_v1.xlsx" }` — borra esa versión. Si quedan otras, activa la más reciente por nombre; si no queda ninguna, borra también el JSON activo de la provincia. `400` `fileName is required` si falta o no es una cadena (antes 500); la clave no se valida con la forma de versión (M4).
 
 ---
 
@@ -118,6 +125,8 @@ Body: `{ "fileName": "data/Malaga/2026-01-10_v1.xlsx" }` — borra esa versión.
 ### `POST /send-email`
 Body: `{ "username", "email", "subject", "message" }`. Envía un correo desde y hacia `EMAIL`, con `replyTo` al email del usuario y asunto `"{subject} - enviado por {username}<{email}>"`.
 
+`400` `username, email, subject and message are required and must be strings` si falta alguno de los cuatro, no es una cadena o está vacío tras quitar espacios; no se envía correo (antes se enviaba con "undefined"). No se valida el formato del email ni las longitudes, ni hay límite de peticiones (M3). Ver el aviso M21 de arriba.
+
 ### `GET /list-images`
 Devuelve todas las imágenes de `gallery/` con URL prefirmada (válida 1 hora):
 ```json
@@ -125,22 +134,22 @@ Devuelve todas las imágenes de `gallery/` con URL prefirmada (válida 1 hora):
 ```
 
 ### `GET /get-image?imageKey=Encinar.jpg`
-`data: { imageUrl }` — URL prefirmada (1 hora) de una imagen concreta.
+`data: { imageUrl }` — URL prefirmada (1 hora) de una imagen concreta. `400` `imageKey is required` si falta, está vacío o no es una cadena (por ejemplo `?imageKey=a&imageKey=b`); antes respondía `200` con una URL a `gallery/undefined`. La clave se sigue construyendo con texto del cliente sin lista de permitidos (M4, M5). Ver el aviso M21 de arriba.
 
 ### `GET /list-terms`
 Devuelve el glosario `data/terms/noLatinTerms.json`: `[ { "term": "..." } ]`. Si no existe devuelve `[]`.
 
 ### `POST /upload-image` 🔒
-`multipart/form-data` con `file` y `title`. Guarda en `gallery/{title_con_guiones_bajos}{extensión}`. `400` si falta alguno.
+`multipart/form-data` con `file` y `title`. Guarda en `gallery/{title_con_guiones_bajos}{extensión}`. `400` `File and title are required` si falta el fichero o `title` no es una cadena o está vacío (antes, un `title` no cadena daba 500). Un campo multipart con nombre incorrecto da `400` `File upload error: ...` (antes 500).
 
 ### `DELETE /delete-image` 🔒
-Body: `{ "imageKey": "Encinar.jpg" }`. `400` si falta.
+Body: `{ "imageKey": "Encinar.jpg" }`. `400` `imageKey is required` si falta o no es una cadena.
 
 ### `POST /upload-term` 🔒
-Body: `{ "term": "texto" }`. Añade el término al glosario. `400` si está vacío.
+Body: `{ "term": "texto" }`. Añade el término al glosario. `400` `Term must be a string` si falta o no es una cadena (antes 500); `400` `Term cannot be empty` si está vacío o solo tiene espacios.
 
 ### `DELETE /delete-term` 🔒
-Body: `{ "term": "texto" }`. Elimina todas las entradas con ese texto exacto. `400` si falta.
+Body: `{ "term": "texto" }`. Elimina todas las entradas con ese texto exacto. `400` `Term is required` si falta, está vacío o no es una cadena.
 
 ---
 
@@ -159,4 +168,4 @@ Body: `{ "term": "texto" }`. Elimina todas las entradas con ese texto exacto. `4
 | `NetworkingError` / `ECONNREFUSED` | `Storage connection error` |
 | Otro | `err.message` o `Internal server error` |
 
-El status es `err.status || err.statusCode || 500`.
+El status es `err.status || err.statusCode`, o `400` si el error es un `MulterError` (antes caía en 500), o `500`.
