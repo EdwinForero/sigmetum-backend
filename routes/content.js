@@ -135,7 +135,7 @@ router.delete('/delete-image', tokenAuth, async (req, res, next) => {
         if (result.success) {
             res.status(200).json({ success: true, data: 'Image deleted successfully' });
         } else {
-            res.status(500).json({ success: false, error: result.error });
+            next(new Error(result.error || 'delete-image failed'));
         }
     } catch (error) {
         next(error);
@@ -171,7 +171,7 @@ router.delete('/delete-term', tokenAuth, async (req, res, next) => {
         if (result.success) {
             res.json({ success: true, data: 'Term deleted successfully' });
         } else {
-            res.status(500).json({ success: false, error: result.message });
+            next(new Error(result.message || 'delete-term failed'));
         }
     } catch (error) {
         next(error);

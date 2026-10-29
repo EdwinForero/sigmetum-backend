@@ -12,7 +12,12 @@
 //   de cada ruta protegida, ausente en las públicas, sin use(tokenAuth) a nivel de router, y lectura ESTÁTICA de index.js.
 // Criterio 9: Authorization inválido o caducado en las rutas abiertas responde igual que sin token; rutas inexistentes
 //   (también fuera del prefijo) y métodos no definidos dan 404 con envoltorio { success: false, error: 'Not found' } fijo,
-//   sin 405; /healthcheck, OPTIONS, Origin no permitido y JSON mal formado conservan su respuesta.
+//   sin 405; /healthcheck y OPTIONS conservan su respuesta; Origin no permitido da 403 y JSON mal formado 400 Invalid JSON.
+// Criterio 10: errores controlados y CORS (M17, M22). Errores inyectados con `inject` sobre GET /list-terms y delete-*:
+//   500 genérico sin el texto original, 5xx explícito, mapeados de almacenamiento, 4xx de librería, MulterError, 413,
+//   delete-* sin reflejar el SDK y el origen rechazado fuera de las respuestas (solo en el console.warn).
+// Límite: la réplica de cors de startApp es una copia a mano de index.js (los marcadores del criterio 8 detectan
+//   su ausencia, no una divergencia); el index.js real solo se ejercita con un arranque real.
 // Sale con código 0 si todo pasa, 1 si algún caso falla y 2 si el propio script falla.
 
 import { createRequire } from 'node:module';
@@ -46,15 +51,18 @@ const injectInCache = (request, exports) => {
   require.cache[filename] = { id: filename, filename, loaded: true, exports, children: [], paths: [] };
 };
 
+// Respuestas sembradas por el criterio 10 (null = comportamiento normal). Las rutas inyectadas también cuentan.
+const inject = { getTextJson: null, deleteImage: null, deleteTerm: null };
+
 const other = (value) => async () => { calls.s3Other += 1; return value; };
 injectInCache(join(ROOT, 'aws', 'awsS3connect.js'), {
   getPresignedUrlsFromS3Folder: other([]),
   getPresignedUrlFromS3: async () => { calls.getPresigned += 1; return 'https://s3.example.invalid/url-prefirmada'; },
   uploadImageToS3: other(undefined),
-  deleteImageFromS3: async () => { calls.deleteImage += 1; return { success: true }; },
-  getTextJsonS3: other([]),
+  deleteImageFromS3: async () => { calls.deleteImage += 1; return inject.deleteImage ?? { success: true }; },
+  getTextJsonS3: async () => { calls.s3Other += 1; if (inject.getTextJson) throw inject.getTextJson; return []; },
   uploadTextToJsonS3: other(undefined),
-  deleteTermFromS3: other({ success: true }),
+  deleteTermFromS3: async () => { calls.s3Other += 1; return inject.deleteTerm ?? { success: true }; },
   uploadFileToS3: other(undefined),
   getFileFromS3: other({}),
   getMergedDataInS3Folder: other({}),
@@ -86,13 +94,17 @@ const startApp = async () => {
   app.use('/healthcheck', (req, res) => {
     res.status(200).send('ok');
   });
+  const originNotAllowed = new Error('Origin not allowed');
+  originNotAllowed.status = 403;
+  originNotAllowed.publicMessage = 'Origin not allowed';
   app.use(cors({
     origin: (origin, callback) => {
       const allowed = (process.env.ALLOWED_ORIGIN || '').split(',').map((s) => s.trim()).filter(Boolean);
       if (!origin || allowed.includes(origin)) {
         callback(null, true);
       } else {
-        callback(new Error(`Origin not allowed: ${origin}`));
+        console.warn('CORS: origin not allowed:', JSON.stringify(origin.slice(0, 200)));
+        callback(originNotAllowed);
       }
     },
   }));
@@ -231,6 +243,10 @@ const checkIndexStatic = () => {
   if (secuencia !== 'mount,mount,mount,notFound,errorHandler') problems.push(`notFound debe montarse una vez, tras los tres routers y justo antes de errorHandler (secuencia: ${secuencia || 'ninguna'})`);
   for (const [name, file] of [['authRoutes', './routes/auth'], ['dataRoutes', './routes/data'], ['contentRoutes', './routes/content'], ['notFound', './middleware/notFound']]) {
     if (!source.includes(`const ${name} = require('${file}');`)) problems.push(`index.js no importa ${name} desde ${file}`);
+  }
+  // Marcadores del 403 de CORS (M22). Comprobación literal: un cambio de espaciado en index.js la haría fallar.
+  for (const marcador of ['originNotAllowed.status = 403;', "originNotAllowed.publicMessage = 'Origin not allowed';","console.warn('CORS: origin not allowed:'"]) {
+    if (!source.includes(marcador)) problems.push(`index.js no contiene el marcador de CORS: ${marcador}`);
   }
   return problems;
 };
@@ -517,11 +533,123 @@ const criterio9 = async (base, root) => {
   record(9, 'e. GET /no-existe con Origin permitido lleva la cabecera CORS', conOrigin.headers.get('access-control-allow-origin') === 'http://localhost',
     String(conOrigin.headers.get('access-control-allow-origin')));
   const otroOrigen = await call(base, 'GET', '/list-terms', { headers: { Origin: 'http://otro.example' } });
-  record(9, 'e. Origin no permitido da 500 Origin not allowed (no Not found)',
-    otroOrigen.status === 500 && otroOrigen.json?.success === false && /^Origin not allowed/.test(otroOrigen.json?.error ?? '') && otroOrigen.json.error !== 'Not found', resumen(otroOrigen));
-  // f. JSON mal formado sigue dando 400 con envoltorio.
+  record(9, 'e. Origin no permitido da 403 Origin not allowed sin el origen (no Not found)',
+    otroOrigen.status === 403 && otroOrigen.json?.success === false && otroOrigen.json?.error === 'Origin not allowed'
+    && !JSON.stringify(otroOrigen.json).includes('otro.example'), resumen(otroOrigen));
+  const otroPreflight = await call(base, 'OPTIONS', '/list-terms', { headers: { Origin: 'http://otro.example', 'Access-Control-Request-Method': 'GET' } });
+  record(9, 'e. Preflight OPTIONS con Origin no permitido da 403 sin el origen',
+    otroPreflight.status === 403 && otroPreflight.json?.error === 'Origin not allowed' && !JSON.stringify(otroPreflight.json).includes('otro.example'), resumen(otroPreflight));
+  // f. JSON mal formado da 400 con envoltorio y texto fijo, sin el mensaje del parser.
   const malformado = await call(base, 'POST', '/send-email', { rawBody: '{', headers: { 'Content-Type': 'application/json' }, ip: nextIp() });
-  record(9, 'f. JSON mal formado da 400 con envoltorio (no Not found)', malformado.status === 400 && isEnvelopeError(malformado) && malformado.json.error !== 'Not found', resumen(malformado));
+  record(9, 'f. JSON mal formado da 400 Invalid JSON sin detalle del parser',
+    malformado.status === 400 && isEnvelopeError(malformado) && malformado.json.error === 'Invalid JSON'
+    && !/Unexpected|position/.test(malformado.json.error), resumen(malformado));
+};
+
+// ─── Criterio 10: errores controlados y CORS ─────────────────────────────────
+
+const resumenCaso = (r) => `${r.status} ${JSON.stringify(r.json)}`;
+
+const criterio10 = async (base) => {
+  const registro = [];
+  const originalError = console.error;
+  const originalWarn = console.warn;
+  const capturar = (...args) => { registro.push(args.map(String).join(' ')); };
+  const sembrar = async (error) => {
+    inject.getTextJson = error;
+    try { return await call(base, 'GET', '/list-terms'); } finally { inject.getTextJson = null; }
+  };
+  const conRegistro = (texto) => registro.some((linea) => linea.includes(texto));
+  const sinTexto = (r, texto) => !JSON.stringify(r.json ?? {}).includes(texto);
+  const conCodigo = (mensaje, props) => Object.assign(new Error(mensaje), props);
+  console.error = capturar;
+  console.warn = capturar;
+  try {
+    // 10a. Error sin status y sin mapear: texto genérico; el detalle solo va al registro.
+    const a = await sembrar(new Error('secreto interno xyz'));
+    record(10, 'a. error sin status da 500 Internal server error sin el texto original',
+      a.status === 500 && a.json?.error === 'Internal server error' && sinTexto(a, 'secreto'), resumenCaso(a));
+    record(10, 'a. el registro conserva el mensaje real', conRegistro('secreto interno xyz'), 'no se registró');
+    // 10b. 5xx explícito.
+    const b = await sembrar(conCodigo('secreto 503', { status: 503 }));
+    record(10, 'b. status 503 se conserva con Internal server error',
+      b.status === 503 && b.json?.error === 'Internal server error' && sinTexto(b, 'secreto'), resumenCaso(b));
+    // 10c. Mapeados de almacenamiento: conservan su texto.
+    const mapeados = [
+      ['NoSuchKey', 'The requested file does not exist in storage'], ['NoSuchBucket', 'Storage bucket is not configured correctly'],
+      ['AccessDenied', 'Access denied to storage'], ['NetworkingError', 'Storage connection error'], ['ECONNREFUSED', 'Storage connection error'],
+    ];
+    for (const [code, texto] of mapeados) {
+      const r = await sembrar(conCodigo(`detalle ${code}`, { code }));
+      record(10, `c. ${code} conserva su texto`, r.status === 500 && r.json?.error === texto, resumenCaso(r));
+    }
+    // 10d. Otro 4xx de librería: texto fijo.
+    const d = await sembrar(conCodigo('secreto 422', { status: 422 }));
+    record(10, 'd. status 422 da Bad request sin el texto original', d.status === 422 && d.json?.error === 'Bad request' && sinTexto(d, 'secreto'), resumenCaso(d));
+    // 10e. MulterError real: campo inesperado (LIMIT_UNEXPECTED_FILE).
+    const form = new FormData();
+    form.append('otro', new Blob(['contenido']), 'a.jpg');
+    const e = await call(base, 'POST', '/upload-image', { token: validToken, rawBody: form });
+    record(10, 'e. MulterError (campo inesperado) da 400 File upload error: Unexpected field',
+      e.status === 400 && e.json?.error === 'File upload error: Unexpected field', resumenCaso(e));
+    // 10f. delete-image y delete-term no reflejan el error del SDK.
+    inject.deleteImage = { success: false, error: 'secreto del sdk' };
+    let fi;
+    try { fi = await call(base, 'DELETE', '/delete-image', { token: validToken, body: { imageKey: 'foto.jpg' } }); } finally { inject.deleteImage = null; }
+    record(10, 'f. delete-image fallido da 500 Internal server error sin el texto del SDK',
+      fi.status === 500 && fi.json?.error === 'Internal server error' && sinTexto(fi, 'secreto'), resumenCaso(fi));
+    inject.deleteTerm = { success: false, message: 'secreto del sdk' };
+    let ft;
+    try { ft = await call(base, 'DELETE', '/delete-term', { token: validToken, body: { term: 'x' } }); } finally { inject.deleteTerm = null; }
+    record(10, 'f. delete-term fallido da 500 Internal server error sin el texto del SDK',
+      ft.status === 500 && ft.json?.error === 'Internal server error' && sinTexto(ft, 'secreto'), resumenCaso(ft));
+    record(10, 'f. el registro conserva el texto del SDK', conRegistro('secreto del sdk'), 'no se registró');
+    // 10g. Cuerpo mayor que el límite de express.json (100 KB): 413 con texto fijo.
+    const grande = await call(base, 'POST', '/send-email', { rawBody: JSON.stringify({ message: 'a'.repeat(110 * 1024) }), headers: { 'Content-Type': 'application/json' }, ip: nextIp() });
+    record(10, 'g. cuerpo de más de 100 KB da 413 Payload too large', grande.status === 413 && grande.json?.error === 'Payload too large', resumenCaso(grande));
+    // 10h. El origen rechazado no vuelve al cliente; solo el 403 y el warn aportan evidencia (404 y 500 no reflejan el origen).
+    const evil = 'http://evil-xyz.example';
+    registro.length = 0;
+    const h403 = await call(base, 'GET', '/list-terms', { headers: { Origin: evil } });
+    record(10, 'h. 403 de CORS sin el origen en el cuerpo', h403.status === 403 && h403.json?.error === 'Origin not allowed' && sinTexto(h403, 'evil-'), resumenCaso(h403));
+    record(10, 'h. el warn registra el origen rechazado', registro.some((linea) => linea.includes('CORS') && linea.includes(evil)), 'el warn no contiene el origen');
+    // El index.js real registra el origen truncado con JSON.stringify (neutraliza saltos de línea y comillas del valor del cliente).
+    const indexSource = readFileSync(join(ROOT, 'index.js'), 'utf8');
+    record(10, 'h. index.js registra el origen rechazado truncado con JSON.stringify (estático)',
+      indexSource.includes("console.warn('CORS: origin not allowed:', JSON.stringify(origin.slice(0, 200)))"), 'falta el warn con JSON.stringify(origin.slice(0, 200)) en index.js');
+    const h404 = await call(base, 'GET', '/no-existe', { headers: { Origin: 'http://localhost' } });
+    record(10, 'h. 404 sin el origen (no aporta evidencia)', sinTexto(h404, 'evil-'), resumenCaso(h404));
+    inject.getTextJson = new Error('fallo sembrado');
+    let h500;
+    try { h500 = await call(base, 'GET', '/list-terms', { headers: { Origin: 'http://localhost' } }); } finally { inject.getTextJson = null; }
+    record(10, 'h. 500 sin el origen (no aporta evidencia)', sinTexto(h500, 'evil-'), resumenCaso(h500));
+    // 10i. Origin muy largo: el warn lo trunca a 200 caracteres y el cuerpo del 403 no refleja nada.
+    registro.length = 0;
+    const largo = `http://${'a'.repeat(5000)}.example`;
+    const i403 = await call(base, 'GET', '/list-terms', { headers: { Origin: largo } });
+    const lineaWarn = registro.find((linea) => linea.includes('CORS')) ?? '';
+    record(10, 'i. Origin de 5000 caracteres: 403 sin reflejar el origen', i403.status === 403 && i403.json?.error === 'Origin not allowed' && sinTexto(i403, 'aaaa'), resumenCaso(i403));
+    record(10, 'i. el warn trunca el origen largo (conserva 200 caracteres y descarta el resto)',
+      lineaWarn.includes('a'.repeat(100)) && !lineaWarn.includes('a'.repeat(201)) && lineaWarn.length < 400, `longitud del warn: ${lineaWarn.length}`);
+    // 10j. delete-image / delete-term con {success:false} sin texto: 500 genérico y mensaje por defecto en el registro.
+    registro.length = 0;
+    inject.deleteImage = { success: false };
+    let vi;
+    try { vi = await call(base, 'DELETE', '/delete-image', { token: validToken, body: { imageKey: 'foto.jpg' } }); } finally { inject.deleteImage = null; }
+    record(10, 'j. delete-image sin texto de error da 500 Internal server error', vi.status === 500 && vi.json?.error === 'Internal server error', resumenCaso(vi));
+    record(10, 'j. el registro de delete-image lleva el mensaje por defecto', conRegistro('delete-image failed'), 'el registro no contiene delete-image failed');
+    inject.deleteTerm = { success: false };
+    let vt;
+    try { vt = await call(base, 'DELETE', '/delete-term', { token: validToken, body: { term: 'x' } }); } finally { inject.deleteTerm = null; }
+    record(10, 'j. delete-term sin texto de error da 500 Internal server error', vt.status === 500 && vt.json?.error === 'Internal server error', resumenCaso(vt));
+    record(10, 'j. el registro de delete-term lleva el mensaje por defecto', conRegistro('delete-term failed'), 'el registro no contiene delete-term failed');
+  } finally {
+    console.error = originalError;
+    console.warn = originalWarn;
+    inject.getTextJson = null;
+    inject.deleteImage = null;
+    inject.deleteTerm = null;
+  }
 };
 
 // ─── Ejecución ───────────────────────────────────────────────────────────────
@@ -536,6 +664,7 @@ const main = async () => {
   await criterio7(base, app);
   criterio8(app);
   await criterio9(base, root);
+  await criterio10(base);
 
   let fallos = 0;
   for (const id of Object.keys(criteria).sort()) {
@@ -545,8 +674,8 @@ const main = async () => {
     if (lista.length > 8) console.log(`  ... y ${lista.length - 8} más`);
     fallos += lista.length;
   }
-  // Un criterio que no registró ningún caso no se vería arriba: se exige que los criterios 1 a 9 hayan registrado algo.
-  const vacios = [1, 2, 3, 4, 5, 6, 7, 8, 9].filter((id) => !criteria[id] || criteria[id].total === 0);
+  // Un criterio que no registró ningún caso no se vería arriba: se exige que los criterios 1 a 10 hayan registrado algo.
+  const vacios = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].filter((id) => !criteria[id] || criteria[id].total === 0);
   if (vacios.length > 0) console.log(`FALLA: el criterio ${vacios.join(', ')} no registró ningún caso (criterio vacío)`);
   console.log(fallos === 0 && vacios.length === 0 ? 'Resultado: todo pasa' : `Resultado: ${fallos} caso(s) fallan${vacios.length > 0 ? `, ${vacios.length} criterio(s) vacío(s)` : ''}`);
   return fallos === 0 && vacios.length === 0 ? 0 : 1;

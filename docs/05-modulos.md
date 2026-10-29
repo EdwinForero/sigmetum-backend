@@ -85,9 +85,9 @@ Todos los routers declaran sus rutas en un único `router`. `tokenAuth` es el **
 | `GET /get-image` | 400 si `imageKey` falta, está vacío o no es cadena; 400 `imageKey is not valid` si `isValidImageKey` lo rechaza; si no, `getPresignedUrlFromS3(GALLERY_PATH, imageKey)` |
 | `GET /list-terms` | `getTextJsonS3(TERMS_FILE, TERMS_PATH)` |
 | `POST /upload-image` | 400 si falta el fichero o `title` no es cadena o está vacío. Sustituye espacios del `title` por `_`, añade la extensión del fichero original, `uploadImageToS3` |
-| `DELETE /delete-image` | 400 si `imageKey` falta o no es cadena; 400 `imageKey is not valid` si `isValidImageKey` lo rechaza; `deleteImageFromS3`; si devuelve `success: false` responde 500 |
+| `DELETE /delete-image` | 400 si `imageKey` falta o no es cadena; 400 `imageKey is not valid` si `isValidImageKey` lo rechaza; `deleteImageFromS3`; si devuelve `success: false` responde 500 (`next(new Error(result.error || 'delete-image failed'))`: el registro conserva un mensaje por defecto si `aws/` lo devuelve vacío) |
 | `POST /upload-term` | 400 si `term` no es cadena o está vacío tras `trim()`; `uploadTextToJsonS3(term, ...)` |
-| `DELETE /delete-term` | 400 si `term` falta, está vacío o no es cadena; `deleteTermFromS3`; si devuelve `success: false` responde 500 |
+| `DELETE /delete-term` | 400 si `term` falta, está vacío o no es cadena; `deleteTermFromS3`; si devuelve `success: false` responde 500 (`next(new Error(result.message || 'delete-term failed'))`, con el mismo mensaje por defecto en el registro) |
 
 ---
 
@@ -240,5 +240,7 @@ Se monta con `app.use(notFound)` después de los tres routers y antes de `errorH
 | Elemento | Descripción |
 |---|---|
 | `isDev` | `NODE_ENV === 'local'` |
-| `friendlyMessage(err)` | Mapea `err.name` / `err.code` / `err.Code` a mensajes legibles (tabla en [04-api.md](04-api.md#errores-comunes)) |
-| `errorHandler(err, req, res, next)` | Status = `err.status \|\| err.statusCode`, o 400 si `err.name === 'MulterError'`, o 500. En local loguea el stack; en otros entornos sólo el mensaje. Responde `{ success: false, error }` |
+| `friendlyMessage(err, status)` | Texto que ve el cliente, por este orden: `err.publicMessage`; mapeados por `err.name` / `err.code` / `err.Code` (`TokenExpiredError`, `JsonWebTokenError`, `MulterError`, `NoSuchKey`, `NoSuchBucket`, `AccessDenied`, `NetworkingError` / `ECONNREFUSED`); `Invalid JSON` (`err.type === 'entity.parse.failed'`); `Payload too large` (413); `Bad request` (resto de 4xx, con guarda `400 <= status < 500`); y `Internal server error` para todo lo demás. Ya no devuelve `err.message` (M17). Tabla en [04-api.md](04-api.md#errores-comunes) |
+| `errorHandler(err, req, res, next)` | Status = `err.status \|\| err.statusCode`, o 400 si `err.name === 'MulterError'`, o 500. En local loguea el stack; en otros entornos sólo el mensaje (el real, que no se envía al cliente). Responde `{ success: false, error }` |
+
+**CORS en `index.js`.** El callback de `origin` de `cors` rechaza un origen no permitido con `console.warn('CORS: origin not allowed:', JSON.stringify(origin.slice(0, 200)))` (el origen se trunca a 200 caracteres antes de registrarlo, para que un `Origin` enorme no llene el registro, y `JSON.stringify` neutraliza saltos de línea y comillas de un valor que controla el cliente) y pasa a `cors` un único `Error` constante, `originNotAllowed` (`status = 403`, `publicMessage = 'Origin not allowed'`), creado fuera del callback porque ni `cors` ni `errorHandler` lo mutan (su traza es la del arranque); `errorHandler` lo responde como `403` `Origin not allowed`, sin el origen. El origen solo está en el `warn`.

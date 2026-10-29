@@ -85,7 +85,7 @@ Concatena en un único array todos los JSON de `data/active/`. Es el endpoint qu
 
 Validación antes de procesar:
 - Sin fichero → `400` `File is required`.
-- Extensión distinta de `.xlsx` (sin distinguir mayúsculas; `.xls`, `.xlsm`, `.csv` y `.txt` entre ellas) → `400` `Only .xlsx files are allowed`, con cualquier MIME. En `/upload` el MIME no se comprueba (desde el 28/10/2026) porque lo manda el cliente; la extensión es la única comprobación de tipo. Un fichero que no es un libro válido pero se llama `.xlsx` llega a `convertExcelToJson` y responde `500` con el `err.message` de `exceljs` (M17), por ejemplo `Can't find end of central directory…` si no es un zip, o `Cannot read properties of undefined (reading 'eachRow')` si el libro está vacío. `/upload-image` sí sigue confiando en el MIME (M5).
+- Extensión distinta de `.xlsx` (sin distinguir mayúsculas; `.xls`, `.xlsm`, `.csv` y `.txt` entre ellas) → `400` `Only .xlsx files are allowed`, con cualquier MIME. En `/upload` el MIME no se comprueba (desde el 28/10/2026) porque lo manda el cliente; la extensión es la única comprobación de tipo. Un fichero que no es un libro válido pero se llama `.xlsx` llega a `convertExcelToJson` y responde `500` `Internal server error` (el `err.message` de `exceljs`, por ejemplo `Can't find end of central directory…` si no es un zip o `Cannot read properties of undefined (reading 'eachRow')` si el libro está vacío, solo se registra en consola; M17 resuelto el 28/10/2026). `/upload-image` sí sigue confiando en el MIME (M5).
 - Campo multipart con otro nombre (`MulterError`, p. ej. `Unexpected field`) → `400` `File upload error: ...` (antes 500).
 
 1. Convierte el Excel a JSON (`convertExcelToJson`).
@@ -174,6 +174,16 @@ Body: `{ "term": "texto" }`. Elimina todas las entradas con ese texto exacto. `4
 | S3 `NoSuchBucket` | `Storage bucket is not configured correctly` |
 | S3 `AccessDenied` | `Access denied to storage` |
 | `NetworkingError` / `ECONNREFUSED` | `Storage connection error` |
-| Otro | `err.message` o `Internal server error` |
+| JSON mal formado en el cuerpo (`err.type === 'entity.parse.failed'`, 400) | `Invalid JSON` |
+| Cuerpo mayor que el límite de `express.json` (100 KB; 413) | `Payload too large` |
+| Otro error de librería con estado 4xx (por ejemplo 415 o 422) | `Bad request` (límite conocido: se pierde el detalle de cualquier 4xx distinto de 413) |
+| `Origin` no permitido por CORS (`index.js`; 403) | `Origin not allowed` |
+| Cualquier otro error (sin `status`, 5xx, o con texto propio como `Excel conversion failed...`, `No files found...` o `Error getting signed URL`) | `Internal server error` |
 
-El status es `err.status || err.statusCode`, o `400` si el error es un `MulterError` (antes caía en 500), o `500`.
+El mensaje real de un error no mapeado **no se devuelve al cliente**: se registra en consola (`[método] ruta → estado` más `err.message`, o el stack en `local`). El orden de reglas de `friendlyMessage(err, status)` es: `publicMessage`, los mapeados de la tabla (por `name` o código), `Invalid JSON`, `Payload too large`, `Bad request` (guarda `400 <= status < 500`) y, si nada encaja, `Internal server error`. Las respuestas 4xx que las rutas construyen con `res.status(400).json(...)` no pasan por `errorHandler` y conservan su texto.
+
+El status es `err.status || err.statusCode`, o `400` si el error es un `MulterError` (antes caía en 500), o `500`. Los mapeados de almacenamiento (`NoSuchKey`, `NoSuchBucket`, `AccessDenied`, `NetworkingError` / `ECONNREFUSED`) conservan su texto pero siguen respondiendo `500` (B9). Notas: `code === 'ECONNREFUSED'` etiqueta también como `Storage connection error` un fallo de conexión SMTP de `nodemailer` (comportamiento existente), y `NetworkingError` es un nombre del SDK v2 de AWS; qué devuelve el SDK real en cada caso de almacenamiento solo se probó con errores inyectados **(por confirmar)**.
+
+`DELETE /delete-image` y `DELETE /delete-term` ya no responden `500` con el mensaje del SDK: ante un fallo reportado por `aws/` (`{ success: false }`) pasan `next(new Error(...))` y responden siempre `500` `Internal server error`, también para `NoSuchBucket` o `AccessDenied`, porque `aws/` aplana el error a un texto antes (B5). El detalle queda en la consola (si `aws/` devuelve el mensaje vacío, el registro lleva `delete-image failed` / `delete-term failed`). `GET /list-images` con la galería vacía sigue siendo `500` (F3, A5), pero ahora con `Internal server error` en lugar de `No files found in the specified folder.`.
+
+**CORS rechazado.** Una petición con `Origin` distinto de `ALLOWED_ORIGIN` (también el preflight `OPTIONS`) responde `403` `{ "success": false, "error": "Origin not allowed" }`, sin el origen en el cuerpo (antes `500` con el origen reflejado, M22). El origen (truncado a 200 caracteres) se registra solo con `console.warn('CORS: origin not allowed:', JSON.stringify(origin.slice(0, 200)))`. Una petición sin `Origin` o con el origen permitido no cambia. Un navegador no deja a la página ver esta respuesta (no lleva `Access-Control-Allow-Origin`); solo la ven `curl`, herramientas y servidores.

@@ -52,7 +52,7 @@ El desarrollo con agentes de Claude Code sigue el plugin `ciclo-agentico` (`plug
 | `ADMIN_PASSWORD` | Sí | `$2b$10$...` | **Hash bcrypt** de la contraseña, no la contraseña en claro |
 | `EMAIL` | Sí | — | Cuenta Gmail que envía y recibe el formulario de contacto |
 | `EMAIL_PASSWORD` | Sí | — | Contraseña de aplicación de Gmail |
-| `ALLOWED_ORIGIN` | Sí | `http://localhost:3000` | Origen del frontend permitido por CORS |
+| `ALLOWED_ORIGIN` | Sí | `http://localhost:3000` | Origen del frontend permitido por CORS; otro origen recibe `403` `Origin not allowed` (el valor de la variable no cambia) |
 
 ### Generar el hash de `ADMIN_PASSWORD`
 

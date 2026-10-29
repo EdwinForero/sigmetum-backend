@@ -42,7 +42,7 @@ Nombres: archivos en `camelCase` (`awsS3connect.js` es la excepción con minúsc
 | Los fallos inesperados se pasan con `next(error)` a `middleware/errorHandler.js`; las validaciones de entrada responden 400 directamente | Un único sitio da forma a los errores y decide qué se loguea | Skill `new-endpoint` | Cumple en las rutas de S3 y de contenido |
 | **Todo manejador `async` captura sus errores** (`try/catch` + `next`) | Express 4 **no** captura las promesas rechazadas: la petición se queda colgada y el error acaba en `unhandledRejection` | Revisión | Cumple en el código tocado el 28/10/2026 (A7 resuelto: `userAuth` ya captura y llama a `next(error)`). Queda por revisar el resto de manejadores |
 | Códigos HTTP correctos: **400** entrada inválida, **401** sin token o token inválido, **404** recurso inexistente, **429** límite de peticiones, **500** solo fallos propios | El frontend y quien use la API distinguen el caso por el código | Tests de cada ruta (cuando existan) | **Cumple en las rutas de A3 resueltas el 28/10/2026** (entrada ausente o de tipo incorrecto responde 400; `MulterError` también); `NoSuchKey` de S3 da 500 porque el error del SDK no trae `status` (B9, por confirmar) |
-| El mensaje de error al cliente es **controlado**, no `err.message` tal cual | Un error interno puede revelar rutas, claves o nombres de librerías | Revisión de `errorHandler.js` | **No cumple**: `friendlyMessage` devuelve `err.message` para cualquier error no mapeado, también en producción (M17) |
+| El mensaje de error al cliente es **controlado**, no `err.message` tal cual | Un error interno puede revelar rutas, claves o nombres de librerías | Revisión de `errorHandler.js` | Cumple (M17, 28/10/2026): `friendlyMessage(err, status)` devuelve un texto mapeado (`publicMessage`, `Token expired`, `Invalid JSON`, `Payload too large`, `Bad request`, almacenamiento) o `Internal server error`; el `err.message` real solo va a la consola. Lo comprueba el criterio 10 de `scripts/verificar-rutas.mjs` |
 | No cambies la forma de una respuesta sin revisar el contrato con el frontend | Rompe la web sin avisar | [mantenimiento.md](mantenimiento.md), sección 6 | — |
 | Los mensajes de la API se añaden en inglés y estables. Si el frontend necesita distinguirlos, se acuerda un `code` | El frontend **no muestra** el texto del servidor | Revisión | Hoy no existe `code` |
 
@@ -77,7 +77,7 @@ Cómo validar: **una función de validación por forma de entrada**, con una lis
 
 | Regla | Por qué | Se comprueba | Estado |
 |---|---|---|---|
-| Las funciones de `aws/` **lanzan** ante un error; no devuelven `{ success: false }` | Hoy hay dos estilos y cada ruta tiene que tratar ambos. Con `throw`, `errorHandler` actúa siempre | Skill `s3-operation-review` | **No cumple**: `deleteImageFromS3` y `deleteTermFromS3` devuelven el error (B5) |
+| Las funciones de `aws/` **lanzan** ante un error; no devuelven `{ success: false }` | Hoy hay dos estilos y cada ruta tiene que tratar ambos. Con `throw`, `errorHandler` actúa siempre | Skill `s3-operation-review` | **No cumple**: `deleteImageFromS3` y `deleteTermFromS3` devuelven el error (B5); las rutas `delete-*` lo pasan ahora a `next(new Error(...))`, pero como `aws/` aplana el error a un texto, siempre responden `Internal server error`, incluso ante `NoSuchBucket` o `AccessDenied` |
 | Distingue "no existe" de "falló": solo `NoSuchKey` se convierte en un valor vacío; cualquier otro error se propaga | Tragarse errores hace que el glosario se **sobrescriba entero** tras un fallo de permisos | Test con el SDK simulado | **No cumple**: `getTextJsonS3` devuelve `[]` ante cualquier error (A6) |
 | Las claves salen de `config/s3Paths.js`, nunca de literales | Un único sitio si cambia el layout | `quality` no lo comprueba; revisión | Cumple |
 | Las URLs prefirmadas llevan caducidad explícita y corta | Una URL filtrada deja de servir | Revisión | Cumple (3600 s, ver D9) |
@@ -203,7 +203,7 @@ No los repitas al escribir código nuevo:
 | Valor del Excel usado como clave de S3 y como clave de un objeto sin validar | `routes/data.js` (`grouped[provincia]`), `POST /upload` | A4 |
 | Lógica de negocio en la capa de S3 | `deleteFileFromS3`, `updateFileS3` | M14 |
 | Una función "pura" que llama a S3 | `getNextVersion` | M14 |
-| Devolver `err.message` al cliente | `middleware/errorHandler.js` | M17 |
+| Devolver `err.message` al cliente (o el `error` del SDK en una respuesta manual, como hacían `delete-image` y `delete-term`) | `middleware/errorHandler.js` | M17 (resuelto el 28/10/2026) |
 | Funciones de S3 que a veces lanzan y a veces devuelven `{ success: false }` | `deleteImageFromS3`, `deleteTermFromS3` | B5 |
 | Descargas secuenciales en un bucle | `getMergedDataInS3Folder` | M7 |
 | Leer, modificar y escribir un objeto entero sin control de concurrencia | `uploadTextToJsonS3`, `deleteTermFromS3` | M1 |

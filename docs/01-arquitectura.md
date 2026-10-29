@@ -41,13 +41,13 @@ Las rutas no hablan con S3 directamente: siempre pasan por `awsS3connect.js`. La
 ## Flujo de una petición
 
 1. `morgan('combined')` registra la petición.
-2. `cors` sólo acepta el origen `ALLOWED_ORIGIN`.
+2. `cors` sólo acepta el origen `ALLOWED_ORIGIN`; otro origen recibe `403` `Origin not allowed` (sin el origen en el cuerpo; se registra con `console.warn`).
 3. `express.json()` parsea el body; `compression()` comprime la respuesta.
 4. El router correspondiente (bajo `API_PREFIX`, por defecto `/api/v1`) procesa la ruta.
    - Rutas públicas: se atienden directamente.
    - Rutas protegidas: pasan antes por `tokenAuth` (cabecera `Authorization: Bearer <jwt>`).
 5. Si ningún router resuelve la petición (ruta inexistente o método no definido), `notFound` responde `404` `{ success: false, error: "Not found" }`.
-6. Si algo falla, el handler llama a `next(error)` y `errorHandler` responde `{ success: false, error }` con el status adecuado.
+6. Si algo falla, el handler llama a `next(error)` y `errorHandler` responde `{ success: false, error }` con el status adecuado; el mensaje es fijo o de una lista de mapeados, y el real solo va a la consola.
 
 `/healthcheck` se registra **antes** de los middlewares para que el health check del balanceador no genere logs ni dependa de CORS.
 

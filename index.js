@@ -34,13 +34,19 @@ app.use('/healthcheck', (req, res) => {
 });
 
 app.use(morgan('combined'));
+// Error constante (cors y errorHandler no lo mutan): evita capturar una pila por cada petición rechazada
+const originNotAllowed = new Error('Origin not allowed');
+originNotAllowed.status = 403;
+originNotAllowed.publicMessage = 'Origin not allowed';
+
 app.use(cors({
   origin: (origin, callback) => {
     const allowed = (process.env.ALLOWED_ORIGIN || '').split(',').map(s => s.trim()).filter(Boolean);
     if (!origin || allowed.includes(origin)) {
       callback(null, true);
     } else {
-      callback(new Error(`Origin not allowed: ${origin}`));
+      console.warn('CORS: origin not allowed:', JSON.stringify(origin.slice(0, 200)));
+      callback(originNotAllowed);
     }
   },
 }));

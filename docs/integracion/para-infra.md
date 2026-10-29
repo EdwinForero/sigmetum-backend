@@ -94,7 +94,7 @@ Acciones que usa el código, deducidas de `aws/awsS3connect.js` **(verificado)**
 
 **`ALLOWED_ORIGIN` por entorno:**
 
-`ALLOWED_ORIGIN` acepta **una lista de orígenes separados por coma**. El backend los divide, elimina espacios y permite el acceso si el origen del request está en la lista o si no hay origen (llamadas server-side). Formato: `https://a.com,https://b.com` (sin barra final, sin espacios extra).
+`ALLOWED_ORIGIN` acepta **una lista de orígenes separados por coma**. El backend los divide, elimina espacios y permite el acceso si el origen del request está en la lista o si no hay origen (llamadas server-side). Formato: `https://a.com,https://b.com` (sin barra final, sin espacios extra). **Desde el 28/10/2026 (M22)** un origen no permitido recibe `403` `Origin not allowed` (antes `500` con el origen reflejado) y el backend registra `CORS: origin not allowed: "<origen>"` con `console.warn`. El valor y el formato de `ALLOWED_ORIGIN` no cambian; no hay variables, permisos IAM ni endpoints nuevos. **(Por confirmar con infra)**: si hay monitorización o alarmas por `500` que contaran las peticiones CORS rechazadas, dejarán de contarlas (ahora son `403`), y los mensajes de error de producción ya no revelan detalles internos, solo la consola.
 
 | Entorno | Qué poner en `ALLOWED_ORIGIN` | Estado |
 |---|---|---|
