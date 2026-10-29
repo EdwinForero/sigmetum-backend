@@ -21,14 +21,16 @@ Documento para quien mantiene `sigmetum-infra`. Explica **qué necesita este bac
 
 Nombres únicamente; nunca valores reales. Fuente: `config/validateEnv.js` **(verificado)**.
 
+**Condición previa de despliegue (M15, 28/10/2026), a cargo del usuario y por confirmar.** `validateEnv` valida ahora el valor de `JWT_SECRET` (mínimo 32 caracteres), `ADMIN_PASSWORD` (hash bcrypt completo) y `JWT_EXPIRATION` (con unidad y mayor que cero) y es **estricto salvo con `NODE_ENV` exactamente `local` o `test`**: sin `NODE_ENV` (el caso de los `.tfvars.example`) o con cualquier otro valor, un valor incumplidor hace que el backend **no arranque**. Antes de desplegar hay que comprobar que los valores reales de dev y prod en Beanstalk cumplen las reglas, y cuál es su `NODE_ENV` real. **No se han visto valores reales** de ninguna de estas variables (por confirmar).
+
 ### Obligatorias en todos los entornos
 
 | Variable | Secreto | Notas |
 |---|---|---|
-| `JWT_SECRET` | Sí | Ver [../guias/seguridad.md](../guias/seguridad.md#s2-autenticación): largo y aleatorio, distinto por entorno |
-| `JWT_EXPIRATION` | No | Formato de `jsonwebtoken` (p. ej. `8h`). El `.tfvars.example` de infra usa `10m`; el `.env.example` del backend usa `8h`: son solo valores de ejemplo, no una discrepancia, pero conviene que ambos repositorios usen el mismo valor de referencia |
+| `JWT_SECRET` | Sí | Ver [../guias/seguridad.md](../guias/seguridad.md#s2-autenticación): largo y aleatorio, distinto por entorno. Mínimo 32 caracteres (lo exige `validateEnv`) |
+| `JWT_EXPIRATION` | No | Formato de `jsonwebtoken` con unidad y mayor que cero (p. ej. `8h`; `3600` sin unidad, `0` y los negativos se rechazan). El `10m` del `.tfvars.example` es válido. El `.tfvars.example` de infra usa `10m`; el `.env.example` del backend usa `8h`: son solo valores de ejemplo, no una discrepancia, pero conviene que ambos repositorios usen el mismo valor de referencia |
 | `ADMIN_USERNAME` | Sí (es una credencial) | — |
-| `ADMIN_PASSWORD` | Sí | **Debe ser un hash bcrypt**, nunca la contraseña en claro. Cómo generarlo: [../03-configuracion.md](../03-configuracion.md#generar-el-hash-de-admin_password) |
+| `ADMIN_PASSWORD` | Sí | **Debe ser un hash bcrypt completo**, nunca la contraseña en claro (`validateEnv` lo comprueba). Cómo generarlo: [../03-configuracion.md](../03-configuracion.md#generar-el-hash-de-admin_password) |
 | `EMAIL` | Sí | Cuenta Gmail del formulario de contacto |
 | `EMAIL_PASSWORD` | Sí | Contraseña de aplicación de Gmail, no la contraseña de la cuenta |
 | `AWS_REGION` | No | `eu-west-3` en ambos entornos **(verificado)** |
@@ -47,7 +49,7 @@ Nombres únicamente; nunca valores reales. Fuente: `config/validateEnv.js` **(ve
 |---|---|---|
 | `PORT` | `8000` | El `.tfvars.example` ya la fija en `8000`: coincide |
 | `API_PREFIX` | `/api/v1` | No está en `app_env_vars` de ningún ejemplo; si no se define, el backend usa el valor por defecto, que es el esperado por el frontend |
-| `NODE_ENV` | (ninguno; cualquier valor que no sea `local` se trata como no-local) | No está en ningún `.tfvars.example`; conviene **no** definirlo como `local` en Beanstalk, porque activaría credenciales SSO (que no existen en la instancia) en vez del rol IAM |
+| `NODE_ENV` | (ninguno; cualquier valor que no sea `local` se trata como no-local) | Sin definir, `validateEnv` es estricto (M15), igual que con `production`; solo `local` y `test` se conforman con avisos. El valor real en Beanstalk **(por confirmar)**. No está en ningún `.tfvars.example`; conviene **no** definirlo como `local` en Beanstalk, porque activaría credenciales SSO (que no existen en la instancia) en vez del rol IAM |
 
 **Estado de `app_env_vars` en los ejemplos (03/10/2026, verificado):** `dev` y `prod` incluyen las 9 obligatorias más `PORT`. I3 resuelto: el doc de infra confirma que `app_env_vars` ya incluye `ALLOWED_ORIGIN`, `ADMIN_USERNAME` y `ADMIN_PASSWORD`.
 
@@ -109,7 +111,7 @@ Acciones que usa el código, deducidas de `aws/awsS3connect.js` **(verificado)**
 | Límite de `POST /send-email` (M21 entregas 1 y 2, 28/10/2026) | 5 peticiones cada 15 minutos por IP (`express-rate-limit` 8.5.2, mismo mecanismo que el login). **Desde la entrega 2 la ruta es pública (sin token), así que el cupo lo consume cualquier visitante anónimo y también cuentan los `400`.** **Obligatorio ANTES DE DESPLEGAR, aún sin hacer (por confirmar con infra)**: confirmar cuántos saltos de proxy hay entre el cliente y Express. `index.js` (líneas 28-29) comenta "ALB → nginx → Express" con `trust proxy 1`, y este documento (fila anterior y I2) describe "nginx (loopback) → Express"; las dos descripciones no coinciden. Si hay un salto más de los que cuenta `trust proxy 1`, `req.ip` sería la IP del proxy intermedio para todos los clientes y un solo cliente podría agotar el cupo de 5 por 15 minutos para todos; si hay uno menos, la cabecera `X-Forwarded-For` se podría falsificar y no se limitaría a nadie. Si el resultado exige cambiar `trust proxy`, es un cambio fuera de la entrega 2 (vuelve a `architect`). Resultado de la confirmación: **(por confirmar)**. Depende de `trust proxy 1`: que `req.ip` sea el cliente real detrás de nginx y el balanceador está **(por confirmar con infra)** en producción; si llegara la IP del proxy, el cupo lo compartirían todos los usuarios, y si se pudiera falsificar la cabecera, no limitaría a nadie. **Almacén en memoria** (`MemoryStore`, el de por defecto): el contador se reinicia al reiniciar o desplegar y cada instancia (1 a 3 en prod) lleva el suyo, así que el tope real por IP es de hasta 5 por instancia. **Usuarios tras un mismo NAT** (oficina, universidad) comparten el cupo. **IPv6**: la versión instalada agrupa por defecto las direcciones IPv6 por subred /56 (opción `ipv6Subnet`, valor por defecto 56; leído en `node_modules/express-rate-limit/dist/index.cjs`, no probado con tráfico real), de modo que varias direcciones de una misma /56 comparten cupo; las IPv4 mapeadas en IPv6 se tratan como IPv4. Sin variables de entorno ni permisos IAM nuevos |
 | HTTPS | `prod` usa ALB con `ssl_certificate_arn` (HTTPS en el 443); `dev` usa CloudFront como terminador HTTPS delante de Beanstalk (`enable_cdn = true`) **(I4 resuelto)** |
 | Salida SMTP (`smtp.gmail.com:587`) | Sin regla de grupo de seguridad específica en el módulo `beanstalk`; se asume la salida por defecto del grupo del VPC por defecto **(por confirmar)** |
-| Memoria e instancia | `t3.nano` (0.5 GiB de RAM) en los dos entornos, 1 a 3 instancias en prod, 1 fija en dev. El backend carga los Excel enteros en memoria (`multer` sin límite de tamaño, hallazgo interno M6): con `t3.nano`, un Excel grande es un riesgo real de memoria, no solo teórico |
+| Memoria e instancia | `t3.nano` (0.5 GiB de RAM) en los dos entornos, 1 a 3 instancias en prod, 1 fija en dev. El backend carga los Excel enteros en memoria (`multer` limita la subida a 10 MB en `/upload` y 5 MB en `/upload-image` desde el 28/10/2026, M6; el `.xlsx` sigue descomprimiéndose en memoria, M9): con `t3.nano`, un Excel grande sigue siendo un riesgo de memoria. Que el proxy no imponga un límite de cuerpo menor **(por confirmar)** |
 
 ## 7. Tabla de discrepancias
 
@@ -132,7 +134,7 @@ Ver el resumen de la sección 1. Estado y responsable:
 | El rol IAM de la instancia (nombre o permisos) | Que siga permitiendo `GetObject`, `PutObject`, `DeleteObject`, `ListBucket` sobre el bucket (sección 4) |
 | `HealthCheckPath` | Que coincida con `/healthcheck` (I1) |
 | El balanceador (de `single` a `application`, o el certificado) | `ALLOWED_ORIGIN` sigue siendo el origen correcto; si pasa a HTTPS, avisar al frontend |
-| El tipo de instancia | Revisar el límite de tamaño de `multer` (hoy no hay ninguno; sección 6) |
+| El tipo de instancia | Revisar el límite de tamaño de `multer` (10 MB y 5 MB; sección 6) |
 | `app_env_vars` | Que siga cubriendo la tabla de la sección 2 (obligatorias) |
 | El dominio de `prod` o de `dev` | `ALLOWED_ORIGIN` de ese entorno, y avisar al frontend si cambia la URL que consume |
 

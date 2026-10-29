@@ -65,7 +65,7 @@ Qué validar y dónde, con el estado real de cada ruta:
 | `POST /update-file`, `POST /delete-file` | `fileName` | Cadena no vacía (400) y `isValidDataKey` (400 `Invalid fileName`, antes de tocar S3) | Que el objeto exista (no se exige) |
 | `GET /get-data/:path(*)` | `path` | Nada | Restringir a `data/active/` (M2) |
 | `GET /get-image` | `imageKey` | Cadena no vacía (400; cubre `?imageKey=a&imageKey=b`) y lista de permitidos `isValidImageKey` (400 `imageKey is not valid`, antes de llamar a S3) | Que la clave exista en el listado (no se exige: riesgo residual aceptado) |
-| `POST /upload-image` | `file`, `title` | `file` presente y `title` cadena no vacía (400); `MulterError` a 400 | Tipo MIME y extensión, tamaño, saneo completo del título (M5, M6) |
+| `POST /upload-image` | `file`, `title` | `file` presente y `title` cadena no vacía (400); `MulterError` a 400 | Tipo MIME y extensión, saneo completo del título (M5). El tamaño (5 MB) se limita desde M6 |
 | `DELETE /delete-image` | `imageKey` | Cadena no vacía (400) y `isValidImageKey` (400 `imageKey is not valid`, antes de llamar a S3) | Nada de forma pendiente; el resto de M4/M5 está en `/upload-image` y en las rutas de versiones |
 | `POST /upload-term`, `DELETE /delete-term` | `term` | Cadena (400 `Term must be a string` en `/upload-term`) y no vacía (400) | Longitud máxima |
 | `POST /send-email` | `username`, `email`, `subject`, `message` | `validateContactMessage`: cuatro cadenas no vacías tras `trim()`, longitudes (100, 150, 2000, 254), comprobación básica del formato del correo (no RFC), sin caracteres de control en nombre, correo y asunto y sin controles (salvo salto de línea y tabulador) en el mensaje (400, no se envía correo); límite de 5 por 15 minutos por IP (429) | Nada pendiente (M3 resuelto) |
@@ -98,14 +98,14 @@ Cómo validar: **una función de validación por forma de entrada**, con una lis
 | Regla | Por qué | Estado |
 |---|---|---|
 | No bloquees el event loop con trabajo pesado en una petición: `exceljs` carga el libro entero en memoria | Con un Excel grande, todas las demás peticiones esperan. Con una t3.nano (poca memoria) el proceso puede morir | `POST /upload`, `updateFileS3` y `deleteFileFromS3` convierten dentro de la petición (M9). Sin límite de tamaño en `multer` (M6) |
-| Pon **límite de tamaño** a todo lo que entra en memoria | `multer.memoryStorage()` guarda el fichero entero en RAM | **No cumple** (M6) |
+| Pon **límite de tamaño** a todo lo que entra en memoria | `multer.memoryStorage()` guarda el fichero entero en RAM | Cumple (M6 resuelto el 28/10/2026) |
 | Si el procesamiento crece, sácalo de la petición (cola + worker). La decisión de infraestructura está pendiente | Con el ALB de prod hay varias instancias: la cola no puede vivir en memoria del proceso | Sin decidir; SQS o Redis gestionado (**por confirmar** con infra) |
 | Lo que cambia poco y se pide mucho se cachea o se precalcula | `GET /get-merged-data` recalcula todo en cada petición | M8 |
 
 ## 8. Configuración y entorno
 
 - **Toda variable nueva** entra por `config/validateEnv.js` (`required`; o `requiredLocal` si solo hace falta con `NODE_ENV=local`), por `.env.example` (con el valor **vacío** si es un secreto) y por el entorno de Beanstalk de `sigmetum-infra`. Las opcionales (`NODE_ENV`, `PORT`, `API_PREFIX`) se declaran en `OPTIONAL_ENV` de `scripts/quality-check.mjs` con su motivo. Procedimiento: skill `env-var-change`.
-- **Se valida el valor, no solo que exista.** Hoy `validateEnv` solo comprueba presencia: un `ADMIN_PASSWORD` que no sea un hash bcrypt hace que **todos los logins den 401** sin ningún aviso, y un `JWT_SECRET` corto se acepta (M15).
+- **Se valida el valor, no solo que exista.** `validateEnv` comprueba, además de la presencia, que `ADMIN_PASSWORD` sea un hash bcrypt completo, que `JWT_SECRET` tenga al menos 32 caracteres y que `JWT_EXPIRATION` sea una duración con unidad y positiva (M15 resuelto el 28/10/2026). Es estricto (el arranque falla) salvo con `NODE_ENV` exactamente `local` o `test`, donde solo avisa. Los mensajes nunca llevan el valor.
 - Se lee `process.env` **al usarse o al arrancar, de forma centralizada**, no dispersa. Hoy se lee al cargar los módulos (`userAuthentication.js`) y dentro de las funciones (`awsS3connect.js`).
 - Nada de valores por defecto que oculten una configuración ausente en producción.
 
@@ -209,7 +209,6 @@ No los repitas al escribir código nuevo:
 | Leer, modificar y escribir un objeto entero sin control de concurrencia | `uploadTextToJsonS3`, `deleteTermFromS3` | M1 |
 | `listObjectsV2` sin paginar | `listFilesInS3Folder` | M10 |
 | Middleware fuera de `middleware/` | `functions/tokenAuthentication.js` | B7 |
-| `max` (obsoleto) en `express-rate-limit` 8 | `routes/auth.js` | B6 |
 
 ## 16. Mantener esta guía
 

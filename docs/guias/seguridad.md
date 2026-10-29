@@ -33,12 +33,12 @@ Toda la seguridad real está aquí: el frontend solo evita errores y no facilita
 
 | Regla | Por qué | Se comprueba | Estado |
 |---|---|---|---|
-| `ADMIN_PASSWORD` contiene un **hash bcrypt**, nunca la contraseña en claro | `userAuth` hace `bcrypt.compare`: con un valor que no sea un hash, **todos los logins dan 401** sin avisar | Revisión | **No se valida al arrancar** (M15). Cómo generarlo: [03](../03-configuracion.md#generar-el-hash-de-admin_password) |
-| `JWT_SECRET` es largo y aleatorio (al menos 32 bytes; por ejemplo `node -e "console.log(require('crypto').randomBytes(48).toString('base64'))"`), **distinto por entorno** | Con un secreto corto se pueden falsificar tokens por fuerza bruta | Revisión | `validateEnv` solo comprueba que exista (M15). La fortaleza de los valores reales **(por confirmar)** |
+| `ADMIN_PASSWORD` contiene un **hash bcrypt**, nunca la contraseña en claro | `userAuth` hace `bcrypt.compare`: con un valor que no sea un hash, **todos los logins dan 401** sin avisar | Revisión | `validateEnv` comprueba al arrancar que tiene forma de hash bcrypt completo (M15 resuelto el 28/10/2026; estricto salvo `NODE_ENV` `local` o `test`, donde solo avisa). Cómo generarlo: [03](../03-configuracion.md#generar-el-hash-de-admin_password) |
+| `JWT_SECRET` es largo y aleatorio (al menos 32 bytes; por ejemplo `node -e "console.log(require('crypto').randomBytes(48).toString('base64'))"`), **distinto por entorno** | Con un secreto corto se pueden falsificar tokens por fuerza bruta | Revisión | `validateEnv` exige al menos 32 caracteres (M15 resuelto el 28/10/2026; estricto salvo `NODE_ENV` `local` o `test`). La aleatoriedad y los valores reales de despliegue **(por confirmar)** |
 | **Rotación** de `JWT_SECRET`: al sospechar una filtración o cuando cambie quien lo conoce | Cambiarlo invalida todos los tokens, lo que con un único administrador es aceptable | Revisión | Sin procedimiento escrito |
-| Los tokens **caducan** (`JWT_EXPIRATION`, `8h` en el ejemplo) y el valor es el mínimo útil | Un token robado deja de servir | `validateEnv` exige la variable | Cumple |
-| `jwt.verify` fija el algoritmo (`algorithms: ['HS256']`) | No depender del valor por defecto de la librería | Revisión | **No cumple** (B8) |
-| El login tiene **límite de intentos** y `trust proxy` bien configurado | Detrás del ALB, sin `trust proxy`, todos los clientes comparten una IP y el mismo contador: cualquiera puede bloquear el login del administrador | `routes/auth.js` | Límite de 10 intentos cada 15 minutos. **Falta `trust proxy`** (M12, por confirmar en el despliegue). La opción `max` está obsoleta (B6) |
+| Los tokens **caducan** (`JWT_EXPIRATION`, `8h` en el ejemplo) y el valor es el mínimo útil | Un token robado deja de servir | `validateEnv` exige la variable y que sea una duración con unidad y mayor que cero (M15) | Cumple |
+| `jwt.verify` fija el algoritmo (`algorithms: ['HS256']`) | No depender del valor por defecto de la librería | Test (`tests/jwt-algoritmo.test.js`) | Cumple desde el 28/10/2026 (B8): `jwt.verify` con `algorithms: ['HS256']` y `jwt.sign` con `algorithm: 'HS256'` |
+| El login tiene **límite de intentos** y `trust proxy` bien configurado | Detrás del ALB, sin `trust proxy`, todos los clientes comparten una IP y el mismo contador: cualquiera puede bloquear el login del administrador | `routes/auth.js` | Límite de 10 intentos cada 15 minutos. **Falta `trust proxy`** (M12, por confirmar en el despliegue). Los limitadores usan `limit` (B6 resuelto el 28/10/2026) |
 | Un manejador de login **no puede quedarse colgado** | Quien conoce el usuario puede agotar conexiones enviando peticiones sin contraseña | Test (cuando existan) | **No cumple**: `userAuth` sin `try/catch` deja la petición sin respuesta **(verificado ejecutándolo)** (A7) |
 | Mensaje único para usuario y contraseña incorrectos | No revela qué usuarios existen | Revisión | Cumple (`Invalid credentials`) |
 | Las dependencias de autenticación están al día | `jsonwebtoken` depende de `jws`, con un aviso alto sobre la verificación de firmas HMAC | `npm run quality` | **No cumple** (M16); el alcance real del aviso, **por confirmar** |
@@ -75,8 +75,8 @@ Rutas de **lectura** públicas (los datos del portal son públicos): `GET /list-
 
 | Regla | Por qué | Estado |
 |---|---|---|
-| `multer` con `limits.fileSize` | `memoryStorage` guarda el fichero entero en RAM: un fichero enorme tumba el proceso | **No cumple** (M6) |
-| Se valida la **extensión y el tipo**: para datos (`/upload`), la extensión `.xlsx`, sin comprobar el MIME porque lo manda el cliente; `image/jpeg`, `image/png`, `image/webp` para la galería | El backend solo procesa `.xlsx`; el `ContentType` de las imágenes lo pone el cliente. Un fichero con nombre `.xlsx` se carga entero en memoria y `exceljs` lo descomprime sin límite (M6, M9); la ruta exige JWT y es solo del administrador | **No cumple** (D3, M5) |
+| `multer` con `limits.fileSize` | `memoryStorage` guarda el fichero entero en RAM: un fichero enorme tumba el proceso | Cumple desde el 28/10/2026 (M6): 10 MB en `/upload` y 5 MB en `/upload-image`, máximo aceptado exacto; 400 `File exceeds the maximum allowed size` |
+| Se valida la **extensión y el tipo**: para datos (`/upload`), la extensión `.xlsx`, sin comprobar el MIME porque lo manda el cliente; `image/jpeg`, `image/png`, `image/webp` para la galería | El backend solo procesa `.xlsx`; el `ContentType` de las imágenes lo pone el cliente. Un fichero con nombre `.xlsx` se carga entero en memoria y `exceljs` lo descomprime sin límite (M9); la ruta exige JWT y es solo del administrador | **No cumple** (D3, M5) |
 | Un `.xlsx` es un zip: se trata como **no confiable** (zip bomb, libros con millones de filas) | `exceljs` lo carga entero en memoria y no hay límite de descompresión **(por confirmar)** | Sin límites (M9). Mitigado porque solo el administrador sube ficheros |
 | El procesamiento pesado sale de la petición si el volumen crece | Una conversión larga bloquea el event loop | M9 |
 | Se comprueba que la subida llegó a S3 antes de dar el éxito | Un fallo parcial deja datos a medias | Cumple: se espera a cada `putObject` |
@@ -167,7 +167,7 @@ Solo nombres de categoría; el detalle de cada riesgo está en la fuente.
 | `npm audit` de producción (alta o crítica) | **Pasa**: sin avisos altos o críticos y sin excepciones aceptadas. Solo queda el moderado de `uuid` vía `exceljs` (M20) |
 | ESLint | Sin errores; avisos en el tope (ver [buenas prácticas](buenas-practicas-backend.md#14-eslint-y-el-tope-de-avisos)) |
 | Login con el usuario correcto y sin contraseña | La petición **no recibe respuesta** (A7) |
-| `trust proxy`, `helmet`, límite de `multer`, límite en `/send-email` | `trust proxy` y el límite de `/send-email` configurados; `helmet` y el límite de `multer` no (B1, M6) |
+| `trust proxy`, `helmet`, límite de `multer`, límite en `/send-email` | `trust proxy` y el límite de `/send-email` configurados; `helmet` no (B1); el límite de `multer` configurado desde el 28/10/2026 (M6) |
 | Validación de la entrada de las rutas | Parcial: ver la tabla de [buenas prácticas](buenas-practicas-backend.md#4-validación-de-entrada) |
 | `errorHandler` y mensajes al cliente | Sin trazas en producción; mensajes fijos o mapeados, sin `err.message` (M17, resuelto el 28/10/2026); CORS rechazado como `403` sin el origen (M22) |
 | Bucket: acceso público bloqueado, cifrado y versionado; IAM mínimo | Sí **(verificado en `sigmetum-infra`)** |

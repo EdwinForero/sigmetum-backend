@@ -8,7 +8,7 @@ const tokenAuth = (req, res, next) => {
         return res.status(401).json({ success: false, error: 'No token provided' });
     }
 
-    jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
+    jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] }, (err, user) => {
         if (err) {
             const expired = err.name === 'TokenExpiredError';
             return res.status(401).json({

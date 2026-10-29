@@ -55,7 +55,7 @@ Respuestas:
 - `401` → `Invalid credentials` (cadenas válidas, usuario o contraseña incorrectos; una cadena vacía también da 401)
 - `429` → `Too many login attempts. Please try again in 15 minutes.`
 
-El token lleva `{ userId }` y caduca según `JWT_EXPIRATION`.
+El token lleva `{ userId }`, se firma con HS256 (el algoritmo va fijado al firmar y `tokenAuth` solo acepta HS256; un token con otro algoritmo, como HS512, o con `alg: none` da `401` `Invalid token`) y caduca según `JWT_EXPIRATION`.
 
 ### `GET /auth` 🔒
 Comprueba que el token es válido. `200` → `data: "Authorized"`; `401` → `No token provided` / `Token expired` / `Invalid token`.
@@ -86,6 +86,7 @@ Concatena en un único array todos los JSON de `data/active/`. Es el endpoint qu
 Validación antes de procesar:
 - Sin fichero → `400` `File is required`.
 - Extensión distinta de `.xlsx` (sin distinguir mayúsculas; `.xls`, `.xlsm`, `.csv` y `.txt` entre ellas) → `400` `Only .xlsx files are allowed`, con cualquier MIME. En `/upload` el MIME no se comprueba (desde el 28/10/2026) porque lo manda el cliente; la extensión es la única comprobación de tipo. Un fichero que no es un libro válido pero se llama `.xlsx` llega a `convertExcelToJson` y responde `500` `Internal server error` (el `err.message` de `exceljs`, por ejemplo `Can't find end of central directory…` si no es un zip o `Cannot read properties of undefined (reading 'eachRow')` si el libro está vacío, solo se registra en consola; M17 resuelto el 28/10/2026). `/upload-image` sí sigue confiando en el MIME (M5).
+- Fichero de más de **10 MB** → `400` `File exceeds the maximum allowed size` (texto fijo, sin cifras; sin llamar a S3). El máximo aceptado es exacto: 10 MB justos se aceptan y 10 MB + 1 byte se rechazan (M6).
 - Campo multipart con otro nombre (`MulterError`, p. ej. `Unexpected field`) → `400` `File upload error: ...` (antes 500).
 
 1. Convierte el Excel a JSON (`convertExcelToJson`).
@@ -153,7 +154,7 @@ Devuelve todas las imágenes de `gallery/` con URL prefirmada (válida 1 hora):
 Devuelve el glosario `data/terms/noLatinTerms.json`: `[ { "term": "..." } ]`. Si no existe devuelve `[]`.
 
 ### `POST /upload-image` 🔒
-`multipart/form-data` con `file` y `title`. Guarda en `gallery/{title_con_guiones_bajos}{extensión}`. `400` `File and title are required` si falta el fichero o `title` no es una cadena o está vacío (antes, un `title` no cadena daba 500). Un campo multipart con nombre incorrecto da `400` `File upload error: ...` (antes 500).
+`multipart/form-data` con `file` y `title`. Guarda en `gallery/{title_con_guiones_bajos}{extensión}`. `400` `File and title are required` si falta el fichero o `title` no es una cadena o está vacío (antes, un `title` no cadena daba 500). Un fichero de más de **5 MB** da `400` `File exceeds the maximum allowed size` (el máximo aceptado es exacto: 5 MB justos se aceptan y 5 MB + 1 byte se rechazan; sin llamar a S3). Un campo multipart con nombre incorrecto da `400` `File upload error: ...` (antes 500).
 
 ### `DELETE /delete-image` 🔒
 Body: `{ "imageKey": "Encinar.jpg" }`. `400` `imageKey is required` si falta o no es una cadena; `400` `imageKey is not valid` si no cumple la lista de permitidos (misma regla que `GET /get-image`, ver [06](06-almacenamiento-s3.md#regla-de-imagekey)), sin llamar a S3.
@@ -174,7 +175,8 @@ Body: `{ "term": "texto" }`. Elimina todas las entradas con ese texto exacto. `4
 |---|---|
 | `TokenExpiredError` | `Token expired` |
 | `JsonWebTokenError` | `Invalid token` |
-| `MulterError` | `File upload error: ...` |
+| `MulterError` con código `LIMIT_FILE_SIZE` | `File exceeds the maximum allowed size` |
+| Otros `MulterError` | `File upload error: ...` |
 | S3 `NoSuchKey` | `The requested file does not exist in storage` |
 | S3 `NoSuchBucket` | `Storage bucket is not configured correctly` |
 | S3 `AccessDenied` | `Access denied to storage` |

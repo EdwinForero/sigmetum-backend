@@ -31,7 +31,7 @@ const userAuth = async (req, res, next) => {
       return res.status(401).json({ success: false, error: 'Invalid credentials' });
     }
 
-    const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: JWT_EXPIRATION });
+    const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: JWT_EXPIRATION, algorithm: 'HS256' });
 
     res.json({ success: true, data: { token } });
   } catch (error) {

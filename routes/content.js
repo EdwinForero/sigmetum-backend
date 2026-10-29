@@ -18,7 +18,9 @@ const {
 } = require('../aws/awsS3connect');
 const { GALLERY_PATH, TERMS_PATH, TERMS_FILE } = require('../config/s3Paths');
 
-const upload = multer({ storage: multer.memoryStorage() });
+// Maximum accepted file size. multer rejects a size equal to fileSize, so 1 is added to accept exactly the maximum.
+const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_UPLOAD_BYTES + 1 } });
 
 const transporter = nodemailer.createTransport({
     host: 'smtp.gmail.com',
@@ -32,7 +34,7 @@ const transporter = nodemailer.createTransport({
 
 const sendEmailLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 5,
+    limit: 5,
     message: { success: false, error: 'Too many messages. Please try again in 15 minutes.' },
     standardHeaders: true,
     legacyHeaders: false,

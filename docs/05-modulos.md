@@ -37,7 +37,7 @@ Construye y exporta la app (`module.exports = app`) sin abrir puerto, sin `doten
 |---|---|
 | `required` | Array con las variables siempre obligatorias |
 | `requiredLocal` | `['AWS_PROFILE']`, obligatorias sólo si `NODE_ENV === 'local'` |
-| `validateEnv()` | Recorre ambas listas y lanza `Error("Variables de entorno requeridas no definidas: ...")` con todas las que falten |
+| `validateEnv()` | Recorre ambas listas y lanza `Error("Variables de entorno requeridas no definidas: ...")` con todas las que falten. Después valida el valor de las presentes (M15): `ADMIN_PASSWORD` hash bcrypt completo, `JWT_SECRET` de al menos 32 caracteres y `JWT_EXPIRATION` con unidad y mayor que cero (`isValidExpiration`: rechaza solo números y duraciones <= 0, y delega el formato en `jsonwebtoken`). Si `NODE_ENV` no es exactamente `local` ni `test` lanza `Error("Variables de entorno con valor no válido: ...")`; en `local` y `test` solo emite `console.warn` con prefijo `[validateEnv]`. Los mensajes nombran variable y regla, nunca el valor. Detalle en [03](03-configuracion.md#variables-de-entorno) |
 
 Exporta: `validateEnv` (función por defecto).
 
@@ -68,7 +68,7 @@ Todos los routers declaran sus rutas en un único `router`. `tokenAuth` es el **
 
 | Elemento | Descripción |
 |---|---|
-| `loginLimiter` | `rateLimit({ windowMs: 15 min, max: 10 })` con cabeceras estándar `RateLimit-*` |
+| `loginLimiter` | `rateLimit({ windowMs: 15 min, limit: 10 })` con cabeceras estándar `RateLimit-*` |
 | `POST /log` | `loginLimiter` → `userAuth` |
 | `GET /auth` | `tokenAuth` → responde `Authorized` |
 
@@ -76,7 +76,7 @@ Todos los routers declaran sus rutas en un único `router`. `tokenAuth` es el **
 
 | Elemento | Descripción |
 |---|---|
-| `upload` | Instancia `multer({ storage: memoryStorage() })` |
+| `upload` | Instancia `multer({ storage: memoryStorage(), limits: { fileSize: MAX_UPLOAD_BYTES + 1 } })` con `MAX_UPLOAD_BYTES` = 10 MB. Se suma 1 porque multer rechaza el tamaño igual a `fileSize`: así 10 MB exactos se aceptan y 10 MB + 1 byte da `LIMIT_FILE_SIZE` (400) |
 | `GET /list-files` | `listFilesInS3Folder('data/')`, agrupa por el segundo segmento de la clave descartando `RESERVED_SEGMENTS` |
 | `GET /get-data/:path(*)` | `getFileFromS3(path)` |
 | `GET /get-merged-data` | `getMergedDataInS3Folder(ACTIVE_PATH)` |
@@ -89,9 +89,9 @@ Todos los routers declaran sus rutas en un único `router`. `tokenAuth` es el **
 
 | Elemento | Descripción |
 |---|---|
-| `upload` | Instancia `multer` en memoria |
+| `upload` | Instancia `multer` en memoria con `limits.fileSize` = 5 MB + 1 (mismo motivo que en `data.js`): 5 MB exactos se aceptan y 5 MB + 1 byte da 400 |
 | `transporter` | `nodemailer.createTransport` contra `smtp.gmail.com:587` (`secure: false` → STARTTLS) con `EMAIL`/`EMAIL_PASSWORD` |
-| `sendEmailLimiter` | `rateLimit({ windowMs: 15 min, max: 5 })` con cabeceras estándar; al superarlo responde 429 con `{ success: false, error }`. Almacén en memoria (se reinicia al reiniciar y se multiplica por instancia). Copia de `loginLimiter`, que usa `max` (obsoleto en `express-rate-limit` 8, B6) |
+| `sendEmailLimiter` | `rateLimit({ windowMs: 15 min, limit: 5 })` con cabeceras estándar; al superarlo responde 429 con `{ success: false, error }`. Almacén en memoria (se reinicia al reiniciar y se multiplica por instancia). Copia de `loginLimiter`; los dos usan `limit` (B6 resuelto) |
 | `POST /send-email` | `sendEmailLimiter` → `validateContactMessage(req.body)`; si devuelve `error`, 400; si no, construye `mailOptions` con los valores recortados (from/to = `EMAIL`, `replyTo` = email del usuario) y `transporter.sendMail`. Todo el cuerpo va dentro de `try/catch` con `next(error)`. Ruta pública (sin `tokenAuth`). El limitador es el primer manejador, cuenta antes de validar y cuenta también el tráfico anónimo |
 | `GET /list-images` | `getPresignedUrlsFromS3Folder(GALLERY_PATH)` |
 | `GET /get-image` | 400 si `imageKey` falta, está vacío o no es cadena; 400 `imageKey is not valid` si `isValidImageKey` lo rechaza; si no, `getPresignedUrlFromS3(GALLERY_PATH, imageKey)` |
@@ -114,7 +114,7 @@ Handler de login (no es middleware: solo llama a `next(error)` ante un fallo ine
 - Si `username` o `password` no son cadenas (ausentes, número, objeto, `null`) → 400 `Username and password are required and must be strings`.
 - Busca por `username`; si no existe → 401.
 - `bcrypt.compare(password, user.password)`; si falla → 401. **`ADMIN_PASSWORD` debe ser un hash bcrypt.**
-- Firma `jwt.sign({ userId }, JWT_SECRET, { expiresIn: JWT_EXPIRATION })` y responde `{ token }`.
+- Firma `jwt.sign({ userId }, JWT_SECRET, { expiresIn: JWT_EXPIRATION, algorithm: 'HS256' })` y responde `{ token }`.
 
 Las variables se leen al cargar el módulo, no en cada petición.
 
@@ -126,6 +126,7 @@ Middleware.
 - Sin token → 401 `No token provided`.
 - `jwt.verify` con `JWT_SECRET`: error → 401 `Token expired` o `Invalid token`.
 - Éxito → `req.user = payload` y `next()`.
+- `jwt.verify` fija `algorithms: ['HS256']` (B8): un token firmado con otro algoritmo o con `alg: none` da 401 `Invalid token`; los emitidos antes siguen valiendo porque `jsonwebtoken` firma con HS256 por defecto.
 
 ### `validateImageKey.js` → `isValidImageKey(key)`
 
@@ -260,7 +261,7 @@ Se monta con `app.use(notFound)` después de los tres routers y antes de `errorH
 | Elemento | Descripción |
 |---|---|
 | `isDev` | `NODE_ENV === 'local'` |
-| `friendlyMessage(err, status)` | Texto que ve el cliente, por este orden: `err.publicMessage`; mapeados por `err.name` / `err.code` / `err.Code` (`TokenExpiredError`, `JsonWebTokenError`, `MulterError`, `NoSuchKey`, `NoSuchBucket`, `AccessDenied`, `NetworkingError` / `ECONNREFUSED`); `Invalid JSON` (`err.type === 'entity.parse.failed'`); `Payload too large` (413); `Bad request` (resto de 4xx, con guarda `400 <= status < 500`); y `Internal server error` para todo lo demás. Ya no devuelve `err.message` (M17). Tabla en [04-api.md](04-api.md#errores-comunes) |
+| `friendlyMessage(err, status)` | Texto que ve el cliente, por este orden: `err.publicMessage`; mapeados por `err.name` / `err.code` / `err.Code` (`TokenExpiredError`, `JsonWebTokenError`, `MulterError`, `NoSuchKey`, `NoSuchBucket`, `AccessDenied`, `NetworkingError` / `ECONNREFUSED`); `File exceeds the maximum allowed size` (`MulterError` con `LIMIT_FILE_SIZE`, antes de la línea genérica `File upload error: ...` del resto de `MulterError`); `Invalid JSON` (`err.type === 'entity.parse.failed'`); `Payload too large` (413); `Bad request` (resto de 4xx, con guarda `400 <= status < 500`); y `Internal server error` para todo lo demás. Ya no devuelve `err.message` (M17). Tabla en [04-api.md](04-api.md#errores-comunes) |
 | `errorHandler(err, req, res, next)` | Status = `err.status \|\| err.statusCode`, o 400 si `err.name === 'MulterError'`, o 500. En local loguea el stack; en otros entornos sólo el mensaje (el real, que no se envía al cliente). Responde `{ success: false, error }` |
 
 **CORS en `index.js`.** El callback de `origin` de `cors` rechaza un origen no permitido con `console.warn('CORS: origin not allowed:', JSON.stringify(origin.slice(0, 200)))` (el origen se trunca a 200 caracteres antes de registrarlo, para que un `Origin` enorme no llene el registro, y `JSON.stringify` neutraliza saltos de línea y comillas de un valor que controla el cliente) y pasa a `cors` un único `Error` constante, `originNotAllowed` (`status = 403`, `publicMessage = 'Origin not allowed'`), creado fuera del callback porque ni `cors` ni `errorHandler` lo mutan (su traza es la del arranque); `errorHandler` lo responde como `403` `Origin not allowed`, sin el origen. El origen solo está en el `warn`.

@@ -26,7 +26,7 @@ Runtime: **Node.js** (CommonJS, `require`). Arranque con `npm start` → `node i
 | Paquete | Versión | Uso |
 |---|---|---|
 | `supertest` | 7.3.1 | Peticiones HTTP a la app en los tests (`npm test`). Versión exacta |
-| `nodemon` | 3.1.14 | Recarga en caliente (no hay script configurado; usar `npx nodemon index.js`) |
+| `nodemon` | 3.1.14 | Recarga en caliente (`npm run dev`) |
 | `eslint` | 9.39.5 | Linter (`npm run lint`). Versión exacta, compatible con Node 20 |
 | `@eslint/js` | 9.39.5 | Reglas recomendadas de ESLint |
 | `globals` | 17.12.0 | Variables globales de Node para ESLint |

@@ -7,6 +7,7 @@ const friendlyMessage = (err, status) => {
     if (err.publicMessage) return err.publicMessage;
     if (name === 'TokenExpiredError') return 'Token expired';
     if (name === 'JsonWebTokenError') return 'Invalid token';
+    if (name === 'MulterError' && code === 'LIMIT_FILE_SIZE') return 'File exceeds the maximum allowed size';
     if (name === 'MulterError') return `File upload error: ${err.message}`;
     if (code === 'NoSuchKey') return 'The requested file does not exist in storage';
     if (code === 'NoSuchBucket') return 'Storage bucket is not configured correctly';

@@ -19,7 +19,9 @@ const {
 } = require('../aws/awsS3connect');
 const { DATA_PATH, ACTIVE_PATH, RESERVED_SEGMENTS } = require('../config/s3Paths');
 
-const upload = multer({ storage: multer.memoryStorage() });
+// Maximum accepted file size. multer rejects a size equal to fileSize, so 1 is added to accept exactly the maximum.
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_UPLOAD_BYTES + 1 } });
 
 // ─── Public routes ───────────────────────────────────────────────────────────
 
