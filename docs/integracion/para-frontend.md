@@ -12,7 +12,7 @@ Documento para quien mantiene `sigmetum-frontend`. Sigue la convención de [../g
 | Id | Qué pasa | Efecto |
 |---|---|---|
 | **F1** | `GET /get-data/:path(*)` es público y lee cualquier clave del bucket, pero es el único endpoint que puede abrir una versión histórica | El frontend lo usa para abrir un Excel de versión, que hoy da error (`frontend:D1`). No se puede cerrar sin dar antes un sustituto |
-| **F2** | `POST /upload` responde el `processedData` completo en el 400 de fila vacía | Con un Excel grande, la respuesta pesa más de lo necesario; el frontend no lo usa (`frontend:D8`) |
+| **F2** | ~~`POST /upload` responde el `processedData` completo en el 400 de fila vacía~~ **Resuelto en el backend el 29/10/2026 (D8)**: el `400` de borrador lleva `data.emptyFields[].rowIndex`, `data.draftKey` y `data.actionRequired`, sin `processedData` ni `emptyFields[].rowData` | Cambio **compatible**, sin `/api/v2`: `FileUpload.js` (líneas 66-71) solo usa `data.draftKey` y `data.emptyFields[].rowIndex`, `FileUpload.test.js` solo siembra `{ emptyFields: [{ rowIndex: 3 }], draftKey }` y ningún otro archivo de `src/` ni `sigmetum-infra` usa `processedData`, `rowData` ni `actionRequired` (`frontend:D8`). El frontend debe actualizar su `para-backend.md` (sección 6, D8, y la fila de `POST /upload`) en su repositorio |
 | **F3** | ~~`GET /list-images` responde 500 si la galería está vacía, en vez de `[]`~~ **Resuelto en el backend el 29/10/2026 (A5/D5)**: con la galería vacía o con solo el marcador `gallery/` responde `200` `data: []`; el marcador ya no sale como imagen de `fileName` vacío | Cambio compatible. Que el frontend no dependa del elemento de clave vacía del marcador está **(por confirmar)** (`frontend:D5`) |
 | **F4** | ~~El login (`POST /log`) puede quedarse sin responder si falta `password`~~ **Resuelto el 28/10/2026**: ahora responde `400` si `username` o `password` no son cadenas | El frontend puede no distinguir un `400` de un `401` en el login **(por confirmar)**; antes la petición no recibía respuesta (hallazgo interno A7) |
 | **F5** | `GET /get-image` sin `imageKey` pasa de `200` (URL a `gallery/undefined`) a `400` `imageKey is required` (28/10/2026) | Que el frontend no la llame sin clave está **(por confirmar)** |
@@ -54,7 +54,7 @@ Contra la sección 2 de `../sigmetum-frontend/docs/integracion/para-backend.md` 
 | `GET /get-merged-data` | `data`: array de registros con las 11 columnas | Sí |
 | `GET /list-files` | `data`: `{ [provincia]: [{ key, name }] }` | Sí |
 | `GET /get-data/<key>` | `data`: array de registros | **No, si `<key>` es un `.xlsx`** (ver F1) |
-| `POST /upload` | Con `400`: `data.emptyFields[].rowIndex`, `data.draftKey`. Con `200`: solo el estado | Sí, aunque el `400` incluye más de lo que se necesita (F2) |
+| `POST /upload` | Con `400`: `data.emptyFields[].rowIndex`, `data.draftKey`. Con `200`: solo el estado | Sí (el `400` ya solo lleva `emptyFields[].rowIndex`, `draftKey` y `actionRequired`; F2 resuelto el 29/10/2026) |
 | `POST /upload/confirm`, `POST /update-file`, `POST /delete-file` | Solo el estado | Sí (con claves válidas; las mal formadas dan 400, F8) |
 | `GET /list-terms` | `data`: `[{ term }]` | Sí |
 | `GET /list-images` | `data`: `[{ fileName, url }]` | Sí (con la galería vacía, `[]`; F3 resuelto el 29/10/2026) |
@@ -87,7 +87,7 @@ Clasificación de `D1` a `D9` de `../sigmetum-frontend/docs/integracion/para-bac
 | `frontend:D5` (F3) | Backend (hecho el 29/10/2026) | Resuelto: `[]` con la galería vacía o con solo el marcador (F3, F9) |
 | `frontend:D6` | Solo frontend | Ninguna |
 | `frontend:D7` | Frontend (y ver M12 de este repo) | El límite de 10 intentos solo es fiable si `trust proxy` está bien configurado detrás del ALB; sin eso, el 429 puede dispararse para todos los clientes a la vez |
-| `frontend:D8` (F2) | Backend | Omitir o limitar `processedData` en el 400 de `POST /upload` |
+| `frontend:D8` (F2) | Backend (hecho el 29/10/2026) | Resuelto: el 400 de `POST /upload` ya no lleva `processedData` ni `rowData` (F2). Pendiente solo que el frontend actualice su `para-backend.md` (sección 6, D8, y la fila de `POST /upload`) en su repositorio |
 | `frontend:D9` | Ninguno (informativa) | — |
 
 ## 5. Si cambias algo en el backend

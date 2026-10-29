@@ -81,7 +81,7 @@ Todos los routers declaran sus rutas en un único `router`. `tokenAuth` es el **
 | `GET /list-files` | `listFilesInS3Folder('data/')`, agrupa por el segundo segmento de la clave descartando `RESERVED_SEGMENTS` |
 | `GET /get-data/:path(*)` | `getFileFromS3(path)` |
 | `GET /get-merged-data` | `getMergedDataInS3Folder(ACTIVE_PATH)` |
-| `POST /upload` | Sin `req.file` → 400; extensión distinta de `.xlsx` → 400 (el MIME no se comprueba en esta ruta: lo manda el cliente). Después `convertExcelToJson` → `validateProvincia(processedData)` (400 con su mensaje, antes de cualquier escritura) → un único `now = new Date()` pasado a `getNextVersion(provincia, now)` y `formatFileName(version, now)` → `uploadFileToS3` (Excel) → si no hay vacíos, `uploadFileToS3` (JSON activo); si hay vacíos, 400 con `draftKey` |
+| `POST /upload` | Sin `req.file` → 400; extensión distinta de `.xlsx` → 400 (el MIME no se comprueba en esta ruta: lo manda el cliente). Después `convertExcelToJson` → `validateProvincia(processedData)` (400 con su mensaje, antes de cualquier escritura) → un único `now = new Date()` pasado a `getNextVersion(provincia, now)` y `formatFileName(version, now)` → `uploadFileToS3` (Excel) → si no hay vacíos, `uploadFileToS3` (JSON activo); si hay vacíos, 400 con `draftKey` y `emptyFields` solo con `rowIndex` (sin `processedData` ni `rowData`, D8) |
 | `POST /upload/confirm` | 400 si `draftKey` falta o no es cadena; 400 `Invalid draftKey` si `isValidDataKey` la rechaza. `confirmed` falso → `deleteFileFromS3(draftKey)`; verdadero → `updateFileS3(draftKey)` |
 | `POST /update-file` | 400 si `fileName` falta o no es cadena; 400 `Invalid fileName` si `isValidDataKey` la rechaza; `updateFileS3(fileName)` |
 | `POST /delete-file` | 400 si `fileName` falta o no es cadena; 400 `Invalid fileName` si `isValidDataKey` la rechaza; `deleteFileFromS3(fileName)` |
@@ -183,7 +183,7 @@ Comportamiento:
   | 11 | Especies Características |
 
 - Valores con coma se convierten en array (`"Quercus, Pistacia"` → `["Quercus", "Pistacia"]`).
-- Celdas vacías no se incluyen en el objeto de la fila; la fila se añade a `emptyFields` como `{ rowIndex, rowData }` pero **también** se incluye en `processedData`.
+- Celdas vacías no se incluyen en el objeto de la fila; la fila se añade a `emptyFields` como `{ rowIndex, rowData }` pero **también** se incluye en `processedData`. La función sigue construyendo ambos, pero `POST /upload` ya no los expone: desde el 29/10/2026 (D8) su `400` solo devuelve `emptyFields[].rowIndex` y `draftKey`; `processedData` se usa dentro de la ruta (provincia y JSON activo) y `rowData` no se usa fuera de la función.
 
 Helper interno `getCellValue(cell)`: normaliza celdas de ExcelJS — texto enriquecido (`richText`) se concatena, fórmulas devuelven su `result`, `null`/`undefined` → `null`.
 

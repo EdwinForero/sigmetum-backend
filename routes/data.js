@@ -103,8 +103,7 @@ router.post('/upload', tokenAuth, upload.single('file'), async (req, res, next) 
                 success: false,
                 error: 'Some rows have empty fields.',
                 data: {
-                    emptyFields,
-                    processedData,
+                    emptyFields: emptyFields.map(({ rowIndex }) => ({ rowIndex })),
                     draftKey,
                     actionRequired: 'Confirm whether to continue or cancel the upload.',
                 },

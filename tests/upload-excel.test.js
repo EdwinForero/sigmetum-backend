@@ -72,3 +72,27 @@ for (const [n, rows] of borradores) {
         assert.equal(argsLog.upload.length, 1);
     });
 }
+
+test('borrador: cuerpo completo del 400 sin processedData ni rowData', async () => {
+    const sinMunicipio = [...fullRow('Málaga')];
+    sinMunicipio[1] = null;
+    // Cabecera en la fila 1: los datos son las filas 2 a 5; las filas 3 y 5 tienen una celda vacía.
+    const r = await subir(app, [fullRow('Málaga'), sinMunicipio, fullRow('Málaga'), sinMunicipio]);
+    assert.equal(r.status, 400);
+    assert.deepEqual(Object.keys(r.json).sort(), ['data', 'error', 'success']);
+    assert.equal('processedData' in r.json.data, false);
+    assert.ok(r.json.data.emptyFields.every((f) => !('rowData' in f)));
+    const { draftKey, ...resto } = r.json.data;
+    assert.match(draftKey, /^data\/Málaga\/\d{4}-\d{2}-\d{2}_v\d+\.xlsx$/);
+    assert.deepEqual(r.json, {
+        success: false,
+        error: 'Some rows have empty fields.',
+        data: {
+            emptyFields: [{ rowIndex: 3 }, { rowIndex: 5 }],
+            draftKey,
+            actionRequired: 'Confirm whether to continue or cancel the upload.',
+        },
+    });
+    assert.deepEqual(Object.keys(resto).sort(), ['actionRequired', 'emptyFields']);
+    assert.equal(argsLog.upload.length, 1);
+});

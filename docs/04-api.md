@@ -104,13 +104,12 @@ Validación antes de procesar:
 5. Si **hay** celdas vacías → el Excel queda guardado como borrador, **no** se activa, y responde `400`:
    ```json
    { "success": false, "error": "Some rows have empty fields.", "data": {
-     "emptyFields": [ { "rowIndex": 7, "rowData": [ ... ] } ],
-     "processedData": [ ... ],
+     "emptyFields": [ { "rowIndex": 7 } ],
      "draftKey": "data/Malaga/2026-01-15_v2.xlsx",
      "actionRequired": "Confirm whether to continue or cancel the upload."
    } }
    ```
-   El frontend debe llamar después a `/upload/confirm`.
+   Desde el 29/10/2026 (D8) el `400` ya no devuelve `processedData` ni `rowData`: `emptyFields` solo lleva el número de fila (`rowIndex`). `draftKey` y `actionRequired` van dentro de `data`, sin cambios. El frontend debe llamar después a `/upload/confirm`.
 
 ### `POST /upload/confirm` 🔒
 Body: `{ "draftKey": "data/Malaga/2026-01-15_v2.xlsx", "confirmed": true }`
