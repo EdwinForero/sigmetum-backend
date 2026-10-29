@@ -18,7 +18,7 @@ El servidor escucha en `PORT` (8000 por defecto). Comprobación rápida: `GET ht
 | `npm start` | Arranca el servidor (`node index.js`, que carga `app.js`) |
 | `npm run dev` | Arranca el servidor con `nodemon index.js` (recarga en caliente; `nodemon` es dependencia de desarrollo) |
 | `npm test` | Ejecuta la suite de la API (`node --test "tests/**/*.test.js"`, `node:test` + `supertest`): sin red, sin credenciales y sin `.env`. Cobertura parcial (M11 en [07](07-estado-y-deuda-tecnica.md)) |
-| `npm run lint` | ESLint 9: falla con errores o si los avisos superan el tope de `--max-warnings` de `package.json` |
+| `npm run lint` | ESLint 9: falla con errores o si los avisos superan el tope de `--max-warnings` de `package.json` (hoy 4; `quality` falla si el tope es mayor que los avisos reales) |
 | `npm run quality` | Puerta de calidad y seguridad: patrones prohibidos, rutas sin autenticación, variables sin declarar, secretos, `npm audit` de producción, ESLint y la suite de `tests/` (la comprobación de rutas protegidas y públicas con la pila real de Express; ver [seguridad.md](guias/seguridad.md)) |
 | `npm run docs:check` | Comprueba que `docs/` coincide con el código (ver [mantenimiento.md](guias/mantenimiento.md)). Con `-- --metrics` imprime las métricas reales |
 | `npm run docs:gate` | Cierre documental del flujo agéntico: comprueba que los archivos cambiados respecto a `HEAD` llevan sus documentos, que [07](07-estado-y-deuda-tecnica.md) está modificado y con la fecha de hoy, y que hay aviso para PR si se tocó un área de contrato. Mide una iteración contra `HEAD`, así que se ejecuta con el árbol limpio de iteraciones previas (ver [mantenimiento.md](guias/mantenimiento.md#lo-que-comprueba-npm-run-docsgate)) |

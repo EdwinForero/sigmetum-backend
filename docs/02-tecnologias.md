@@ -33,7 +33,7 @@ Runtime: **Node.js** (CommonJS, `require`). Arranque con `npm start` → `node i
 | `eslint-plugin-security` | 4.1.0 | Reglas de seguridad de ESLint (inyección de objetos, expresiones regulares y rutas de fichero no literales) |
 | `eslint-plugin-n` | 17.24.0 | Reglas de Node para ESLint: módulos que faltan o sobran, APIs obsoletas, `child_process` |
 
-Las herramientas de calidad van con **versión exacta** (sin `^`) para que el tope de avisos no cambie solo. La configuración está en `eslint.config.js` y las reglas en [buenas prácticas](guias/buenas-practicas-backend.md#14-eslint-y-el-tope-de-avisos); los `.mjs` de `plugins/` se lintean con las mismas reglas que los scripts de mantenimiento.
+Las herramientas de calidad van con **versión exacta** (sin `^`) para que el tope de avisos no cambie solo (`--max-warnings` bajó de 5 a 4 el 29/10/2026; el número vigente está en `package.json`). La configuración está en `eslint.config.js` y las reglas en [buenas prácticas](guias/buenas-practicas-backend.md#14-eslint-y-el-tope-de-avisos); los `.mjs` de `plugins/` se lintean con las mismas reglas que los scripts de mantenimiento.
 
 Los tests usan `node:test`, el ejecutor integrado en Node, sin framework adicional: los de la API están en `tests/` (`npm test`, con `supertest`) y los de `plugins/` (núcleo `ciclo-agentico` y marketplace local) se ejecutan aparte con `npm run agentes:test`. La cobertura de la API es parcial (M11).
 

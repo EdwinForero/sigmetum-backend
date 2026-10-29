@@ -188,7 +188,7 @@ Cómo validar: **una función de validación por forma de entrada**, con una lis
 - **Cuando corrijas avisos, baja el tope** al nuevo número. `npm run quality` falla si el tope es mayor que los avisos reales.
 - No uses `// eslint-disable` sin un comentario que explique el motivo.
 - Una regla relajada o desactivada se justifica **en `eslint.config.js`** y se anota aquí. Hoy hay dos excepciones: `security/detect-object-injection` desactivada en `config/validateEnv.js` y `functions/convertExcelToJson.js` (el índice sale de listas fijas del código), y tres reglas de `security/*` (rutas de fichero, expresiones regulares no literales e inyección de objetos) desactivadas en `scripts/**/*.mjs` y `plugins/**/*.mjs` (herramientas de desarrollo que no atienden peticiones; el plugin `ciclo-agentico` comparte el bloque de los scripts de mantenimiento, y sus pruebas usan `node:test`, sin dependencias nuevas).
-- Avisos reales hoy (los que cuenta el tope): una variable sin usar en `aws/awsS3connect.js` (el `catch` de `getTextJsonS3`, relacionado con A6), el `console.log` de arranque y tres de `security/detect-object-injection` en `routes/data.js` (`grouped[provincia]`, relacionado con A4: una provincia llamada `__proto__` daría un 500).
+- Avisos reales hoy (los que cuenta el tope, 4): el `console.log` de arranque y tres de `security/detect-object-injection` en `routes/data.js` (`grouped[provincia]`, relacionado con A4: una provincia llamada `__proto__` daría un 500).
 
 ## 15. Anti-patrones que ya están en el código
 

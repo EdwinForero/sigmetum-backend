@@ -54,7 +54,7 @@ Exporta: `validateEnv` (función por defecto).
 | `PROVINCIA_MAX_LENGTH` | `50` | Longitud máxima de la provincia, medida tras recortar y normalizar a NFC y comprobada antes de ejecutar la expresión |
 | `PROVINCIA_WORD_PATTERN` | `/^\p{L}[\p{L}\p{M}]*$/u` (sin `g`) | Una palabra de provincia: letras Unicode con marcas combinantes. No es un patrón de la provincia entera: `getProvinciaNameError` parte por espacio o guion y valida cada palabra (una parte vacía = separador en los extremos o doble = rechazo) |
 | `PROVINCIA_RESERVED` | `[...RESERVED_SEGMENTS, 'drafts']` | Nombres exactos que no pueden ser carpeta de provincia. `RESERVED_SEGMENTS` no cambia, para no alterar `GET /list-files` |
-| `DATA_FILE_NAME_PATTERN` | `/^\d{4}-\d{2}-\d{2}_v\d+\.xlsx$/` (sin `g`) | Nombre de una versión (D2); lo usa `isValidDataKey`. `getNextVersion` conserva su propio regex equivalente (no lo reutiliza) |
+| `DATA_FILE_NAME_PATTERN` | `/^(\d{4}-\d{2}-\d{2})_v(\d+)\.xlsx$/` (sin `g`, dos grupos de captura: fecha y `N`) | Nombre de una versión (D2). Fuente única: `parseVersionName` (`functions/versionName.js`) lo usa para interpretar el nombre, y con él `getNextVersion` y `deleteFileFromS3`; `isValidDataKey` solo lo usa con `.test()` |
 | `IMAGE_KEY_MAX_LENGTH` | `200` | Longitud máxima de un `imageKey` |
 | `IMAGE_KEY_PATTERN` | expresión regular (banderas `u` e `i`, sin `g`) | Forma permitida de un `imageKey`; se aplica con `isValidImageKey` (regla en [06](06-almacenamiento-s3.md#regla-de-imagekey)). Va en forma plana, con dos lookaheads (`(?!.*\/\/)` y `(?!.*\/[.\p{M}])`, que impide que un segmento tras `/` empiece por `.` o por una marca combinante), para no disparar `security/detect-unsafe-regex` |
 
@@ -185,7 +185,14 @@ Devuelve `YYYY-MM-DD_v{version}.xlsx` con el día **UTC** de `now` (`now.toISOSt
 Devuelve `Promise<{ version, provinciaFolder }>`.
 
 - `provinciaFolder = data/{provincia}`.
-- Lista la carpeta y, para los ficheros con patrón `YYYY-MM-DD_vN.xlsx` cuya fecha es **hoy (UTC, el día de `now`)**, toma el mayor `N` y devuelve `N + 1`. Si no hay ninguno de hoy, `1`.
+- Lista la carpeta y, para los ficheros con patrón `YYYY-MM-DD_vN.xlsx` (interpretado con `parseVersionName`) cuya fecha es **hoy (UTC, el día de `now`)**, toma el mayor `N` (entero: `_v9` y `_v10` dan `_v11`) y devuelve `N + 1`. Si no hay ninguno de hoy, `1`.
+
+### `versionName.js` → `parseVersionName(name)` y `latestVersionFile(files)`
+
+Funciones puras (no leen el entorno ni llaman a S3); interpretación única del nombre de una versión (A8, 29/10/2026). Está en `functions/` y no en `aws/` para que `aws/` la importe sin dependencia circular con `getNextVersion`.
+
+- `parseVersionName(name)`: aplica `DATA_FILE_NAME_PATTERN` y devuelve `{ date, version }` (`version` como entero) o `null` si el nombre no es estándar.
+- `latestVersionFile(files)`: recibe `[{ name, key }]` y devuelve el de mayor fecha y, a igual fecha, mayor `N` entero (`_v10` gana a `_v9`). Si también coincide `N` (`_v7` y `_v007`), gana el nombre mayor por unidades de código (`a.name > b.name`, no `localeCompare`), así el resultado no depende del orden del listado. Ignora los nombres no estándar y devuelve `null` si no hay ninguno estándar. La usa `deleteFileFromS3`.
 
 ---
 
@@ -199,12 +206,14 @@ Crea un único cliente `S3` (clase agregada de SDK v3) con `AWS_REGION` y, en lo
 |---|---|
 | `streamToString(stream)` | Lee un stream de S3 a string UTF-8 |
 | `streamToBuffer(stream)` | Lee un stream de S3 a `Buffer` |
+| `isRealObject(item)` | «Objeto real» de un listado: clave sin `/` final y `Size > 0` (excluye el marcador de carpeta y los objetos vacíos). Lo comparten `listFilesInS3Folder` y `getPresignedUrlsFromS3Folder`, de modo que no pueden divergir |
+| `listAllObjects(prefix)` | `Contents` de **todas** las páginas de `ListObjectsV2`, sin tope de páginas. Una página sin `Contents` aporta `[]` y continúa. Guardia contra bucle infinito: lanza si `IsTruncated` es verdadero y falta `NextContinuationToken`, o si el token ya se usó |
 
 ### URLs prefirmadas
 
 | Función | Parámetros | Devuelve | Notas |
 |---|---|---|---|
-| `getPresignedUrlsFromS3Folder` | `folderPath` | `[{ fileName, url }]` | `ListObjectsV2` + `getSignedUrl` por objeto, en paralelo. Expiran en 3600 s. **Lanza si la carpeta está vacía** |
+| `getPresignedUrlsFromS3Folder` | `folderPath` | `[{ fileName, url }]` | `listAllObjects` + `getSignedUrl` por objeto real, en paralelo. Expiran en 3600 s. Devuelve `[]` con la carpeta vacía, ausente o con solo marcadores (A5; ya no lanza); un error real de `ListObjectsV2` sigue lanzando |
 | `getPresignedUrlFromS3` | `filePath, imageKey` | `string` | URL de `filePath/imageKey`, 3600 s. Envuelve el error en `Error('Error getting signed URL')` |
 
 ### Lectura
@@ -213,14 +222,14 @@ Crea un único cliente `S3` (clase agregada de SDK v3) con `AWS_REGION` y, en lo
 |---|---|---|---|
 | `getFileFromS3` | `filePath` | objeto JSON | `GetObject` + `JSON.parse`. Relanza errores |
 | `getBufferFromS3` | `filePath` | `Buffer` | Para leer Excel |
-| `getTextJsonS3` | `fileName, folderName` | array JSON | **Devuelve `[]` ante cualquier error** (fichero inexistente, permisos, red…) |
+| `getTextJsonS3` | `fileName, folderName` | array JSON | Devuelve `[]` **solo** con `NoSuchKey` (por `error.name` o `error.Code`; un 404 sin más no basta, `NoSuchBucket` también lo es). Un JSON que no es un array lanza un `Error` sin `Code`; permisos, red, 5xx, `SyntaxError` y el cuerpo de 0 bytes se propagan (A6, 29/10/2026). `uploadTextToJsonS3` y `deleteTermFromS3` no llegan al `putObject` en esos casos |
 
 ### Listado
 
 | Función | Parámetros | Devuelve | Notas |
 |---|---|---|---|
-| `listFilesInS3Folder` | `folderName` (prefijo) | `[{ name, key }]` | El `Prefix` del listado termina siempre en `/` (se añade si falta, sin duplicarlo): `data/Santa Cruz` no ve `data/Santa Cruz de Tenerife/` y `data/active` no ve `data/activos/` (también para `getNextVersion`, `deleteFileFromS3` y `getMergedDataInS3Folder`). Descarta objetos de tamaño 0 (marcadores de carpeta). Sin paginación: máximo 1000 objetos |
-| `getMergedDataInS3Folder` | `folderName` | array | Lista y descarga cada JSON **en secuencia**, concatenando |
+| `listFilesInS3Folder` | `folderName` (prefijo) | `[{ name, key }]` | El `Prefix` del listado termina siempre en `/` (se añade si falta, sin duplicarlo): `data/Santa Cruz` no ve `data/Santa Cruz de Tenerife/` y `data/active` no ve `data/activos/` (también para `getNextVersion`, `deleteFileFromS3` y `getMergedDataInS3Folder`). Descarta los objetos que no son «reales» (`isRealObject`: clave acabada en `/` o tamaño 0). Recorre todas las páginas con `listAllObjects` (M10: ya no se trunca a 1000 objetos). Formato `{ name, key }` sin cambios |
+| `getMergedDataInS3Folder` | `folderName` | array | Lista y lee los JSON **en paralelo** (`Promise.all`, M7; sin límite de concurrencia) y concatena en el orden del listado, no en el de finalización. Si una lectura falla, rechaza sin datos parciales |
 
 ### Escritura
 
@@ -236,7 +245,7 @@ Crea un único cliente `S3` (clase agregada de SDK v3) con `AWS_REGION` y, en lo
 |---|---|---|---|
 | `deleteImageFromS3` | `filePath, imageKey` | `{ success, error? }` | No lanza; devuelve el error |
 | `deleteTermFromS3` | `termToDelete, fileName, folderName` | `{ success, message? }` | Filtra el término y reescribe el fichero. No lanza |
-| `deleteFileFromS3` | `filePath` (`data/{prov}/{fecha}_vN.xlsx`) | `{ message }` | Borra la versión; si quedan `.xlsx` en la provincia, reconvierte el último (orden alfabético con `localeCompare`, que pone `_v10` antes que `_v9`: A8 en [07](07-estado-y-deuda-tecnica.md)) y reescribe el activo; si no queda ninguno, borra el activo |
+| `deleteFileFromS3` | `filePath` (`data/{prov}/{fecha}_vN.xlsx`) | `{ message }` | Borra la versión, lista las que quedan y elige con `latestVersionFile` (fecha y luego `N` entero; A8 resuelto). Tres casos: (a) hay algún `.xlsx` con nombre estándar, reconvierte el más reciente y reescribe el activo (los de nombre no estándar se ignoran); (b) solo quedan `.xlsx` no estándar, **no toca el activo** (ni borra ni escribe); (c) no queda ningún `.xlsx` (la comprobación es sensible a mayúsculas), borra el activo. Sigue decidiendo en `aws/` (M14 y B5 abiertos), ahora apoyada en una función pura de `functions/` |
 
 ### Versión activa
 

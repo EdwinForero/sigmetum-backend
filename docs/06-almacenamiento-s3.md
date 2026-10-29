@@ -23,9 +23,13 @@
 
 Los prefijos están en `config/s3Paths.js`. `active` y `terms` están en `RESERVED_SEGMENTS` para que `/list-files` no los trate como provincias. Todo listado por prefijo (`listFilesInS3Folder`) añade una `/` final al `Prefix` si falta, así que listar `data/Santa Cruz` no recoge `data/Santa Cruz de Tenerife/...` ni `data/active` recoge `data/activos/...`.
 
+**Listados y objetos reales (A5, M10; 29/10/2026).** Los listados recorren **todas** las páginas de `ListObjectsV2` (`IsTruncated` con `NextContinuationToken`), sin tope de páginas; si S3 dice que hay más páginas y no da token, o repite uno ya usado, la función lanza en vez de iterar sin fin. Una página sin `Contents` cuenta como vacía y continúa. Un «objeto real» es el que tiene la clave sin `/` final y `Size > 0`; el marcador de carpeta (`gallery/`) y los objetos de tamaño 0 se excluyen igual de `listFilesInS3Folder` y de las URL prefirmadas, y la galería vacía o con solo el marcador da `[]` en `GET /list-images`. La paginación usa la misma acción `s3:ListBucket` que antes.
+
+**Lecturas de JSON (A6).** El glosario (`data/terms/noLatinTerms.json`) solo se trata como «vacío» si S3 responde `NoSuchKey`; cualquier otro fallo, un objeto de 0 bytes, un JSON corrupto o un JSON que no es un array se propaga y las tres rutas de glosario responden `500` sin escribir. **Un glosario ilegible ya no se autocura**: hay que repararlo a mano en S3 (por ejemplo, subir un `[]` válido) para desbloquear `list-terms`, `upload-term` y `delete-term`. `/get-merged-data` lee los activos en paralelo y concatena en el orden del listado.
+
 ## Modelo de versionado
 
-- Cada subida de Excel crea un objeto nuevo en `data/{Provincia}/` con nombre `YYYY-MM-DD_vN.xlsx`. La fecha es el día **UTC** (la misma fuente en `getNextVersion` y `formatFileName`; entre las 00:00 UTC y las 01:00-02:00 de España el nombre lleva el día anterior al local). `N` empieza en 1 cada día y se incrementa si ya hay subidas ese día.
+- Cada subida de Excel crea un objeto nuevo en `data/{Provincia}/` con nombre `YYYY-MM-DD_vN.xlsx`. La fecha es el día **UTC** (la misma fuente en `getNextVersion` y `formatFileName`; entre las 00:00 UTC y las 01:00-02:00 de España el nombre lleva el día anterior al local). `N` empieza en 1 cada día y se incrementa si ya hay subidas ese día. El nombre se interpreta en un solo sitio (`parseVersionName`, que usa `DATA_FILE_NAME_PATTERN`): `N` es un entero y el orden de versiones es por fecha y luego por `N` (`_v10` es posterior a `_v9`; con `_v7` y `_v007` gana el nombre mayor por unidades de código).
 - Los Excel **nunca se modifican**; son el historial.
 - `data/active/{Provincia}.json` es una **proyección** de una de esas versiones: se regenera convirtiendo el Excel elegido. Hay exactamente un activo por provincia.
 - `/get-merged-data` concatena todos los activos: es la fuente de datos pública.
@@ -44,13 +48,13 @@ Los prefijos están en `config/s3Paths.js`. `active` y `terms` están en `RESERV
                  │
        POST /upload/confirm
           ├─ confirmed: true  ─► updateFileS3(draftKey) → activo = borrador
-          └─ confirmed: false ─► deleteFileFromS3(draftKey) → activo = última versión restante
+          └─ confirmed: false ─► deleteFileFromS3(draftKey) → activo = última versión restante (tres casos, ver abajo)
 ```
 
 Operaciones de mantenimiento:
 
 - **Cambiar versión activa**: `POST /update-file` con la clave de cualquier Excel del historial.
-- **Borrar una versión**: `POST /delete-file`. El activo se recalcula con la versión más reciente que quede (orden alfabético = cronológico gracias al formato de fecha). Si la provincia se queda vacía, se borra su activo.
+- **Borrar una versión**: `POST /delete-file`. Tras borrar, se miran los `.xlsx` que quedan en la carpeta de la provincia (el mismo borrado ocurre con `/upload/confirm` y `confirmed: false`): (a) si hay alguno con nombre estándar, el activo se regenera desde el más reciente por fecha y `N` entero (los de nombre no estándar se ignoran); (b) si solo quedan `.xlsx` de nombre no estándar (subidos a mano), el activo **no se toca**, para que cancelar un borrador no borre un activo válido; (c) si no queda ningún `.xlsx`, se borra el activo.
 
 ### Regla de provincia
 

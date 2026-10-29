@@ -146,12 +146,13 @@ Devuelve todas las imágenes de `gallery/` con URL prefirmada (válida 1 hora):
 ```json
 { "success": true, "data": [ { "fileName": "Encinar.jpg", "url": "https://..." } ] }
 ```
+Con la galería vacía, o con solo el marcador de carpeta `gallery/`, responde `200` con `data: []` (A5/D5 resueltos el 29/10/2026; antes `500`, o el marcador como imagen de `fileName` vacío). Se excluyen las claves que terminan en `/` y los objetos de tamaño 0, y se recorren todas las páginas del listado. Un fallo real de S3 (por ejemplo `AccessDenied`) sigue dando `500` genérico.
 
 ### `GET /get-image?imageKey=Encinar.jpg`
 `data: { imageUrl }` — URL prefirmada (1 hora) de una imagen concreta. `400` `imageKey is required` si falta, está vacío o no es una cadena (por ejemplo `?imageKey=a&imageKey=b`); antes respondía `200` con una URL a `gallery/undefined`. `400` `imageKey is not valid` si la clave no cumple la lista de permitidos compartida con `DELETE /delete-image` (regla en [06](06-almacenamiento-s3.md#regla-de-imagekey)), antes de llamar a S3. Se alcanza sin token (M21, entrega 2); firma cualquier clave bajo `gallery/` que cumpla la regla, exista o no en el listado.
 
 ### `GET /list-terms`
-Devuelve el glosario `data/terms/noLatinTerms.json`: `[ { "term": "..." } ]`. Si no existe devuelve `[]`.
+Devuelve el glosario `data/terms/noLatinTerms.json`: `[ { "term": "..." } ]`. Si no existe (`NoSuchKey`) devuelve `[]`. Ante cualquier otro fallo de S3 (permisos, red, 5xx), un glosario de 0 bytes, con JSON corrupto o con un JSON que no es un array, responde `500` genérico por `next(error)` (A6, 29/10/2026; antes `200` `[]`). Con `AccessDenied` el mensaje es `Access denied to storage`. **Efecto**: un glosario ilegible ya no se autocura y bloquea esta ruta, `POST /upload-term` y `DELETE /delete-term` hasta repararlo a mano en S3 (ver [06](06-almacenamiento-s3.md)).
 
 ### `POST /upload-image` 🔒
 `multipart/form-data` con `file` y `title`. Guarda en `gallery/{title_con_guiones_bajos}{extensión}`. `400` `File and title are required` si falta el fichero o `title` no es una cadena o está vacío (antes, un `title` no cadena daba 500). Un fichero de más de **5 MB** da `400` `File exceeds the maximum allowed size` (el máximo aceptado es exacto: 5 MB justos se aceptan y 5 MB + 1 byte se rechazan; sin llamar a S3). Un campo multipart con nombre incorrecto da `400` `File upload error: ...` (antes 500).
@@ -160,10 +161,10 @@ Devuelve el glosario `data/terms/noLatinTerms.json`: `[ { "term": "..." } ]`. Si
 Body: `{ "imageKey": "Encinar.jpg" }`. `400` `imageKey is required` si falta o no es una cadena; `400` `imageKey is not valid` si no cumple la lista de permitidos (misma regla que `GET /get-image`, ver [06](06-almacenamiento-s3.md#regla-de-imagekey)), sin llamar a S3.
 
 ### `POST /upload-term` 🔒
-Body: `{ "term": "texto" }`. Añade el término al glosario. `400` `Term must be a string` si falta o no es una cadena (antes 500); `400` `Term cannot be empty` si está vacío o solo tiene espacios.
+Body: `{ "term": "texto" }`. Añade el término al glosario. `400` `Term must be a string` si falta o no es una cadena (antes 500); `400` `Term cannot be empty` si está vacío o solo tiene espacios. Con el glosario inexistente (`NoSuchKey`) lo crea con ese único término. Ante otro fallo de S3 o un glosario ilegible (0 bytes, JSON corrupto o no-array) responde `500` sin escribir nada (no sobrescribe el glosario; A6); con `AccessDenied`, `Access denied to storage`.
 
 ### `DELETE /delete-term` 🔒
-Body: `{ "term": "texto" }`. Elimina todas las entradas con ese texto exacto. `400` `Term is required` si falta, está vacío o no es una cadena.
+Body: `{ "term": "texto" }`. Elimina todas las entradas con ese texto exacto. `400` `Term is required` si falta, está vacío o no es una cadena. Ante un fallo de S3 distinto de `NoSuchKey` o un glosario ilegible (0 bytes, JSON corrupto o no-array) responde `500` sin escribir nada (A6); esta ruta pierde el código del error al envolverlo, así que con `AccessDenied` responde `Internal server error` (B5 sigue abierto).
 
 ---
 
@@ -191,6 +192,6 @@ El mensaje real de un error no mapeado **no se devuelve al cliente**: se registr
 
 El status es `err.status || err.statusCode`, o `400` si el error es un `MulterError` (antes caía en 500), o `500`. Los mapeados de almacenamiento (`NoSuchKey`, `NoSuchBucket`, `AccessDenied`, `NetworkingError` / `ECONNREFUSED`) conservan su texto pero siguen respondiendo `500` (B9). Notas: `code === 'ECONNREFUSED'` etiqueta también como `Storage connection error` un fallo de conexión SMTP de `nodemailer` (comportamiento existente), y `NetworkingError` es un nombre del SDK v2 de AWS; qué devuelve el SDK real en cada caso de almacenamiento solo se probó con errores inyectados **(por confirmar)**.
 
-`DELETE /delete-image` y `DELETE /delete-term` ya no responden `500` con el mensaje del SDK: ante un fallo reportado por `aws/` (`{ success: false }`) pasan `next(new Error(...))` y responden siempre `500` `Internal server error`, también para `NoSuchBucket` o `AccessDenied`, porque `aws/` aplana el error a un texto antes (B5). El detalle queda en la consola (si `aws/` devuelve el mensaje vacío, el registro lleva `delete-image failed` / `delete-term failed`). `GET /list-images` con la galería vacía sigue siendo `500` (F3, A5), pero ahora con `Internal server error` en lugar de `No files found in the specified folder.`.
+`DELETE /delete-image` y `DELETE /delete-term` ya no responden `500` con el mensaje del SDK: ante un fallo reportado por `aws/` (`{ success: false }`) pasan `next(new Error(...))` y responden siempre `500` `Internal server error`, también para `NoSuchBucket` o `AccessDenied`, porque `aws/` aplana el error a un texto antes (B5). El detalle queda en la consola (si `aws/` devuelve el mensaje vacío, el registro lleva `delete-image failed` / `delete-term failed`). `GET /list-images` con la galería vacía daba `500` (F3, A5); desde el 29/10/2026 responde `200` `data: []`.
 
 **CORS rechazado.** Una petición con `Origin` distinto de `ALLOWED_ORIGIN` (también el preflight `OPTIONS`) responde `403` `{ "success": false, "error": "Origin not allowed" }`, sin el origen en el cuerpo (antes `500` con el origen reflejado, M22). El origen (truncado a 200 caracteres) se registra solo con `console.warn('CORS: origin not allowed:', JSON.stringify(origin.slice(0, 200)))`. Una petición sin `Origin` o con el origen permitido no cambia. Un navegador no deja a la página ver esta respuesta (no lleva `Access-Control-Allow-Origin`); solo la ven `curl`, herramientas y servidores.

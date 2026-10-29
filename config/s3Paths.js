@@ -23,10 +23,11 @@ exports.IMAGE_KEY_PATTERN = /^(?!.*\/\/)(?!.*\/[.\p{M}])[\p{L}\p{N}_\-()+][\p{L}
 // PROVINCIA_RESERVED: nombres que no pueden ser carpeta de provincia (RESERVED_SEGMENTS y el borrador). Además
 // se rechaza todo nombre que en minúsculas empiece por "active" o "terms" y los nombres de propiedades de objeto.
 // DATA_FILE_NAME_PATTERN: nombre de archivo de una versión (AAAA-MM-DD_vN.xlsx), contrato con el frontend (D2).
-// Sin bandera "g": test() no debe guardar estado entre llamadas.
+// Fuente única del nombre de versión (la usan isValidDataKey y functions/versionName.js); grupos: 1 = fecha, 2 = N.
+// Sin bandera "g": test() y match() no deben guardar estado entre llamadas.
 exports.PROVINCIA_MAX_LENGTH = 50;
 exports.PROVINCIA_WORD_PATTERN = /^\p{L}[\p{L}\p{M}]*$/u;
-exports.DATA_FILE_NAME_PATTERN = /^\d{4}-\d{2}-\d{2}_v\d+\.xlsx$/;
+exports.DATA_FILE_NAME_PATTERN = /^(\d{4}-\d{2}-\d{2})_v(\d+)\.xlsx$/;
 
 // Folder segments reserved inside DATA_PATH — excluded from /list-files grouping
 exports.RESERVED_SEGMENTS = ['active', 'terms'];

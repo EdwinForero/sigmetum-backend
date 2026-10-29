@@ -1,8 +1,9 @@
-const { S3, GetObjectCommand, ListObjectsV2Command } = require('@aws-sdk/client-s3');
+const { S3, GetObjectCommand } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const { fromSSO } = require('@aws-sdk/credential-providers');
 const { convertExcelToJson } = require('../functions/convertExcelToJson');
 const { ACTIVE_PATH, DATA_PATH } = require('../config/s3Paths');
+const { latestVersionFile } = require('../functions/versionName');
 
 const path = require('path');
 
@@ -31,24 +32,41 @@ const streamToBuffer = (stream) =>
         stream.on('error', reject);
     });
 
+// Objeto real: ni el marcador de carpeta (clave acabada en "/") ni un objeto de tamaño 0.
+const isRealObject = (item) => !item.Key.endsWith('/') && item.Size > 0;
+
+// Contents de todas las páginas de un listado. Lanza si S3 dice que hay más páginas y no da token,
+// o si repite un token ya usado (evita un bucle infinito).
+const listAllObjects = async (prefix) => {
+    const contents = [];
+    const usedTokens = new Set();
+    let token;
+    do {
+        const page = await s3.listObjectsV2({
+            Bucket: process.env.AWS_BUCKET_NAME,
+            Prefix: prefix,
+            ...(token ? { ContinuationToken: token } : {}),
+        });
+        contents.push(...(page.Contents || []));
+        if (!page.IsTruncated) break;
+        token = page.NextContinuationToken;
+        if (!token) throw new Error('S3 listing is truncated but returned no continuation token.');
+        if (usedTokens.has(token)) throw new Error('S3 listing returned a repeated continuation token.');
+        usedTokens.add(token);
+    } while (true); // eslint-disable-line no-constant-condition
+    return contents;
+};
+
 // ─── Presigned URLs ──────────────────────────────────────────────────────────
 
 exports.getPresignedUrlsFromS3Folder = async (folderPath) => {
-    const params = {
-        Bucket: process.env.AWS_BUCKET_NAME,
-        Prefix: folderPath.endsWith('/') ? folderPath : `${folderPath}/`,
-    };
+    const prefix = folderPath.endsWith('/') ? folderPath : `${folderPath}/`;
 
     try {
-        const command = new ListObjectsV2Command(params);
-        const response = await s3.send(command);
+        const objects = (await listAllObjects(prefix)).filter(isRealObject);
 
-        if (!response.Contents || response.Contents.length === 0) {
-            throw new Error('No files found in the specified folder.');
-        }
-
-        return Promise.all(
-            response.Contents.map(async (item) => {
+        return await Promise.all(
+            objects.map(async (item) => {
                 const getObjectCommand = new GetObjectCommand({
                     Bucket: process.env.AWS_BUCKET_NAME,
                     Key: item.Key,
@@ -114,9 +132,13 @@ exports.getTextJsonS3 = async (fileName, folderName) => {
             Bucket: process.env.AWS_BUCKET_NAME,
             Key: `${folderName}/${fileName}`,
         });
-        return JSON.parse(await streamToString(data.Body));
+        const parsed = JSON.parse(await streamToString(data.Body));
+        if (!Array.isArray(parsed)) throw new Error('JSON file does not contain an array.');
+        return parsed;
     } catch (error) {
-        return [];
+        // Solo "no existe" equivale a lista vacía; cualquier otro fallo se propaga (no se sobrescribe el glosario).
+        if (error.name === 'NoSuchKey' || error.Code === 'NoSuchKey') return [];
+        throw error;
     }
 };
 
@@ -124,15 +146,11 @@ exports.getTextJsonS3 = async (fileName, folderName) => {
 
 exports.listFilesInS3Folder = async (folderName) => {
     try {
-        const data = await s3.listObjectsV2({
-            Bucket: process.env.AWS_BUCKET_NAME,
-            Prefix: folderName.endsWith('/') ? folderName : `${folderName}/`,
-        });
+        const prefix = folderName.endsWith('/') ? folderName : `${folderName}/`;
+        const contents = await listAllObjects(prefix);
 
-        if (!data.Contents || data.Contents.length === 0) return [];
-
-        return data.Contents
-            .filter(file => file.Size > 0)
+        return contents
+            .filter(isRealObject)
             .map(file => ({
                 name: path.basename(file.Key),
                 key: file.Key,
@@ -146,12 +164,9 @@ exports.listFilesInS3Folder = async (folderName) => {
 exports.getMergedDataInS3Folder = async (folderName) => {
     try {
         const files = await exports.listFilesInS3Folder(folderName);
-        let mergedData = [];
-        for (const file of files) {
-            const jsonData = await exports.getFileFromS3(file.key);
-            mergedData = mergedData.concat(jsonData);
-        }
-        return mergedData;
+        // Promise.all conserva el orden de entrada: el resultado sigue el orden del listado.
+        const parts = await Promise.all(files.map(file => exports.getFileFromS3(file.key)));
+        return [].concat(...parts);
     } catch (error) {
         console.error('Error merging JSON files:', error);
         throw error;
@@ -248,15 +263,10 @@ exports.deleteFileFromS3 = async (filePath) => {
         await s3.deleteObject({ Bucket: process.env.AWS_BUCKET_NAME, Key: filePath });
 
         const remaining = await exports.listFilesInS3Folder(provinciaFolder);
-        const xlsxFiles = remaining
-            .filter(f => f.name.endsWith('.xlsx'))
-            .sort((a, b) => a.name.localeCompare(b.name));
+        const latest = latestVersionFile(remaining);
 
-        if (xlsxFiles.length === 0) {
-            await s3.deleteObject({ Bucket: process.env.AWS_BUCKET_NAME, Key: activeKey });
-        } else {
-            const latestKey = xlsxFiles[xlsxFiles.length - 1].key;
-            const buffer = await exports.getBufferFromS3(latestKey);
+        if (latest) {
+            const buffer = await exports.getBufferFromS3(latest.key);
             const { processedData } = await convertExcelToJson(buffer);
             await s3.putObject({
                 Bucket: process.env.AWS_BUCKET_NAME,
@@ -264,6 +274,9 @@ exports.deleteFileFromS3 = async (filePath) => {
                 Body: JSON.stringify(processedData, null, 2),
                 ContentType: 'application/json',
             });
+        } else if (!remaining.some(f => f.name.endsWith('.xlsx'))) {
+            // Ningún .xlsx: se borra el activo. Si quedan .xlsx pero ninguno con nombre estándar, el activo no se toca.
+            await s3.deleteObject({ Bucket: process.env.AWS_BUCKET_NAME, Key: activeKey });
         }
 
         return { message: 'File deleted successfully' };
