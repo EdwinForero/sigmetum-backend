@@ -49,6 +49,17 @@ module.exports = [
     },
   },
   {
+    // Tests (node:test, CommonJS): no atienden peticiones y construyen rutas, claves y expresiones a partir de listas fijas
+    // de casos (misma justificación que el bloque de scripts). `no-unused-vars` y `eqeqeq` siguen activas.
+    files: ['tests/**/*.js'],
+    rules: {
+      'no-console': 'off',
+      'security/detect-non-literal-fs-filename': 'off',
+      'security/detect-non-literal-regexp': 'off',
+      'security/detect-object-injection': 'off',
+    },
+  },
+  {
     // Falsos positivos: el índice sale de una lista fija del propio código (variables requeridas, columnas del Excel),
     // nunca de la entrada del usuario. En el resto del código la regla sigue activa (ver A4 en docs/07).
     files: ['config/validateEnv.js', 'functions/convertExcelToJson.js'],

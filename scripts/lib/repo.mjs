@@ -22,17 +22,17 @@ export const walk = (dir) =>
 
 // Código de la API (sin tests).
 export const CODE_DIRS = ['routes', 'config', 'functions', 'aws', 'middleware'];
-export const codeFiles = ['index.js', ...CODE_DIRS.flatMap((dir) => walk(dir)).filter((file) => file.endsWith('.js'))];
+export const codeFiles = ['index.js', 'app.js', ...CODE_DIRS.flatMap((dir) => walk(dir)).filter((file) => file.endsWith('.js'))];
 
 // Rutas de routes/*.js: `router.get('/x', ...)`. Una ruta es protegida si y solo si `tokenAuth` es el primer
 // manejador tras la ruta, en la misma línea: `router.post('/y', tokenAuth, ...)`. Un `protectedRouter.post(...)`
 // residual se ve y cuenta como no protegido (lado seguro). La ruta se devuelve tal cual.
 // Limitaciones: la detección es por línea (`tokenAuth` en otra línea se toma como no protegida: falso positivo,
-// lado seguro) y NO ve `router.route()`, `router.all`, `router.use` ni rutas declaradas en variables; solo el
-// criterio 8 de scripts/verificar-rutas.mjs (pila real de Express) los cubre.
+// lado seguro) y NO ve `router.route()`, `router.all`, `router.use` ni rutas declaradas en variables; solo
+// tests/estructura-rutas.test.js y tests/rutas-protegidas.test.js (pila real de Express) los cubren.
 // Limitación en el lado INSEGURO: una declaración partida en varias líneas (`router.post(` y la ruta en la
 // línea siguiente) no casa con la expresión y la ruta es INVISIBLE para esta detección estática: una mutante así
-// no se marcaría como sin proteger. Por eso `quality` ejecuta el criterio 8 (pila real) y además avisa con
+// no se marcaría como sin proteger. Por eso `quality` ejecuta la suite (pila real) y además avisa con
 // `unparsedRouteLines()` de toda línea que empieza por `router.<método>(` y no se pudo interpretar.
 const ROUTE_LINE = /^\s*(router|protectedRouter)\.(get|post|put|patch|delete)\(\s*(['"`])([^'"`]+)\3(.*)$/;
 const ROUTE_START = /^\s*(router|protectedRouter|app)\.(get|post|put|patch|delete|all|use|route)\(/;

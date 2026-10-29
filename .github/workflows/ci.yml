@@ -1,6 +1,5 @@
 # Integración continua: ejecuta la definición de terminado de docs/guias/buenas-practicas-backend.md.
-# npm test no se incluye todavía: hoy es el placeholder de "npm init" y siempre falla (ver M11 en
-# docs/07-estado-y-deuda-tecnica.md). Se añadirá aquí cuando existan tests reales. Si cambias un paso
+# npm test ejecuta la suite de tests/ (node:test + supertest, sin red ni credenciales). Si cambias un paso
 # aquí, cámbialo también en CLAUDE.md y en las guías (npm run docs:check comprueba que los comandos
 # citados en la documentación existen en package.json).
 
@@ -50,9 +49,12 @@ jobs:
       - name: Documentación al día
         run: npm run docs:check
 
-      # - name: Tests
-      #   run: npm test
-      # Pendiente de activar cuando exista una suite de tests real (M11).
+      - name: Tests
+        run: npm test
+
+      # Incluye las dependencias de desarrollo (supertest), que `quality` no mira (npm audit --omit=dev).
+      - name: Auditoría de dependencias (gravedad alta o crítica)
+        run: npm audit --audit-level=high
 
   deploy:
     name: Deploy a Beanstalk
@@ -99,7 +101,8 @@ jobs:
             --exclude ".git/*" \
             --exclude "*.env*" \
             --exclude ".claude/*" \
-            --exclude "docs/*"
+            --exclude "docs/*" \
+            --exclude "tests/*"
 
       - name: Subir artefacto a S3
         run: |

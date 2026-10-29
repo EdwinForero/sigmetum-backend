@@ -37,7 +37,9 @@ Lo que este backend ofrece y necesita de cada repositorio hermano. La convenció
 
 ```
 sigmetum-backend/
-├── index.js                     # Punto de entrada: bootstrap, middlewares, montaje de rutas
+├── index.js                     # Punto de entrada: entorno, validación y arranque del servidor
+├── app.js                       # Construye y exporta la app Express: middlewares, montaje de rutas, 404 y errores
+├── tests/                       # Suite de la API (node:test + supertest): *.test.js y helpers/
 ├── config/
 │   ├── validateEnv.js           # Validación de variables de entorno al arrancar
 │   └── s3Paths.js               # Constantes de rutas (prefijos) dentro del bucket

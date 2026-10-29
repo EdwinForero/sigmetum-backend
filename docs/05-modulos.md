@@ -11,13 +11,21 @@ Orden de ejecución:
 1. `require('dotenv').config()` — carga `.env`.
 2. Registra `process.on('uncaughtException')` (log + `exit(1)`) y `process.on('unhandledRejection')` (sólo log).
 3. `validateEnv()` — lanza si faltan variables; el proceso no arranca.
-4. Crea la app Express y registra, en este orden:
+4. `require('./app')` — después de validar, porque `aws/awsS3connect.js` lee `AWS_REGION` al cargarse.
+5. `app.listen(PORT)`.
+
+---
+
+## `app.js` — la aplicación Express
+
+Construye y exporta la app (`module.exports = app`) sin abrir puerto, sin `dotenv` y sin `validateEnv`, de modo que los tests la importan con `supertest` (M13 resuelto). Registra, en este orden:
    - `/healthcheck` (antes de todo lo demás)
    - `morgan('combined')`, `cors({ origin: ALLOWED_ORIGIN })`, `express.json()`, `compression()`
    - `authRoutes`, `dataRoutes`, `contentRoutes` bajo `API_PREFIX`
    - `notFound` (tras los tres routers)
    - `errorHandler` (último)
-5. `app.listen(PORT)`.
+
+`trust proxy` vale 1 (ALB → nginx → Express). El 403 de CORS (`originNotAllowed`) vive aquí.
 
 ---
 
@@ -54,7 +62,7 @@ Exporta: `validateEnv` (función por defecto).
 
 ## `routes/`
 
-Todos los routers declaran sus rutas en un único `router`. `tokenAuth` es el **primer manejador de cada ruta protegida**, en la propia línea de la declaración (`router.post('/upload', tokenAuth, upload.single('file'), ...)`, antes de `multer`); las públicas no lo llevan. No hay `router.use(tokenAuth)` a nivel de router, así que la protección no depende del orden de montaje en `index.js` (M21, entrega 2, ver [07](07-estado-y-deuda-tecnica.md)). `npm run quality` lo vigila con `scripts/verificar-rutas.mjs` y con `scripts/lib/repo.mjs`: `routeDeclarations()` lee las declaraciones de una línea y `unparsedRouteLines()` lista las líneas de `routes/` que parecen una declaración (`router.`/`protectedRouter.`/`app.` con `get|post|put|patch|delete|all|use|route(`) y no casan con el patrón completo, p. ej. partidas en varias líneas; `quality` las cuenta como problema. El script monta los routers reales, no el `index.js` real.
+Todos los routers declaran sus rutas en un único `router`. `tokenAuth` es el **primer manejador de cada ruta protegida**, en la propia línea de la declaración (`router.post('/upload', tokenAuth, upload.single('file'), ...)`, antes de `multer`); las públicas no lo llevan. No hay `router.use(tokenAuth)` a nivel de router, así que la protección no depende del orden de montaje en `app.js` (M21, entrega 2, ver [07](07-estado-y-deuda-tecnica.md)). `npm run quality` lo vigila con la suite de `tests/` (pila real de `app.js`: `tests/estructura-rutas.test.js` y `tests/rutas-protegidas.test.js`) y con `scripts/lib/repo.mjs`: `routeDeclarations()` lee las declaraciones de una línea y `unparsedRouteLines()` lista las líneas de `routes/` que parecen una declaración (`router.`/`protectedRouter.`/`app.` con `get|post|put|patch|delete|all|use|route(`) y no casan con el patrón completo, p. ej. partidas en varias líneas; `quality` las cuenta como problema. La suite monta la `app.js` real, con S3 y SMTP simulados.
 
 ### `auth.js`
 

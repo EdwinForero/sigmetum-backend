@@ -15,14 +15,13 @@ El servidor escucha en `PORT` (8000 por defecto). Comprobación rápida: `GET ht
 
 | Comando | Qué hace |
 |---|---|
-| `npm start` | Arranca el servidor (`node index.js`) |
-| `npm test` | Placeholder de `npm init`: falla siempre, porque aún no hay tests (ver M11 en [07](07-estado-y-deuda-tecnica.md)) |
+| `npm start` | Arranca el servidor (`node index.js`, que carga `app.js`) |
+| `npm test` | Ejecuta la suite de la API (`node --test "tests/**/*.test.js"`, `node:test` + `supertest`): sin red, sin credenciales y sin `.env`. Cobertura parcial (M11 en [07](07-estado-y-deuda-tecnica.md)) |
 | `npm run lint` | ESLint 9: falla con errores o si los avisos superan el tope de `--max-warnings` de `package.json` |
-| `npm run quality` | Puerta de calidad y seguridad: patrones prohibidos, rutas sin autenticación, variables sin declarar, secretos, `npm audit` de producción y ESLint (ver [seguridad.md](guias/seguridad.md)) |
-| `npm run verificar:rutas` | Comprueba todas las rutas contra la pila real de Express con S3 y SMTP sustituidos por espías (sin red ni credenciales): las públicas responden sin token, las protegidas dan `401` y cada ruta está clasificada. Sale con 0 si todo pasa. También lo ejecuta `npm run quality` (ver [mantenimiento.md](guias/mantenimiento.md#script-de-verificación-de-rutas-m21)) |
+| `npm run quality` | Puerta de calidad y seguridad: patrones prohibidos, rutas sin autenticación, variables sin declarar, secretos, `npm audit` de producción, ESLint y la suite de `tests/` (la comprobación de rutas protegidas y públicas con la pila real de Express; ver [seguridad.md](guias/seguridad.md)) |
 | `npm run docs:check` | Comprueba que `docs/` coincide con el código (ver [mantenimiento.md](guias/mantenimiento.md)). Con `-- --metrics` imprime las métricas reales |
 | `npm run docs:gate` | Cierre documental del flujo agéntico: comprueba que los archivos cambiados respecto a `HEAD` llevan sus documentos, que [07](07-estado-y-deuda-tecnica.md) está modificado y con la fecha de hoy, y que hay aviso para PR si se tocó un área de contrato. Mide una iteración contra `HEAD`, así que se ejecuta con el árbol limpio de iteraciones previas (ver [mantenimiento.md](guias/mantenimiento.md#lo-que-comprueba-npm-run-docsgate)) |
-| `npm run agentes:test` | Pruebas de `plugins/` (núcleo `ciclo-agentico` y marketplace local) con `node:test`. No son tests de la API (M11 sigue abierto) |
+| `npm run agentes:test` | Pruebas de `plugins/` (núcleo `ciclo-agentico` y marketplace local) con `node:test`. No son tests de la API (esos son `npm test`) |
 | `npm run agentes:bootstrap` | En un equipo nuevo, comprueba con `claude plugin list --json` qué plugins del catálogo del flujo agéntico faltan y pregunta antes de instalar cada uno. Con `-- --dry-run` solo informa |
 
 Para recarga en caliente no hay script: usa `npx nodemon index.js` (hallazgo B2 en [07](07-estado-y-deuda-tecnica.md)).

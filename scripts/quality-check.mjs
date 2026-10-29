@@ -1,8 +1,8 @@
 // Puerta de calidad y seguridad del backend.
 // Uso: npm run quality
 // Comprueba: patrones prohibidos en el código, rutas que modifican estado sin autenticación, variables de
-// entorno sin declarar, secretos, vulnerabilidades de las dependencias de producción, ESLint y las rutas contra
-// la pila real de Express (scripts/verificar-rutas.mjs).
+// entorno sin declarar, secretos, vulnerabilidades de las dependencias de producción, ESLint y la suite de tests
+// (tests/), que comprueba las rutas contra la pila real de Express.
 // Las reglas y su motivo están en docs/guias/seguridad.md y docs/guias/buenas-practicas-backend.md.
 // Sin dependencias: solo módulos de Node (y las herramientas que ya usa el proyecto: npm, git y eslint).
 
@@ -107,6 +107,7 @@ const ACCEPTED_ADVISORIES = {};
   ];
   const files = [
     ...codeFiles,
+    ...(existsSync(join(ROOT, 'tests')) ? walk('tests').filter((file) => file.endsWith('.js')) : []),
     '.env.example',
     'package.json',
     'README.md',
@@ -199,18 +200,52 @@ const ACCEPTED_ADVISORIES = {};
   );
 }
 
-// ─── 7. Rutas: pila real de Express (scripts/verificar-rutas.mjs) ───────────
+// ─── 7. Rutas y suite de tests: pila real de Express (tests/) ───────────────
+// Ejecuta la suite entera (npm test) con el reporter TAP y exige que no se haya vaciado: sin fallos, sin tests
+// omitidos ni pendientes, al menos MIN_TESTS tests y presentes las suites de la pila (estructura-rutas) y de las
+// rutas protegidas (rutas-protegidas). Si añades tests, sube MIN_TESTS; si quitas alguno, hay que justificarlo.
+
+const MIN_TESTS = 588;
+// Un test de cada suite imprescindible: el reporter TAP no nombra los archivos, así que se comprueba por existencia
+// del archivo y por este test centinela (su nombre exacto debe aparecer como superado).
+const REQUIRED_SUITES = {
+  'tests/estructura-rutas.test.js': 'la tabla de rutas y la pila declarada no están vacías',
+  'tests/rutas-protegidas.test.js': 'la lista de rutas protegidas tiene las nueve rutas y los tres estados de token',
+};
 
 {
   const problems = [];
-  const verify = run('node', ['scripts/verificar-rutas.mjs'], { timeout: 60000 });
-  if (verify.status !== 0) {
-    const reason = verify.error?.code === 'ETIMEDOUT' ? 'superó el tiempo máximo de 60 s' : `terminó con código ${verify.status} (1: fallan criterios, 2: error del propio script)`;
-    problems.push(`scripts/verificar-rutas.mjs ${reason}. Cola de la salida:`);
-    const tail = `${verify.stdout ?? ''}\n${verify.stderr ?? ''}`.split('\n').filter((line) => line.trim() !== '').slice(-15);
+  const suite = run('node', ['--test', '--test-reporter=tap', '"tests/**/*.test.js"'], { timeout: 180000, maxBuffer: 64 * 1024 * 1024 });
+  const output = `${suite.stdout ?? ''}`;
+  const counter = (name) => {
+    const match = output.match(new RegExp(`^# ${name} (\\d+)\\s*$`, 'm'));
+    return match ? Number(match[1]) : null;
+  };
+  const tests = counter('tests');
+  const fail = counter('fail');
+  const skipped = counter('skipped');
+  const todo = counter('todo');
+  if (suite.status !== 0) {
+    const reason = suite.error?.code === 'ETIMEDOUT' ? 'superó el tiempo máximo de 180 s' : `terminó con código ${suite.status}`;
+    problems.push(`La suite de tests (node --test "tests/**/*.test.js") ${reason}`);
+  }
+  if ([tests, fail, skipped, todo].includes(null)) {
+    problems.push('No hay resumen del reporter TAP (# tests, # fail, # skipped, # todo): no se puede dar por buena la suite');
+  } else {
+    if (fail !== 0) problems.push(`La suite tiene ${fail} test(s) que fallan`);
+    if (skipped !== 0) problems.push(`La suite tiene ${skipped} test(s) omitidos (skip): no se admiten`);
+    if (todo !== 0) problems.push(`La suite tiene ${todo} test(s) pendientes (todo): no se admiten`);
+    if (tests < MIN_TESTS) problems.push(`La suite ejecuta ${tests} tests y el mínimo es ${MIN_TESTS}: ¿se han quitado tests o se ha vaciado un bucle?`);
+  }
+  for (const [file, sentinel] of Object.entries(REQUIRED_SUITES)) {
+    if (!existsSync(join(ROOT, file))) problems.push(`Falta ${file}`);
+    else if (!output.split('\n').some((line) => /^ok \d+ - /.test(line) && line.endsWith(` - ${sentinel}`))) problems.push(`${file} no se ha ejecutado o su test centinela no ha pasado: "${sentinel}"`);
+  }
+  if (problems.length > 0) {
+    const tail = `${output}\n${suite.stderr ?? ''}`.split('\n').filter((line) => /^not ok|^# (tests|fail|skipped|todo)/.test(line)).slice(0, 15);
     tail.forEach((line) => problems.push(`  ${line.trim()}`));
   }
-  check('Rutas protegidas y públicas (pila real de Express, scripts/verificar-rutas.mjs)', problems);
+  check('Rutas protegidas y públicas (suite de tests con la pila real de Express, tests/)', problems);
 }
 
 // ─── Resultado ──────────────────────────────────────────────────────────────

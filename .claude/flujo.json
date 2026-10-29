@@ -55,6 +55,12 @@
       "docs/01-arquitectura.md",
       "docs/03-configuracion.md"
     ],
+    "app.js": [
+      "docs/04-api.md",
+      "docs/05-modulos.md",
+      "docs/01-arquitectura.md",
+      "docs/03-configuracion.md"
+    ],
     "middleware/**": [
       "docs/05-modulos.md"
     ],
@@ -128,6 +134,7 @@
   },
   "areasContrato": [
     "index.js",
+    "app.js",
     "routes/**",
     "middleware/errorHandler.js",
     "config/s3Paths.js",

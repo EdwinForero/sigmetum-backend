@@ -42,11 +42,11 @@ const stripTicks = (cell) => cell.replace(/^`+|`+$/g, '');
 // Rutas de routes/*.js (lectura común en lib/repo.mjs), sin el comodín `(*)`.
 const cleanPath = (path) => path.replace(/\(\*\)/g, '');
 const codeRoutes = routeDeclarations().map((route) => ({ method: route.method, path: cleanPath(route.path), protected: route.protected, file: basename(route.file) }));
-// Rutas declaradas directamente en index.js (hoy, solo /healthcheck; `app.use` responde a todos los métodos, se documenta como GET).
-for (const [, path] of read('index.js').matchAll(/app\.(?:get|use)\(\s*'(\/[^']*)'/g)) {
-  codeRoutes.push({ method: 'GET', path, protected: false, file: 'index.js' });
+// Rutas declaradas directamente en app.js (hoy, solo /healthcheck; `app.use` responde a todos los métodos, se documenta como GET).
+for (const [, path] of read('app.js').matchAll(/app\.(?:get|use)\(\s*'(\/[^']*)'/g)) {
+  codeRoutes.push({ method: 'GET', path, protected: false, file: 'app.js' });
 }
-const apiRoutes = codeRoutes.filter((route) => route.file !== 'index.js');
+const apiRoutes = codeRoutes.filter((route) => route.file !== 'app.js');
 
 // Variables de entorno.
 const { required: requiredVars, requiredLocal: requiredLocalVars } = declaredEnvVars();
@@ -194,7 +194,7 @@ const anchorsOf = (text) => {
   for (const row of rows) {
     if (!codeRoutes.some((r) => r.method === row.method && r.path === row.path)) problems.push(`docs/04 documenta ${row.method} ${row.path}, que no existe en el código`);
   }
-  check('Rutas y endpoints (routes/*.js e index.js → 04-api.md)', problems);
+  check('Rutas y endpoints (routes/*.js e app.js → 04-api.md)', problems);
 }
 
 // ─── 4. Variables de entorno ────────────────────────────────────────────────
@@ -317,6 +317,8 @@ const anchorsOf = (text) => {
   const security = doc('guias/seguridad.md');
   // Claves de un objeto literal de quality-check.mjs: líneas con dos espacios de sangría ('clave': o clave:).
   const keysOf = (name) => {
+    // Un objeto vacío en una sola línea ('{};') no tiene cuerpo: sin esta salida la regex seguiría hasta el '};' de otro objeto.
+    if (new RegExp(`const ${name} = \\{\\s*\\};`).test(quality)) return [];
     const block = quality.match(new RegExp(`const ${name} = \\{([\\s\\S]*?)\\n\\};`))?.[1] ?? '';
     return [...block.matchAll(/^ {2}(?:'([^']+)'|([\w-]+)):/gm)].map((m) => m[1] ?? m[2]);
   };

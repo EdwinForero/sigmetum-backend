@@ -12,7 +12,7 @@ Todas las rutas van bajo `API_PREFIX` (por defecto `/api/v1`), salvo `/healthche
 
 | Método | Ruta | Acceso | Router |
 |---|---|---|---|
-| GET | `/healthcheck` | 🔓 | `index.js` |
+| GET | `/healthcheck` | 🔓 | `app.js` |
 | POST | `/log` | 🔓 (rate limit) | `auth.js` |
 | GET | `/auth` | 🔒 | `auth.js` |
 | GET | `/list-files` | 🔓 | `data.js` |
@@ -182,7 +182,7 @@ Body: `{ "term": "texto" }`. Elimina todas las entradas con ese texto exacto. `4
 | JSON mal formado en el cuerpo (`err.type === 'entity.parse.failed'`, 400) | `Invalid JSON` |
 | Cuerpo mayor que el límite de `express.json` (100 KB; 413) | `Payload too large` |
 | Otro error de librería con estado 4xx (por ejemplo 415 o 422) | `Bad request` (límite conocido: se pierde el detalle de cualquier 4xx distinto de 413) |
-| `Origin` no permitido por CORS (`index.js`; 403) | `Origin not allowed` |
+| `Origin` no permitido por CORS (`app.js`; 403) | `Origin not allowed` |
 | Cualquier otro error (sin `status`, 5xx, o con texto propio como `Excel conversion failed...`, `No files found...` o `Error getting signed URL`) | `Internal server error` |
 
 El mensaje real de un error no mapeado **no se devuelve al cliente**: se registra en consola (`[método] ruta → estado` más `err.message`, o el stack en `local`). El orden de reglas de `friendlyMessage(err, status)` es: `publicMessage`, los mapeados de la tabla (por `name` o código), `Invalid JSON`, `Payload too large`, `Bad request` (guarda `400 <= status < 500`) y, si nada encaja, `Internal server error`. Las respuestas 4xx que las rutas construyen con `res.status(400).json(...)` no pasan por `errorHandler` y conservan su texto.

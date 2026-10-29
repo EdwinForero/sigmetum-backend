@@ -17,7 +17,7 @@ Un cambio está terminado cuando pasan estos comandos y la documentación está 
 | `npm run lint` | ESLint 9: sin errores y sin superar el tope de avisos |
 | `npm run quality` | Patrones prohibidos, rutas mutantes sin autenticación, variables sin declarar, secretos, `npm audit` de producción y ESLint |
 | `npm run docs:check` | Que la documentación sigue al código |
-| `npm test` | Tests, **cuando existan** (hoy es el placeholder de `npm init`: M11) |
+| `npm test` | Suite de la API (`tests/`, `node:test` + `supertest`; cobertura parcial, M11) |
 
 ## 2. Estructura: qué va en cada sitio
 
@@ -28,7 +28,8 @@ Un cambio está terminado cuando pasan estos comandos y la documentación está 
 | `aws/` | **La única capa que habla con S3**: leer, escribir, listar, borrar, firmar URLs | Decisiones de negocio (qué versión activar, cuándo reconvertir un Excel) | **No cumple**: `deleteFileFromS3` y `updateFileS3` contienen la regla "la versión activa es la última" y llaman a `convertExcelToJson` (M14) |
 | `config/` | Constantes de rutas de S3 (`s3Paths.js`) y validación del entorno (`validateEnv.js`) | Lógica | Cumple |
 | `middleware/` | Middlewares transversales (hoy, `errorHandler`) | Manejadores de una ruta concreta | `tokenAuth` vive en `functions/` (B7) |
-| `index.js` | Arranque: entorno, middlewares, montaje de rutas | Lógica. Además arranca el servidor al importarse, lo que impide probarlo con `supertest` | M13 |
+| `app.js` | La app Express: middlewares, montaje de rutas, `notFound` y `errorHandler`; se exporta sin abrir puerto | Lógica de negocio, `dotenv`, `validateEnv`, `listen` | Cumple (M13, 28/10/2026) |
+| `index.js` | Arranque: `dotenv`, validación del entorno, `require('./app')` y `listen` | Lógica, middlewares y rutas | Cumple |
 
 Reglas de dependencia: `routes → functions / aws / config`, `aws → config`, `functions → (nada de infraestructura)`. Una capa inferior **no importa** de una superior.
 
@@ -41,8 +42,8 @@ Nombres: archivos en `camelCase` (`awsS3connect.js` es la excepción con minúsc
 | Toda ruta responde `{ success: true, data }` o `{ success: false, error }` | El frontend solo considera éxito `response.ok` **y** `success === true` (contrato en `../sigmetum-frontend/docs/integracion/para-backend.md`) | Revisión; `docs:check` comprueba la documentación | Cumple |
 | Los fallos inesperados se pasan con `next(error)` a `middleware/errorHandler.js`; las validaciones de entrada responden 400 directamente | Un único sitio da forma a los errores y decide qué se loguea | Skill `new-endpoint` | Cumple en las rutas de S3 y de contenido |
 | **Todo manejador `async` captura sus errores** (`try/catch` + `next`) | Express 4 **no** captura las promesas rechazadas: la petición se queda colgada y el error acaba en `unhandledRejection` | Revisión | Cumple en el código tocado el 28/10/2026 (A7 resuelto: `userAuth` ya captura y llama a `next(error)`). Queda por revisar el resto de manejadores |
-| Códigos HTTP correctos: **400** entrada inválida, **401** sin token o token inválido, **404** recurso inexistente, **429** límite de peticiones, **500** solo fallos propios | El frontend y quien use la API distinguen el caso por el código | Tests de cada ruta (cuando existan) | **Cumple en las rutas de A3 resueltas el 28/10/2026** (entrada ausente o de tipo incorrecto responde 400; `MulterError` también); `NoSuchKey` de S3 da 500 porque el error del SDK no trae `status` (B9, por confirmar) |
-| El mensaje de error al cliente es **controlado**, no `err.message` tal cual | Un error interno puede revelar rutas, claves o nombres de librerías | Revisión de `errorHandler.js` | Cumple (M17, 28/10/2026): `friendlyMessage(err, status)` devuelve un texto mapeado (`publicMessage`, `Token expired`, `Invalid JSON`, `Payload too large`, `Bad request`, almacenamiento) o `Internal server error`; el `err.message` real solo va a la consola. Lo comprueba el criterio 10 de `scripts/verificar-rutas.mjs` |
+| Códigos HTTP correctos: **400** entrada inválida, **401** sin token o token inválido, **404** recurso inexistente, **429** límite de peticiones, **500** solo fallos propios | El frontend y quien use la API distinguen el caso por el código | Tests de cada ruta (`npm test`) | **Cumple en las rutas de A3 resueltas el 28/10/2026** (entrada ausente o de tipo incorrecto responde 400; `MulterError` también); `NoSuchKey` de S3 da 500 porque el error del SDK no trae `status` (B9, por confirmar) |
+| El mensaje de error al cliente es **controlado**, no `err.message` tal cual | Un error interno puede revelar rutas, claves o nombres de librerías | Revisión de `errorHandler.js` | Cumple (M17, 28/10/2026): `friendlyMessage(err, status)` devuelve un texto mapeado (`publicMessage`, `Token expired`, `Invalid JSON`, `Payload too large`, `Bad request`, almacenamiento) o `Internal server error`; el `err.message` real solo va a la consola. Lo comprueba `tests/errores-controlados.test.js` |
 | No cambies la forma de una respuesta sin revisar el contrato con el frontend | Rompe la web sin avisar | [mantenimiento.md](mantenimiento.md), sección 6 | — |
 | Los mensajes de la API se añaden en inglés y estables. Si el frontend necesita distinguirlos, se acuerda un `code` | El frontend **no muestra** el texto del servidor | Revisión | Hoy no existe `code` |
 
@@ -127,7 +128,7 @@ Cómo validar: **una función de validación por forma de entrada**, con una lis
 
 ## 11. Pruebas (TDD)
 
-**Hoy no hay tests (M11).** En esta fase no se implantan, pero cuando se empiece se hará así:
+**Hay una base de tests (`tests/`, `npm test`) y es parcial (M11).** Cómo se escriben y qué cubren: [mantenimiento.md](mantenimiento.md#tests-de-la-api-m11-parcial). Se trabaja así:
 
 1. **Primero el test**: uno que falle **por el motivo correcto** (no por un error de sintaxis ni de importación) y se comprueba.
 2. **Después el cambio mínimo** que lo hace pasar.
@@ -141,15 +142,14 @@ Cómo validar: **una función de validación por forma de entrada**, con una lis
 | No simules código propio si puedes usar el real | Un mock que repite la implementación no prueba nada |
 | Cuando el test pasa a la primera, sospecha | Puede probar lo que ya funcionaba |
 
-**Stack propuesto** (por confirmar, antes de instalar nada):
+**Stack** (`node:test` y `supertest` están instalados; `aws-sdk-client-mock` no se usa: S3 se simula inyectando espías en `require.cache`, decisión 2 del plan de M13/M11):
 
 | Herramienta | Uso |
 |---|---|
 | `node:test` (integrado en Node 20) | Ejecutor y aserciones, sin dependencias. Vitest es la alternativa si se quiere compartir herramienta con el frontend |
-| `supertest` | Llamar a la app sin abrir un puerto |
-| `aws-sdk-client-mock` | Simular el cliente de S3 (`@aws-sdk/client-s3` v3) |
+| `supertest` (7.3.1, versión exacta) | Llamar a la app sin abrir un puerto |
 
-**Requisitos previos para poder probar** (hallazgos ya abiertos): separar `app` de `index.js` para exportarla sin arrancar el servidor (M13); que `functions/` no importe S3 (M14); poder inyectar la fecha (A1).
+**Requisitos previos para poder probar**: la app se exporta sin arrancar el servidor (`app.js`, M13 resuelto) y la fecha se inyecta (A1 resuelto); falta que `functions/` no importe S3 (M14), lo que impide probar el flujo de datos con un S3 simulado con estado.
 
 **Orden de cobertura** (donde están los fallos más caros):
 
@@ -209,7 +209,6 @@ No los repitas al escribir código nuevo:
 | Leer, modificar y escribir un objeto entero sin control de concurrencia | `uploadTextToJsonS3`, `deleteTermFromS3` | M1 |
 | `listObjectsV2` sin paginar | `listFilesInS3Folder` | M10 |
 | Middleware fuera de `middleware/` | `functions/tokenAuthentication.js` | B7 |
-| Arrancar el servidor al importar el módulo | `index.js` | M13 |
 | `max` (obsoleto) en `express-rate-limit` 8 | `routes/auth.js` | B6 |
 
 ## 16. Mantener esta guía

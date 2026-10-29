@@ -12,7 +12,7 @@ Monolito Express pequeño, sin base de datos. S3 actúa como única capa de pers
      │  ALB (solo prod) → Elastic       │
      │  Beanstalk · Node.js · t3.nano   │
      │                                  │
-     │  index.js                        │
+     │  index.js (arranque) → app.js    │
      │   ├─ /healthcheck                │
      │   ├─ morgan · cors · json · gzip │
      │   ├─ routes/auth.js              │
@@ -30,7 +30,8 @@ Monolito Express pequeño, sin base de datos. S3 actúa como única capa de pers
 
 | Capa | Carpeta | Responsabilidad |
 |---|---|---|
-| Arranque | `index.js`, `config/` | Carga `.env`, valida variables, registra middlewares y rutas |
+| Arranque | `index.js`, `config/` | `index.js` carga `.env`, valida variables y escucha en el puerto |
+| Aplicación | `app.js` | Construye y exporta la app Express (middlewares, rutas, `notFound`, `errorHandler`) sin abrir puerto |
 | Rutas (controladores) | `routes/` | Validan entrada, orquestan llamadas, dan forma a la respuesta |
 | Lógica auxiliar | `functions/` | Autenticación, parseo de Excel, nombres y versiones de fichero |
 | Acceso a datos | `aws/awsS3connect.js` | Único punto de contacto con S3 |
@@ -49,7 +50,7 @@ Las rutas no hablan con S3 directamente: siempre pasan por `awsS3connect.js`. La
 5. Si ningún router resuelve la petición (ruta inexistente o método no definido), `notFound` responde `404` `{ success: false, error: "Not found" }`.
 6. Si algo falla, el handler llama a `next(error)` y `errorHandler` responde `{ success: false, error }` con el status adecuado; el mensaje es fijo o de una lista de mapeados, y el real solo va a la consola.
 
-`/healthcheck` se registra **antes** de los middlewares para que el health check del balanceador no genere logs ni dependa de CORS.
+`/healthcheck` (en `app.js`) se registra **antes** de los middlewares para que el health check del balanceador no genere logs ni dependa de CORS.
 
 ## Convenciones
 

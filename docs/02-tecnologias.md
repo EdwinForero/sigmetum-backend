@@ -25,6 +25,7 @@ Runtime: **Node.js** (CommonJS, `require`). Arranque con `npm start` → `node i
 
 | Paquete | Versión | Uso |
 |---|---|---|
+| `supertest` | 7.3.1 | Peticiones HTTP a la app en los tests (`npm test`). Versión exacta |
 | `nodemon` | 3.1.14 | Recarga en caliente (no hay script configurado; usar `npx nodemon index.js`) |
 | `eslint` | 9.39.5 | Linter (`npm run lint`). Versión exacta, compatible con Node 20 |
 | `@eslint/js` | 9.39.5 | Reglas recomendadas de ESLint |
@@ -34,7 +35,7 @@ Runtime: **Node.js** (CommonJS, `require`). Arranque con `npm start` → `node i
 
 Las herramientas de calidad van con **versión exacta** (sin `^`) para que el tope de avisos no cambie solo. La configuración está en `eslint.config.js` y las reglas en [buenas prácticas](guias/buenas-practicas-backend.md#14-eslint-y-el-tope-de-avisos); los `.mjs` de `plugins/` se lintean con las mismas reglas que los scripts de mantenimiento.
 
-Las pruebas de `plugins/` (núcleo `ciclo-agentico` y marketplace local; `npm run agentes:test`) usan `node:test`, integrado en Node, sin dependencias nuevas. Es el único uso de un ejecutor de pruebas: la API sigue sin tests (M11).
+Los tests usan `node:test`, el ejecutor integrado en Node, sin framework adicional: los de la API están en `tests/` (`npm test`, con `supertest`) y los de `plugins/` (núcleo `ciclo-agentico` y marketplace local) se ejecutan aparte con `npm run agentes:test`. La cobertura de la API es parcial (M11).
 
 ## Servicios externos
 
@@ -47,7 +48,7 @@ Las pruebas de `plugins/` (núcleo `ciclo-agentico` y marketplace local; `npm ru
 ## Lo que no hay
 
 - Base de datos.
-- Tests de la API ni framework de testing (`npm test` es el placeholder de `npm init`; `node:test` solo se usa para el plugin).
+- Cobertura completa de tests: la base existe pero es parcial (M11).
 - Formateador (Prettier u otro). Sí hay linter: ESLint.
 - TypeScript.
 - Documentación OpenAPI/Swagger.
