@@ -205,7 +205,7 @@ const ACCEPTED_ADVISORIES = {};
 // omitidos ni pendientes, al menos MIN_TESTS tests y presentes las suites de la pila (estructura-rutas) y de las
 // rutas protegidas (rutas-protegidas). Si añades tests, sube MIN_TESTS; si quitas alguno, hay que justificarlo.
 
-const MIN_TESTS = 813;
+const MIN_TESTS = 863;
 // Un test de cada suite imprescindible: el reporter TAP no nombra los archivos, así que se comprueba por existencia
 // del archivo y por este test centinela (su nombre exacto debe aparecer como superado).
 const REQUIRED_SUITES = {

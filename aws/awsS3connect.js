@@ -227,10 +227,9 @@ exports.deleteImageFromS3 = async (filePath, imageKey) => {
             Bucket: process.env.AWS_BUCKET_NAME,
             Key: `${filePath}/${imageKey}`,
         });
-        return { success: true };
     } catch (error) {
         console.error('Error deleting image:', error);
-        return { success: false, error: error.message };
+        throw error;
     }
 };
 
@@ -245,10 +244,9 @@ exports.deleteTermFromS3 = async (termToDelete, fileName, folderName) => {
             Body: JSON.stringify(updatedTerms, null, 2),
             ContentType: 'application/json',
         });
-        return { success: true };
     } catch (error) {
         console.error('Error deleting term:', error);
-        return { success: false, message: error.message };
+        throw error;
     }
 };
 

@@ -11,7 +11,7 @@ const ROOT = path.join(__dirname, '..', '..');
 const calls = { sendMail: 0, getPresigned: 0, deleteImage: 0, s3Other: 0 };
 const spyTotal = () => Object.values(calls).reduce((sum, n) => sum + n, 0);
 
-// Respuestas sembradas (null = comportamiento normal) y argumentos recibidos por los espías de versiones.
+// Errores sembrados (null = comportamiento normal; el doble lanza el error, como aws/) y argumentos recibidos por los espías de versiones.
 const inject = { getTextJson: null, deleteImage: null, deleteTerm: null };
 const argsLog = { upload: [], update: [], del: [], list: [], image: [] };
 const seed = { list: [] };
@@ -33,10 +33,10 @@ injectInCache(path.join(ROOT, 'aws', 'awsS3connect.js'), {
     getPresignedUrlsFromS3Folder: other([]),
     getPresignedUrlFromS3: async () => { calls.getPresigned += 1; return 'https://s3.example.invalid/url-prefirmada'; },
     uploadImageToS3: async (...args) => { calls.s3Other += 1; argsLog.image.push(args); },
-    deleteImageFromS3: async () => { calls.deleteImage += 1; return inject.deleteImage ?? { success: true }; },
+    deleteImageFromS3: async () => { calls.deleteImage += 1; if (inject.deleteImage) throw inject.deleteImage; },
     getTextJsonS3: async () => { calls.s3Other += 1; if (inject.getTextJson) throw inject.getTextJson; return []; },
     uploadTextToJsonS3: other(undefined),
-    deleteTermFromS3: async () => { calls.s3Other += 1; return inject.deleteTerm ?? { success: true }; },
+    deleteTermFromS3: async () => { calls.s3Other += 1; if (inject.deleteTerm) throw inject.deleteTerm; },
     uploadFileToS3: async (...args) => { calls.s3Other += 1; argsLog.upload.push(args); },
     getFileFromS3: other({}),
     getMergedDataInS3Folder: other({}),

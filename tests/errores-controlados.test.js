@@ -82,17 +82,17 @@ test('e. MulterError (campo inesperado) da 400 File upload error: Unexpected fie
 // 10f. delete-image y delete-term no reflejan el error del SDK.
 test('f. delete-image fallido da 500 Internal server error sin el texto del SDK', async (t) => {
     capturar(t);
-    const r = await borrar('/delete-image', { imageKey: 'foto.jpg' }, 'deleteImage', { success: false, error: 'secreto del sdk' });
+    const r = await borrar('/delete-image', { imageKey: 'foto.jpg' }, 'deleteImage', new Error('secreto del sdk'));
     assert.ok(r.status === 500 && r.json?.error === 'Internal server error' && sinTexto(r, 'secreto'), resumenCaso(r));
 });
 test('f. delete-term fallido da 500 Internal server error sin el texto del SDK', async (t) => {
     capturar(t);
-    const r = await borrar('/delete-term', { term: 'x' }, 'deleteTerm', { success: false, message: 'secreto del sdk' });
+    const r = await borrar('/delete-term', { term: 'x' }, 'deleteTerm', new Error('secreto del sdk'));
     assert.ok(r.status === 500 && r.json?.error === 'Internal server error' && sinTexto(r, 'secreto'), resumenCaso(r));
 });
 test('f. el registro conserva el texto del SDK', async (t) => {
     const registro = capturar(t);
-    await borrar('/delete-image', { imageKey: 'foto.jpg' }, 'deleteImage', { success: false, error: 'secreto del sdk' });
+    await borrar('/delete-image', { imageKey: 'foto.jpg' }, 'deleteImage', new Error('secreto del sdk'));
     assert.ok(registro.some((linea) => linea.includes('secreto del sdk')), 'no se registró');
 });
 
@@ -151,24 +151,85 @@ test('i. el warn trunca el origen largo (conserva 200 caracteres y descarta el r
     assert.ok(lineaWarn.includes('a'.repeat(100)) && !lineaWarn.includes('a'.repeat(201)) && lineaWarn.length < 400, `longitud del warn: ${lineaWarn.length}`);
 });
 
-// 10j. delete-image / delete-term con {success:false} sin texto: 500 genérico y mensaje por defecto en el registro.
+// 10j. delete-image / delete-term con un error sin texto (B5: aws/ lanza): 500 genérico y la línea de registro de errorHandler.
 test('j. delete-image sin texto de error da 500 Internal server error', async (t) => {
     capturar(t);
-    const r = await borrar('/delete-image', { imageKey: 'foto.jpg' }, 'deleteImage', { success: false });
+    const r = await borrar('/delete-image', { imageKey: 'foto.jpg' }, 'deleteImage', new Error());
     assert.ok(r.status === 500 && r.json?.error === 'Internal server error', resumenCaso(r));
 });
-test('j. el registro de delete-image lleva el mensaje por defecto', async (t) => {
+test('j. el registro de delete-image lleva la línea de errorHandler', async (t) => {
     const registro = capturar(t);
-    await borrar('/delete-image', { imageKey: 'foto.jpg' }, 'deleteImage', { success: false });
-    assert.ok(registro.some((linea) => linea.includes('delete-image failed')), 'el registro no contiene delete-image failed');
+    await borrar('/delete-image', { imageKey: 'foto.jpg' }, 'deleteImage', new Error());
+    assert.ok(registro.some((linea) => linea.includes('[DELETE] /api/v1/delete-image → 500')), 'el registro no contiene la línea de errorHandler');
 });
 test('j. delete-term sin texto de error da 500 Internal server error', async (t) => {
     capturar(t);
-    const r = await borrar('/delete-term', { term: 'x' }, 'deleteTerm', { success: false });
+    const r = await borrar('/delete-term', { term: 'x' }, 'deleteTerm', new Error());
     assert.ok(r.status === 500 && r.json?.error === 'Internal server error', resumenCaso(r));
 });
-test('j. el registro de delete-term lleva el mensaje por defecto', async (t) => {
+test('j. el registro de delete-term lleva la línea de errorHandler', async (t) => {
     const registro = capturar(t);
-    await borrar('/delete-term', { term: 'x' }, 'deleteTerm', { success: false });
-    assert.ok(registro.some((linea) => linea.includes('delete-term failed')), 'el registro no contiene delete-term failed');
+    await borrar('/delete-term', { term: 'x' }, 'deleteTerm', new Error());
+    assert.ok(registro.some((linea) => linea.includes('[DELETE] /api/v1/delete-term → 500')), 'el registro no contiene la línea de errorHandler');
 });
+
+// B9: NoSuchKey del SDK (por name o por Code) da 404 con texto fijo; un status propio manda; NoSuchBucket sigue en 500.
+const MENSAJE_NO_EXISTE = 'The requested file does not exist in storage';
+const errorSdk = (name, Code, status) => Object.assign(new Error(`secreto ${name}`), { name, Code, $fault: 'client', $metadata: { httpStatusCode: status } });
+
+test('B9. NoSuchKey por name con $metadata 404 da 404 con el texto fijo', async (t) => {
+    capturar(t);
+    const r = await sembrar(errorSdk('NoSuchKey', undefined, 404));
+    assert.ok(r.status === 404 && r.json?.error === MENSAJE_NO_EXISTE && sinTexto(r, 'secreto'), resumenCaso(r));
+});
+test('B9. NoSuchKey por Code da 404 con el texto fijo', async (t) => {
+    capturar(t);
+    const r = await sembrar(errorSdk('Error', 'NoSuchKey', 404));
+    assert.ok(r.status === 404 && r.json?.error === MENSAJE_NO_EXISTE && sinTexto(r, 'secreto'), resumenCaso(r));
+});
+for (const status of [503, 400]) {
+    test(`B9. NoSuchKey con status propio ${status} conserva ese estado`, async (t) => {
+        capturar(t);
+        const r = await sembrar(conCodigo('secreto status', { name: 'NoSuchKey', status }));
+        assert.ok(r.status === status && sinTexto(r, 'secreto'), resumenCaso(r));
+    });
+}
+test('B9. NoSuchKey con statusCode propio 400 conserva ese estado', async (t) => {
+    capturar(t);
+    const r = await sembrar(conCodigo('secreto statusCode', { name: 'NoSuchKey', statusCode: 400 }));
+    assert.ok(r.status === 400 && sinTexto(r, 'secreto'), resumenCaso(r));
+});
+test('B9. NoSuchBucket con $metadata 404 sigue en 500', async (t) => {
+    capturar(t);
+    const r = await sembrar(errorSdk('NoSuchBucket', 'NoSuchBucket', 404));
+    assert.ok(r.status === 500 && r.json?.error === 'Storage bucket is not configured correctly', resumenCaso(r));
+});
+test('B9. NoSuchKey con code en minúscula sigue en 500 con el texto mapeado (límite conocido)', async (t) => {
+    capturar(t);
+    const r = await sembrar(conCodigo('secreto code', { code: 'NoSuchKey' }));
+    assert.ok(r.status === 500 && r.json?.error === MENSAJE_NO_EXISTE, resumenCaso(r));
+});
+test('B9. la ruta inexistente sigue dando 404 Not found', async (t) => {
+    capturar(t);
+    const r = await llamar(app, 'GET', `${PREFIX}/no-existe`);
+    assert.ok(r.status === 404 && r.json?.error === 'Not found', resumenCaso(r));
+});
+
+// B5: delete-image y delete-term pasan el error original a errorHandler (código, estado y texto mapeado).
+const rutasBorrado = [['/delete-image', { imageKey: 'foto.jpg' }, 'deleteImage'], ['/delete-term', { term: 'x' }, 'deleteTerm']];
+for (const [ruta, cuerpo, campo] of rutasBorrado) {
+    test(`B5. ${ruta} con AccessDenied da 500 Access denied to storage`, async (t) => {
+        capturar(t);
+        const r = await borrar(ruta, cuerpo, campo, conCodigo('secreto sdk', { Code: 'AccessDenied' }));
+        assert.ok(r.status === 500 && r.json?.error === 'Access denied to storage' && sinTexto(r, 'secreto'), resumenCaso(r));
+    });
+    test(`B5. ${ruta} con NoSuchKey da 404 con el texto fijo`, async (t) => {
+        capturar(t);
+        const r = await borrar(ruta, cuerpo, campo, errorSdk('NoSuchKey', 'NoSuchKey', 404));
+        assert.ok(r.status === 404 && r.json?.error === MENSAJE_NO_EXISTE && sinTexto(r, 'secreto'), resumenCaso(r));
+    });
+    test(`B5. ${ruta} con S3 correcto da 200`, async () => {
+        const r = await borrar(ruta, cuerpo, campo, null);
+        assert.ok(r.status === 200 && r.json?.success === true, resumenCaso(r));
+    });
+}

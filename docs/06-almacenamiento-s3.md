@@ -25,6 +25,8 @@ Los prefijos están en `config/s3Paths.js`. `active` y `terms` están en `RESERV
 
 **Listados y objetos reales (A5, M10; 29/10/2026).** Los listados recorren **todas** las páginas de `ListObjectsV2` (`IsTruncated` con `NextContinuationToken`), sin tope de páginas; si S3 dice que hay más páginas y no da token, o repite uno ya usado, la función lanza en vez de iterar sin fin. Una página sin `Contents` cuenta como vacía y continúa. Un «objeto real» es el que tiene la clave sin `/` final y `Size > 0`; el marcador de carpeta (`gallery/`) y los objetos de tamaño 0 se excluyen igual de `listFilesInS3Folder` y de las URL prefirmadas, y la galería vacía o con solo el marcador da `[]` en `GET /list-images`. La paginación usa la misma acción `s3:ListBucket` que antes.
 
+**Errores (B5, 29/10/2026).** Todas las funciones de `aws/` lanzan el error original ante un fallo (ya no hay `{ success: false }`); las rutas lo pasan con `next(error)` y `errorHandler` lo traduce. Un `NoSuchKey` que llegue hasta `errorHandler` responde `404` (B9); `getTextJsonS3` lo convierte antes en `[]` solo para el glosario (A6).
+
 **Lecturas de JSON (A6).** El glosario (`data/terms/noLatinTerms.json`) solo se trata como «vacío» si S3 responde `NoSuchKey`; cualquier otro fallo, un objeto de 0 bytes, un JSON corrupto o un JSON que no es un array se propaga y las tres rutas de glosario responden `500` sin escribir. **Un glosario ilegible ya no se autocura**: hay que repararlo a mano en S3 (por ejemplo, subir un `[]` válido) para desbloquear `list-terms`, `upload-term` y `delete-term`. `/get-merged-data` lee los activos en paralelo y concatena en el orden del listado.
 
 ## Modelo de versionado

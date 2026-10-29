@@ -30,7 +30,9 @@ const nuevoEstado = () => ({
     llamadas: [],
 });
 
-const awsError = (name, Code, status = 400) => Object.assign(new Error(`${name} interno de prueba`), { name, Code, $metadata: { httpStatusCode: status } });
+const awsError = (name, Code, status = 400) => Object.assign(new Error(`${name} interno de prueba`), { name, Code, $fault: 'client', $metadata: { httpStatusCode: status } });
+// Fallo de red de Node: `code` en minúscula, sin $metadata.
+const errorRed = (code) => Object.assign(new Error(`${code} interno de prueba`), { name: 'Error', code });
 const cuerpo = (texto) => ({ Body: Readable.from([Buffer.from(texto)]) });
 const puts = () => estado.llamadas.filter((c) => c instanceof PutObjectCommand);
 const token = jwt.sign({ userId: 1 }, TEST_SECRET, { expiresIn: '1h' });
@@ -188,9 +190,8 @@ describe('getTextJsonS3 y glosario', () => {
                 await assert.rejects(() => realAws.uploadTextToJsonS3('x', 't.json', 'data/terms'));
                 assert.equal(puts().length, 0);
             });
-            test('deleteTermFromS3 devuelve success:false y no escribe', async () => {
-                const r = await realAws.deleteTermFromS3('x', 't.json', 'data/terms');
-                assert.equal(r.success, false);
+            test('deleteTermFromS3 rechaza y no escribe', async () => {
+                await assert.rejects(() => realAws.deleteTermFromS3('x', 't.json', 'data/terms'));
                 assert.equal(puts().length, 0);
             });
             test('GET /list-terms: 500 con envoltorio y sin texto interno', async () => {
@@ -314,5 +315,183 @@ describe('deleteFileFromS3 y getNextVersion', () => {
         const { getNextVersion } = require('../functions/getNextVersion');
         const { version } = await getNextVersion('Sevilla', new Date('2026-10-05T12:00:00Z'));
         assert.equal(version, 11);
+    });
+});
+
+// ─── B5: delete-image y delete-term propagan el error original a errorHandler ────────────────────
+
+describe('B5 delete-image y delete-term', () => {
+    const auth = (req) => req.set('Authorization', `Bearer ${token}`);
+    // Cada ruta hace fallar la operación de S3 que usa: delete-image borra un objeto; delete-term lee el glosario.
+    const rutas = [
+        ['DELETE /delete-image', (fallo) => { estado.del = fallo; }, () => auth(request(app).delete('/api/v1/delete-image')).send({ imageKey: 'foto.jpg' })],
+        ['DELETE /delete-term', (fallo) => { estado.get = fallo; }, () => auth(request(app).delete('/api/v1/delete-term')).send({ term: 'x' })],
+    ];
+    const fallos = [
+        ['AccessDenied', () => awsError('AccessDenied', 'AccessDenied', 403), 'Access denied to storage'],
+        ['NoSuchBucket', () => awsError('NoSuchBucket', 'NoSuchBucket', 404), 'Storage bucket is not configured correctly'],
+        ['red (ECONNREFUSED)', () => errorRed('ECONNREFUSED'), 'Storage connection error'],
+        ['sin código', () => new Error('secreto interno'), 'Internal server error'],
+    ];
+
+    for (const [ruta, sembrar, pedir] of rutas) {
+        for (const [nombre, crear, texto] of fallos) {
+            test(`${ruta} con ${nombre}: 500 ${texto} sin texto interno`, async () => {
+                sembrar(() => { throw crear(); });
+                const res = await pedir();
+                assert.equal(res.status, 500);
+                assert.deepEqual(res.body, { success: false, error: texto });
+                assert.ok(!res.body.error.includes('interno'));
+            });
+        }
+    }
+
+    test('deleteImageFromS3 rechaza con el error original', async () => {
+        const original = awsError('AccessDenied', 'AccessDenied', 403);
+        estado.del = () => { throw original; };
+        await assert.rejects(() => realAws.deleteImageFromS3('gallery', 'foto.jpg'), (e) => e === original && e.name === 'AccessDenied' && e.Code === 'AccessDenied');
+    });
+    test('deleteTermFromS3 rechaza con el error original', async () => {
+        const original = awsError('AccessDenied', 'AccessDenied', 403);
+        estado.get = () => { throw original; };
+        await assert.rejects(() => realAws.deleteTermFromS3('x', 't.json', 'data/terms'), (e) => e === original && e.name === 'AccessDenied' && e.Code === 'AccessDenied');
+        assert.equal(puts().length, 0);
+    });
+    test('deleteTermFromS3 rechaza con el error de escritura original', async () => {
+        const original = awsError('AccessDenied', 'AccessDenied', 403);
+        estado.get = () => cuerpo('[{"term":"x"}]');
+        estado.put = () => { throw original; };
+        await assert.rejects(() => realAws.deleteTermFromS3('x', 't.json', 'data/terms'), (e) => e === original);
+    });
+
+    test('delete-image con S3 correcto: 200 y un solo DeleteObject sobre gallery/<clave>', async () => {
+        const res = await auth(request(app).delete('/api/v1/delete-image')).send({ imageKey: 'foto.jpg' });
+        assert.equal(res.status, 200);
+        assert.deepEqual(res.body, { success: true, data: 'Image deleted successfully' });
+        const borrados = estado.llamadas.filter((c) => c instanceof DeleteObjectCommand);
+        assert.equal(borrados.length, 1);
+        assert.equal(borrados[0].input.Key, 'gallery/foto.jpg');
+    });
+    test('delete-term con S3 correcto: 200 y un solo PutObject sin el término', async () => {
+        estado.get = () => cuerpo('[{"term":"x"},{"term":"y"}]');
+        const res = await auth(request(app).delete('/api/v1/delete-term')).send({ term: 'x' });
+        assert.equal(res.status, 200);
+        assert.deepEqual(res.body, { success: true, data: 'Term deleted successfully' });
+        assert.equal(puts().length, 1);
+        assert.deepEqual(JSON.parse(puts()[0].input.Body), [{ term: 'y' }]);
+    });
+
+    test('los 400 de validación no cambian y no llaman a S3', async () => {
+        const a = await auth(request(app).delete('/api/v1/delete-image')).send({});
+        const b = await auth(request(app).delete('/api/v1/delete-image')).send({ imageKey: '../x.jpg' });
+        const c = await auth(request(app).delete('/api/v1/delete-term')).send({});
+        assert.deepEqual([a.status, b.status, c.status], [400, 400, 400]);
+        assert.equal(estado.llamadas.length, 0);
+    });
+});
+
+// ─── B9: NoSuchKey responde 404 en errorHandler (global) ─────────────────────────────────────────
+
+describe('B9 NoSuchKey a 404', () => {
+    const auth = (req) => req.set('Authorization', `Bearer ${token}`);
+    const CLAVE = 'data/Sevilla/2026-10-05_v1.xlsx';
+    const MENSAJE = 'The requested file does not exist in storage';
+    const faltaObjeto = (error) => () => { throw error; };
+    const rutas = [
+        ['GET /get-data/<clave>', () => request(app).get('/api/v1/get-data/data/active/Sevilla.json')],
+        ['POST /update-file', () => auth(request(app).post('/api/v1/update-file')).send({ fileName: CLAVE })],
+        ['POST /upload/confirm (confirmar)', () => auth(request(app).post('/api/v1/upload/confirm')).send({ confirmed: true, draftKey: CLAVE })],
+    ];
+    const variantes = [
+        ['name y Code', () => awsError('NoSuchKey', 'NoSuchKey', 404)],
+        ['solo name', () => awsError('NoSuchKey', undefined, 404)],
+        ['solo Code', () => awsError('Error', 'NoSuchKey', 404)],
+    ];
+
+    for (const [ruta, pedir] of rutas) {
+        for (const [variante, crear] of variantes) {
+            test(`${ruta} con NoSuchKey (${variante}): 404 con cuerpo exacto`, async () => {
+                estado.get = faltaObjeto(crear());
+                const res = await pedir();
+                assert.equal(res.status, 404);
+                assert.deepEqual(res.body, { success: false, error: MENSAJE });
+                assert.ok(!JSON.stringify(res.body).includes('Sevilla') && !JSON.stringify(res.body).includes('interno de prueba'));
+            });
+        }
+    }
+
+    describe('en carrera (el objeto desaparece entre el listado y la lectura)', () => {
+        test('GET /get-merged-data: 404', async () => {
+            estado.list = () => ({ Contents: [{ Key: 'data/active/Sevilla.json', Size: 10 }] });
+            estado.get = faltaObjeto(awsError('NoSuchKey', 'NoSuchKey', 404));
+            const res = await request(app).get('/api/v1/get-merged-data');
+            assert.equal(res.status, 404);
+            assert.deepEqual(res.body, { success: false, error: MENSAJE });
+        });
+        test('POST /delete-file: el borrado ocurre y la lectura posterior da 404', async () => {
+            estado.list = () => ({ Contents: [{ Key: 'data/Sevilla/2026-10-04_v1.xlsx', Size: 10 }] });
+            estado.get = faltaObjeto(awsError('NoSuchKey', 'NoSuchKey', 404));
+            const res = await auth(request(app).post('/api/v1/delete-file')).send({ fileName: CLAVE });
+            assert.equal(res.status, 404);
+            assert.deepEqual(res.body, { success: false, error: MENSAJE });
+            assert.ok(estado.llamadas.some((c) => c instanceof DeleteObjectCommand && c.input.Key === CLAVE));
+        });
+        test('POST /upload/confirm al cancelar: 404', async () => {
+            estado.list = () => ({ Contents: [{ Key: 'data/Sevilla/2026-10-04_v1.xlsx', Size: 10 }] });
+            estado.get = faltaObjeto(awsError('NoSuchKey', 'NoSuchKey', 404));
+            const res = await auth(request(app).post('/api/v1/upload/confirm')).send({ confirmed: false, draftKey: CLAVE });
+            assert.equal(res.status, 404);
+            assert.deepEqual(res.body, { success: false, error: MENSAJE });
+        });
+    });
+
+    describe('lo que no cambia (ya pasaba antes de B9)', () => {
+        test('DELETE /delete-image de una clave inexistente: 200', async () => {
+            const res = await auth(request(app).delete('/api/v1/delete-image')).send({ imageKey: 'no-existe.jpg' });
+            assert.equal(res.status, 200);
+        });
+        test('POST /delete-file de una clave inexistente sin carrera: 200', async () => {
+            const res = await auth(request(app).post('/api/v1/delete-file')).send({ fileName: CLAVE });
+            assert.equal(res.status, 200);
+        });
+        test('GET /get-image: 200 con imageUrl y sin llamadas a S3', async () => {
+            const res = await request(app).get('/api/v1/get-image?imageKey=a.jpg');
+            assert.equal(res.status, 200);
+            assert.equal(typeof res.body.data.imageUrl, 'string');
+            assert.equal(estado.llamadas.length, 0);
+        });
+        describe('glosario inexistente (A6 captura NoSuchKey dentro de aws/)', () => {
+            beforeEach(() => { estado.get = faltaObjeto(awsError('NoSuchKey', 'NoSuchKey', 404)); });
+            test('delete-term: 200 con un solo PutObject con []', async () => {
+                const res = await auth(request(app).delete('/api/v1/delete-term')).send({ term: 'x' });
+                assert.equal(res.status, 200);
+                assert.equal(puts().length, 1);
+                assert.deepEqual(JSON.parse(puts()[0].input.Body), []);
+            });
+            test('upload-term: 200 con un solo PutObject con [{ term }]', async () => {
+                const res = await auth(request(app).post('/api/v1/upload-term')).send({ term: 'x' });
+                assert.equal(res.status, 200);
+                assert.equal(puts().length, 1);
+                assert.deepEqual(JSON.parse(puts()[0].input.Body), [{ term: 'x' }]);
+            });
+            test('list-terms: 200 con []', async () => {
+                const res = await request(app).get('/api/v1/list-terms');
+                assert.equal(res.status, 200);
+                assert.deepEqual(res.body, { success: true, data: [] });
+            });
+        });
+        for (const [nombre, crear, texto] of [
+            ['NoSuchBucket', () => awsError('NoSuchBucket', 'NoSuchBucket', 404), 'Storage bucket is not configured correctly'],
+            ['AccessDenied', () => awsError('AccessDenied', 'AccessDenied', 403), 'Access denied to storage'],
+            ['red', () => errorRed('ECONNREFUSED'), 'Storage connection error'],
+            ['name Foo con solo $metadata 404', () => awsError('Foo', undefined, 404), 'Internal server error'],
+        ]) {
+            test(`get-data con ${nombre}: 500 ${texto}`, async () => {
+                estado.get = faltaObjeto(crear());
+                const res = await request(app).get('/api/v1/get-data/data/active/Sevilla.json');
+                assert.equal(res.status, 500);
+                assert.deepEqual(res.body, { success: false, error: texto });
+            });
+        }
     });
 });

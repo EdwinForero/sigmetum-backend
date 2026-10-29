@@ -135,12 +135,8 @@ router.delete('/delete-image', tokenAuth, async (req, res, next) => {
     }
 
     try {
-        const result = await deleteImageFromS3(GALLERY_PATH, imageKey);
-        if (result.success) {
-            res.status(200).json({ success: true, data: 'Image deleted successfully' });
-        } else {
-            next(new Error(result.error || 'delete-image failed'));
-        }
+        await deleteImageFromS3(GALLERY_PATH, imageKey);
+        res.status(200).json({ success: true, data: 'Image deleted successfully' });
     } catch (error) {
         next(error);
     }
@@ -171,12 +167,8 @@ router.delete('/delete-term', tokenAuth, async (req, res, next) => {
     }
 
     try {
-        const result = await deleteTermFromS3(term, TERMS_FILE, TERMS_PATH);
-        if (result.success) {
-            res.json({ success: true, data: 'Term deleted successfully' });
-        } else {
-            next(new Error(result.message || 'delete-term failed'));
-        }
+        await deleteTermFromS3(term, TERMS_FILE, TERMS_PATH);
+        res.json({ success: true, data: 'Term deleted successfully' });
     } catch (error) {
         next(error);
     }
