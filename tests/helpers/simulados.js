@@ -13,7 +13,7 @@ const spyTotal = () => Object.values(calls).reduce((sum, n) => sum + n, 0);
 
 // Respuestas sembradas (null = comportamiento normal) y argumentos recibidos por los espías de versiones.
 const inject = { getTextJson: null, deleteImage: null, deleteTerm: null };
-const argsLog = { upload: [], update: [], del: [], list: [] };
+const argsLog = { upload: [], update: [], del: [], list: [], image: [] };
 const seed = { list: [] };
 
 const reiniciar = () => {
@@ -32,7 +32,7 @@ const other = (value) => async () => { calls.s3Other += 1; return value; };
 injectInCache(path.join(ROOT, 'aws', 'awsS3connect.js'), {
     getPresignedUrlsFromS3Folder: other([]),
     getPresignedUrlFromS3: async () => { calls.getPresigned += 1; return 'https://s3.example.invalid/url-prefirmada'; },
-    uploadImageToS3: other(undefined),
+    uploadImageToS3: async (...args) => { calls.s3Other += 1; argsLog.image.push(args); },
     deleteImageFromS3: async () => { calls.deleteImage += 1; return inject.deleteImage ?? { success: true }; },
     getTextJsonS3: async () => { calls.s3Other += 1; if (inject.getTextJson) throw inject.getTextJson; return []; },
     uploadTextToJsonS3: other(undefined),

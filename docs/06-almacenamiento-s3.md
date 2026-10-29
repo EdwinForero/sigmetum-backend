@@ -97,7 +97,9 @@ Las filas con celdas vacías confirmadas aparecen sin esas claves.
 
 ## Imágenes
 
-`gallery/{título}{extensión}`. Se sirven siempre por URL prefirmada de 1 hora; el bucket no necesita ser público.
+`gallery/{título}.{extensión}`. Se sirven siempre por URL prefirmada de 1 hora; el bucket no necesita ser público.
+
+**Cómo se construye la clave al subir (`POST /upload-image`, desde el 29/10/2026, M5):** `validateImageUpload` (`functions/validateImageUpload.js`) toma el título saneado (recorte, blanco a `_`, sin puntos finales) y la extensión en minúsculas, y comprueba `isValidImageKey` sobre el resultado, de modo que una clave subida es siempre válida para `GET /get-image` y `DELETE /delete-image`. Las extensiones admitidas son las de `IMAGE_UPLOAD_TYPES` (`jpg`, `jpeg`, `png`, `gif`, `webp`), un subconjunto de la regla de `imageKey`, y el `ContentType` guardado es el MIME canónico del tipo. Consecuencias: `foto.JPG` y `foto.jpg` son la misma clave (la segunda sobrescribe a la primera sin aviso); no se normaliza a NFC (NFC y NFD del mismo título dan claves distintas); los títulos con `,` `'` `:` `&` `#` `?` `%` se rechazan porque la regla de lectura no los admite.
 
 ### Regla de `imageKey`
 
@@ -110,7 +112,7 @@ Las filas con celdas vacías confirmadas aparecen sin esas claves.
 
 El patrón está escrito en forma plana con lookaheads (`(?!.*\/\/)(?!.*\/[.\p{M}])`) en vez de segmentos anidados: la versión anidada disparaba `security/detect-unsafe-regex`. La comprobación de `..` es aparte, como defensa en profundidad.
 
-No se exige que la clave exista en el listado de la galería. **Límite conocido**: `\p{N}` incluye dígitos y letras numéricas de ancho completo (fullwidth); se aceptan y no se normalizan. **Riesgo residual aceptado**: se pueden firmar (y borrar, con token) objetos bajo `gallery/` que cumplan la regla aunque `GET /list-images` no los liste. `POST /upload-image` aún no valida el MIME ni el nombre (M5), así que pueden existir en S3 claves que la regla rechaza (por ejemplo, con espacios o con otra extensión): quedarían sin poder pedirse ni borrarse con estas dos rutas. Comprobación contra el listado real de la galería: **(por confirmar)**, ver M21 en [07](07-estado-y-deuda-tecnica.md).
+No se exige que la clave exista en el listado de la galería. **Límite conocido**: `\p{N}` incluye dígitos y letras numéricas de ancho completo (fullwidth); se aceptan y no se normalizan. **Riesgo residual aceptado**: se pueden firmar (y borrar, con token) objetos bajo `gallery/` que cumplan la regla aunque `GET /list-images` no los liste. Los objetos subidos **antes del 29/10/2026** (M5) no pasaron por esa validación, así que pueden existir en S3 claves que la regla rechaza (por ejemplo, con espacios, con otra extensión o con `/` o `..` en el título): quedarían sin poder pedirse ni borrarse con estas dos rutas; no hay tarea de migración. Los objetos subidos desde entonces cumplen la regla. Comprobación contra el listado real de la galería: **(por confirmar)**, ver M21 en [07](07-estado-y-deuda-tecnica.md).
 
 ## Glosario
 

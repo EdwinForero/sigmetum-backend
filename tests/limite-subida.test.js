@@ -4,6 +4,7 @@ const { test, describe, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
 const request = require('supertest');
 const { appNueva, reiniciar, validToken, spyTotal, calls } = require('./helpers/simulados');
+const { conFirma } = require('./helpers/imagenes');
 
 const PREFIX = '/api/v1';
 const MB = 1024 * 1024;
@@ -15,7 +16,7 @@ beforeEach(reiniciar);
 const subir = (ruta, bytes, nombre, extra = {}) => {
     let req = request(app).post(`${PREFIX}${ruta}`).set('Authorization', `Bearer ${validToken}`);
     if (extra.title) req = req.field('title', extra.title);
-    return req.attach('file', Buffer.alloc(bytes, 'a'), nombre);
+    return req.attach('file', extra.buffer ?? Buffer.alloc(bytes, 'a'), nombre);
 };
 
 describe('M6: POST /upload (máximo 10 MB)', () => {
@@ -43,7 +44,7 @@ describe('M6: POST /upload-image (máximo 5 MB)', () => {
     const MAX = 5 * MB;
     for (const [etiqueta, bytes] of [['MAX - 1', MAX - 1], ['MAX', MAX]]) {
         test(`${etiqueta} da 200 y sube a S3`, async () => {
-            const res = await subir('/upload-image', bytes, 'foto.jpg', { title: 'titulo' });
+            const res = await subir('/upload-image', bytes, 'foto.jpg', { title: 'titulo', buffer: conFirma('jpg', bytes) });
             assert.equal(res.status, 200);
             assert.equal(calls.s3Other, 1);
         });

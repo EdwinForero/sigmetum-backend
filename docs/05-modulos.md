@@ -57,6 +57,7 @@ Exporta: `validateEnv` (función por defecto).
 | `DATA_FILE_NAME_PATTERN` | `/^(\d{4}-\d{2}-\d{2})_v(\d+)\.xlsx$/` (sin `g`, dos grupos de captura: fecha y `N`) | Nombre de una versión (D2). Fuente única: `parseVersionName` (`functions/versionName.js`) lo usa para interpretar el nombre, y con él `getNextVersion` y `deleteFileFromS3`; `isValidDataKey` solo lo usa con `.test()` |
 | `IMAGE_KEY_MAX_LENGTH` | `200` | Longitud máxima de un `imageKey` |
 | `IMAGE_KEY_PATTERN` | expresión regular (banderas `u` e `i`, sin `g`) | Forma permitida de un `imageKey`; se aplica con `isValidImageKey` (regla en [06](06-almacenamiento-s3.md#regla-de-imagekey)). Va en forma plana, con dos lookaheads (`(?!.*\/\/)` y `(?!.*\/[.\p{M}])`, que impide que un segmento tras `/` empiece por `.` o por una marca combinante), para no disparar `security/detect-unsafe-regex` |
+| `IMAGE_UPLOAD_TYPES` | `{ jpg, jpeg, png, gif, webp }` → MIME canónico (`image/jpeg`, `image/jpeg`, `image/png`, `image/gif`, `image/webp`) | Tipos que acepta `POST /upload-image`: extensión en minúsculas → MIME exigido y `ContentType` guardado. Se consulta solo por sus entradas propias (`constructor` o `__proto__` no pasan). Sus claves deben seguir siendo un subconjunto de las extensiones de `IMAGE_KEY_PATTERN` (un test lo comprueba) |
 
 ---
 
@@ -96,7 +97,7 @@ Todos los routers declaran sus rutas en un único `router`. `tokenAuth` es el **
 | `GET /list-images` | `getPresignedUrlsFromS3Folder(GALLERY_PATH)` |
 | `GET /get-image` | 400 si `imageKey` falta, está vacío o no es cadena; 400 `imageKey is not valid` si `isValidImageKey` lo rechaza; si no, `getPresignedUrlFromS3(GALLERY_PATH, imageKey)` |
 | `GET /list-terms` | `getTextJsonS3(TERMS_FILE, TERMS_PATH)` |
-| `POST /upload-image` | 400 si falta el fichero o `title` no es cadena o está vacío. Sustituye espacios del `title` por `_`, añade la extensión del fichero original, `uploadImageToS3` |
+| `POST /upload-image` | 400 `File and title are required` si falta el fichero o `title` no es cadena o está vacío; `validateImageUpload` da los otros tres 400 (tipo, título, contenido) o la clave y el MIME canónico; `uploadImageToS3` guarda con ese MIME, no con el del cliente |
 | `DELETE /delete-image` | 400 si `imageKey` falta o no es cadena; 400 `imageKey is not valid` si `isValidImageKey` lo rechaza; `deleteImageFromS3`; si devuelve `success: false` responde 500 (`next(new Error(result.error || 'delete-image failed'))`: el registro conserva un mensaje por defecto si `aws/` lo devuelve vacío) |
 | `POST /upload-term` | 400 si `term` no es cadena o está vacío tras `trim()`; `uploadTextToJsonS3(term, ...)` |
 | `DELETE /delete-term` | 400 si `term` falta, está vacío o no es cadena; `deleteTermFromS3`; si devuelve `success: false` responde 500 (`next(new Error(result.message || 'delete-term failed'))`, con el mismo mensaje por defecto en el registro) |
@@ -131,6 +132,16 @@ Middleware.
 ### `validateImageKey.js` → `isValidImageKey(key)`
 
 Función pura (no lee el entorno ni llama a S3) que decide si un `imageKey` del cliente puede usarse para construir la clave `gallery/{imageKey}`. Devuelve `true` solo si `key` es una cadena, mide entre 1 y `IMAGE_KEY_MAX_LENGTH` (comprobación previa a ejecutar la expresión), cumple `IMAGE_KEY_PATTERN` y no contiene `..`. La comprobación de `..` es defensa en profundidad: `a../b.jpg` (lo que llega tras decodificar `a%2e%2e/b.jpg`) cumple el patrón. La usan `GET /get-image` y `DELETE /delete-image`. Regla completa: [06](06-almacenamiento-s3.md#regla-de-imagekey).
+
+### `validateImageUpload.js` → `validateImageUpload({ file, title })`
+
+Función pura (no lee el entorno ni llama a S3) de `POST /upload-image`. Devuelve `{ error }` con un texto fijo o `{ value: { key, contentType } }`, donde `key` es relativa a `gallery/` y `contentType` es el MIME canónico de `IMAGE_UPLOAD_TYPES`. Orden de comprobación, y el primero que falla decide:
+
+1. **Tipo** (`Image type not allowed`): la extensión (lo que hay tras el último `.` de `originalname`, en minúsculas) debe estar en `IMAGE_UPLOAD_TYPES` y el MIME declarado, en minúsculas, debe ser exactamente el canónico de esa extensión. `image/jpg`, un MIME vacío y `application/octet-stream` se rechazan.
+2. **Título** (`Image title is not valid`): `title.trim()` con el blanco (`\s+`, incluidos `\t` y `\n`) sustituido por `_` y sin puntos finales. Se rechaza si supera `IMAGE_KEY_MAX_LENGTH` tras sanear el blanco (antes de quitar los puntos finales), si queda vacío (también solo puntos), si lleva `/` o `\`, o si `isValidImageKey(título + '.' + extensión)` es falso (cubre `..`, los caracteres de control que no son blanco y la longitud máxima de toda la clave).
+3. **Firma** (`File content does not match the image type`): los primeros bytes de `file.buffer` según el tipo canónico (JPEG `FF D8 FF`; PNG `89 50 4E 47 0D 0A 1A 0A`; GIF `GIF87a` o `GIF89a`; WebP `RIFF` en los bytes 0-3 y `WEBP` en 8-11). Un buffer más corto que la firma no coincide.
+
+Sin dependencias. La búsqueda del tipo usa `Object.entries(IMAGE_UPLOAD_TYPES)` y no un acceso con índice variable (este último añadía un aviso `security/detect-object-injection`). Límite: un polyglot imagen+script con cabecera válida pasa; la firma no sustituye un reprocesado de la imagen. La ruta ([04](04-api.md)) pasa a `uploadImageToS3` un objeto con el buffer original y el MIME canónico; `aws/` no cambia.
 
 ### `validateProvincia.js` → `getProvinciaNameError(name)` y `validateProvincia(rows)`
 

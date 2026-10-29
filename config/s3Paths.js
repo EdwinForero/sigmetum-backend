@@ -16,6 +16,17 @@ exports.TERMS_FILE = 'noLatinTerms.json';
 exports.IMAGE_KEY_MAX_LENGTH = 200;
 exports.IMAGE_KEY_PATTERN = /^(?!.*\/\/)(?!.*\/[.\p{M}])[\p{L}\p{N}_\-()+][\p{L}\p{M}\p{N}._\-()+/]*\.(?:jpe?g|png|gif|webp)$/iu;
 
+// Tipos de imagen que acepta POST /upload-image: extensión (en minúsculas) -> MIME canónico, que es también el
+// ContentType con el que se guarda el objeto. Consultar solo por sus entradas propias. Sus claves deben seguir siendo un
+// subconjunto de las extensiones de IMAGE_KEY_PATTERN.
+exports.IMAGE_UPLOAD_TYPES = {
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    png: 'image/png',
+    gif: 'image/gif',
+    webp: 'image/webp',
+};
+
 // Provincia (POST /upload, carpeta data/{provincia}/): se valida tras recortar y normalizar a NFC.
 // Se parte por espacio o guion y cada palabra debe cumplir PROVINCIA_WORD_PATTERN (letras Unicode con marcas
 // combinantes); una parte vacía (separador en los extremos o doble) se rechaza. Rechaza "/", "\", ".", dígitos.

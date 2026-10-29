@@ -7,6 +7,7 @@ const router = express.Router();
 const { tokenAuth } = require('../functions/tokenAuthentication');
 const { validateContactMessage } = require('../functions/validateContactMessage');
 const { isValidImageKey } = require('../functions/validateImageKey');
+const { validateImageUpload } = require('../functions/validateImageUpload');
 const {
     getPresignedUrlsFromS3Folder,
     getPresignedUrlFromS3,
@@ -111,12 +112,13 @@ router.post('/upload-image', tokenAuth, upload.single('file'), async (req, res, 
             return res.status(400).json({ success: false, error: 'File and title are required' });
         }
 
-        const sanitizedTitle = title.replace(/\s+/g, '_');
-        const fileExtension = file.originalname.substring(file.originalname.lastIndexOf('.'));
-        const fileKey = `${sanitizedTitle}${fileExtension}`;
+        const { error, value } = validateImageUpload({ file, title });
+        if (error) {
+            return res.status(400).json({ success: false, error });
+        }
 
-        await uploadImageToS3(file, GALLERY_PATH, fileKey);
-        res.status(200).json({ success: true, data: { key: `${GALLERY_PATH}/${fileKey}` } });
+        await uploadImageToS3({ buffer: file.buffer, mimetype: value.contentType }, GALLERY_PATH, value.key);
+        res.status(200).json({ success: true, data: { key: `${GALLERY_PATH}/${value.key}` } });
     } catch (error) {
         next(error);
     }
