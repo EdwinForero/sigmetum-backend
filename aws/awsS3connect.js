@@ -126,7 +126,7 @@ exports.listFilesInS3Folder = async (folderName) => {
     try {
         const data = await s3.listObjectsV2({
             Bucket: process.env.AWS_BUCKET_NAME,
-            Prefix: folderName,
+            Prefix: folderName.endsWith('/') ? folderName : `${folderName}/`,
         });
 
         if (!data.Contents || data.Contents.length === 0) return [];

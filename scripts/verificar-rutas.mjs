@@ -16,6 +16,12 @@
 // Criterio 10: errores controlados y CORS (M17, M22). Errores inyectados con `inject` sobre GET /list-terms y delete-*:
 //   500 genérico sin el texto original, 5xx explícito, mapeados de almacenamiento, 4xx de librería, MulterError, 413,
 //   delete-* sin reflejar el SDK y el origen rechazado fuera de las respuestas (solo en el console.warn).
+// Criterio 11: fecha UTC única (A1). formatFileName y getNextVersion con la fecha inyectada y el flujo de POST /upload.
+// Criterio 12: validación del nombre de provincia (A4), sin red.
+// Criterio 13: POST /upload con un Excel real en memoria y convertExcelToJson real: provincia válida e inválida.
+// Criterio 14: claves del cliente en upload/confirm, update-file y delete-file (formato, NFC, sin tocar S3).
+// Criterio 15: prefijo con barra en los listados, sobre el aws/awsS3connect.js real con S3Client.send parcheado.
+// Se ejecuta también con TZ=Pacific/Kiritimati (UTC+14) para distinguir la fecha local de la UTC.
 // Límite: la réplica de cors de startApp es una copia a mano de index.js (los marcadores del criterio 8 detectan
 //   su ausencia, no una divergencia); el index.js real solo se ejercita con un arranque real.
 // Sale con código 0 si todo pasa, 1 si algún caso falla y 2 si el propio script falla.
@@ -55,6 +61,9 @@ const injectInCache = (request, exports) => {
 const inject = { getTextJson: null, deleteImage: null, deleteTerm: null };
 
 const other = (value) => async () => { calls.s3Other += 1; return value; };
+// Argumentos recibidos por los espías de versiones (criterios 11 a 14) y listado sembrado para listFilesInS3Folder.
+const argsLog = { upload: [], update: [], del: [], list: [] };
+const seed = { list: [] };
 injectInCache(join(ROOT, 'aws', 'awsS3connect.js'), {
   getPresignedUrlsFromS3Folder: other([]),
   getPresignedUrlFromS3: async () => { calls.getPresigned += 1; return 'https://s3.example.invalid/url-prefirmada'; },
@@ -63,12 +72,12 @@ injectInCache(join(ROOT, 'aws', 'awsS3connect.js'), {
   getTextJsonS3: async () => { calls.s3Other += 1; if (inject.getTextJson) throw inject.getTextJson; return []; },
   uploadTextToJsonS3: other(undefined),
   deleteTermFromS3: async () => { calls.s3Other += 1; return inject.deleteTerm ?? { success: true }; },
-  uploadFileToS3: other(undefined),
+  uploadFileToS3: async (...args) => { calls.s3Other += 1; argsLog.upload.push(args); },
   getFileFromS3: other({}),
   getMergedDataInS3Folder: other({}),
-  deleteFileFromS3: other({ success: true }),
-  updateFileS3: other(undefined),
-  listFilesInS3Folder: other([]),
+  deleteFileFromS3: async (...args) => { calls.s3Other += 1; argsLog.del.push(args); return { success: true }; },
+  updateFileS3: async (...args) => { calls.s3Other += 1; argsLog.update.push(args); },
+  listFilesInS3Folder: async (...args) => { calls.s3Other += 1; argsLog.list.push(args); return seed.list; },
 });
 injectInCache('nodemailer', {
   createTransport: () => ({ sendMail: async () => { calls.sendMail += 1; return { accepted: [] }; } }),
@@ -652,6 +661,236 @@ const criterio10 = async (base) => {
   }
 };
 
+// ─── Criterios 11 a 15: fecha UTC, provincia y claves de versión (A1, A4) ─────
+
+const ExcelJS = require('exceljs');
+const HEADERS = ['Provincia', 'Municipio', 'Altitud Media', 'Sector Biogeográfico', 'Piso Bioclimático', 'Ombrotipo',
+  'Naturaleza del Sustrato', 'Tipo de Serie', 'Serie de Vegetación', 'Vegetación Potencial', 'Especies Características'];
+const fullRow = (provincia) => [provincia, 'Municipio', 100, 'Sector', 'Piso', 'Ombrotipo', 'Sustrato', 'Tipo', 'Serie', 'Vegetación', 'Especies'];
+const makeXlsx = async (rows) => {
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet('Hoja1');
+  sheet.addRow(HEADERS);
+  for (const row of rows) sheet.addRow(row);
+  return Buffer.from(await workbook.xlsx.writeBuffer());
+};
+const utcDay = (date = new Date()) => date.toISOString().slice(0, 10);
+const FILE_RE = /^\d{4}-\d{2}-\d{2}_v\d+\.xlsx$/;
+
+const subir = async (base, rows) => {
+  const form = new FormData();
+  form.append('file', new Blob([await makeXlsx(rows)]), 'datos.xlsx');
+  return call(base, 'POST', '/upload', { token: validToken, rawBody: form });
+};
+
+const criterio11 = async (base) => {
+  const { formatFileName } = require('../functions/formatFileName');
+  const { getNextVersion } = require('../functions/getNextVersion');
+  const antesDeNoche = new Date('2026-10-28T23:30:00Z');
+  const despuesDeNoche = new Date('2026-10-29T00:30:00Z');
+  record(11, 'formatFileName(1, 2026-10-28T23:30Z) usa el día UTC', formatFileName(1, antesDeNoche) === '2026-10-28_v1.xlsx', formatFileName(1, antesDeNoche));
+  record(11, 'formatFileName(1, 2026-10-29T00:30Z) usa el día UTC', formatFileName(1, despuesDeNoche) === '2026-10-29_v1.xlsx', formatFileName(1, despuesDeNoche));
+  record(11, 'formatFileName conserva el formato con versión', formatFileName(7, antesDeNoche) === '2026-10-28_v7.xlsx', formatFileName(7, antesDeNoche));
+  try {
+    seed.list = [{ name: '2026-10-28_v1.xlsx', key: 'data/Málaga/2026-10-28_v1.xlsx' }];
+    const mismoDia = await getNextVersion('Málaga', antesDeNoche);
+    record(11, 'getNextVersion con v1 del mismo día UTC da versión 2', mismoDia.version === 2, String(mismoDia.version));
+    record(11, 'getNextVersion devuelve la carpeta de la provincia', mismoDia.provinciaFolder === 'data/Málaga', mismoDia.provinciaFolder);
+    const otroDia = await getNextVersion('Málaga', despuesDeNoche);
+    record(11, 'getNextVersion el día UTC siguiente vuelve a la versión 1', otroDia.version === 1, String(otroDia.version));
+
+    // Flujo de POST /upload: la clave y la versión usan el mismo día UTC.
+    const hoy = utcDay();
+    seed.list = [{ name: `${hoy}_v1.xlsx`, key: `data/Málaga/${hoy}_v1.xlsx` }];
+    const antes = argsLog.upload.length;
+    const r = await subir(base, [fullRow('Málaga')]);
+    const nombre = argsLog.upload[antes]?.[0];
+    record(11, 'POST /upload usa el mismo día UTC en la versión y en el nombre', r.status === 200 && nombre === `${hoy}_v2.xlsx`, `${r.status} ${nombre}`);
+    record(11, 'POST /upload devuelve la misma clave que sube', r.json?.data?.key === `data/Málaga/${hoy}_v2.xlsx`, String(r.json?.data?.key));
+  } finally {
+    seed.list = [];
+  }
+};
+
+const criterio12 = () => {
+  let nombre;
+  let filas;
+  try {
+    ({ getProvinciaNameError: nombre } = require('../functions/validateProvincia'));
+    ({ validateProvincia: filas } = require('../functions/validateProvincia'));
+  } catch (error) {
+    record(12, 'existe functions/validateProvincia.js', false, error.message.split('\n')[0]);
+    return;
+  }
+  const validas = ['Activos', 'Málaga', 'Santa Cruz de Tenerife', 'A Coruña', 'Illes Balears', 'Castellón-Castelló'];
+  for (const v of validas) record(12, `válida ${v}`, nombre(v) === null, String(nombre(v)));
+  const rechazadas = ['a/b', 'a\\b', '..', 'a1', '__proto__', 'constructor', 'prototype', 'toString', 'hasOwnProperty', 'active', 'terms', 'drafts',
+    'Active', 'Terms', 'Activeness', 'Termsx', 'Terms2', 'a  b', ' a', 'a ', '-a', 'a-', 'a- b', 'Alicante/Alacant', 'a.b', 'a'.repeat(51), 5, ['a'], {}];
+  for (const v of rechazadas) record(12, `getProvinciaNameError rechaza ${JSON.stringify(v)?.slice(0, 20)}`, typeof nombre(v) === 'string', String(nombre(v)));
+  record(12, '50 letras es válido', nombre('a'.repeat(50)) === null, String(nombre('a'.repeat(50))));
+  record(12, 'reservada da Province is reserved', nombre('active') === 'Province is reserved' && nombre('drafts') === 'Province is reserved', String(nombre('active')));
+  const via = (rows) => filas(rows);
+  const casos = [
+    ['ausente', [{}], 'Province is required'], ['vacía', [{ Provincia: '' }], 'Province is required'], ['solo espacios', [{ Provincia: '  ' }], 'Province is required'],
+    ['sin filas', [], 'Province is required'], ['primera fila sin provincia', [{}, { Provincia: 'Málaga' }], 'Province is required'],
+    ['número', [{ Provincia: 5 }], 'Province is not valid'], ['array', [{ Provincia: ['a', 'b'] }], 'Province is not valid'],
+    ['51 letras', [{ Provincia: 'a'.repeat(51) }], 'Province is not valid'], ['reservada', [{ Provincia: 'terms' }], 'Province is reserved'],
+    ['dos provincias', [{ Provincia: 'Málaga' }, { Provincia: 'Sevilla' }], 'Excel contains more than one province'],
+    ['otra fila con array', [{ Provincia: 'Málaga' }, { Provincia: ['Málaga', 'Sevilla'] }], 'Excel contains more than one province'],
+    ['otra fila con número', [{ Provincia: 'Málaga' }, { Provincia: 5 }], 'Excel contains more than one province'],
+  ];
+  for (const [n, rows, esperado] of casos) record(12, `validateProvincia ${n}`, via(rows).error === esperado, JSON.stringify(via(rows)));
+  const nfc = 'Málaga';
+  const nfd = nfc.normalize('NFD');
+  record(12, 'recorta espacios', via([{ Provincia: ' Málaga ' }]).provincia === nfc, JSON.stringify(via([{ Provincia: ' Málaga ' }])));
+  record(12, 'la forma NFD se resuelve a NFC', via([{ Provincia: nfd }]).provincia === nfc, JSON.stringify(via([{ Provincia: nfd }])));
+  record(12, 'otra fila igual tras NFC y trim es la misma provincia', via([{ Provincia: nfc }, { Provincia: ` ${nfd} ` }]).provincia === nfc, JSON.stringify(via([{ Provincia: nfc }, { Provincia: ` ${nfd} ` }])));
+  record(12, 'otra fila sin la clave se ignora', via([{ Provincia: nfc }, { Municipio: 'x' }]).provincia === nfc, JSON.stringify(via([{ Provincia: nfc }, { Municipio: 'x' }])));
+  record(12, 'Málaga y Malaga siguen distintas', via([{ Provincia: nfc }, { Provincia: 'Malaga' }]).error === 'Excel contains more than one province', JSON.stringify(via([{ Provincia: nfc }, { Provincia: 'Malaga' }])));
+};
+
+const criterio13 = async (base) => {
+  const nfd = 'Málaga'.normalize('NFD');
+  const ok = [
+    ['Málaga', [fullRow('Málaga')], 'Málaga'], ['con espacios', [fullRow(' Málaga ')], 'Málaga'], ['en NFD', [fullRow(nfd)], 'Málaga'],
+    ['varias filas con la misma provincia', [fullRow('Málaga'), fullRow('Málaga')], 'Málaga'],
+    ['Santa Cruz de Tenerife', [fullRow('Santa Cruz de Tenerife')], 'Santa Cruz de Tenerife'],
+  ];
+  for (const [n, rows, carpeta] of ok) {
+    const antes = argsLog.upload.length;
+    const r = await subir(base, rows);
+    const subidas = argsLog.upload.slice(antes);
+    const bien = r.status === 200 && subidas.length === 2 && FILE_RE.test(subidas[0][0]) && subidas[0][2] === `data/${carpeta}`
+      && subidas[1][0] === `${carpeta}.json` && subidas[1][2] === 'data/active' && r.json?.data?.key === `data/${carpeta}/${subidas[0][0]}`;
+    record(13, `éxito ${n}`, bien, `${r.status} ${JSON.stringify(subidas.map((s) => [s[0], s[2]]))}`);
+  }
+  const malos = [
+    ['sin filas', [], 'Province is required'], ['primera fila sin provincia', [fullRow(null), fullRow('Sevilla')], 'Province is required'],
+    ['solo espacios', [fullRow('   ')], 'Province is required'],
+    ['active', [fullRow('active')], 'Province is reserved'], ['terms', [fullRow('terms')], 'Province is reserved'],
+    ['drafts', [fullRow('drafts')], 'Province is reserved'], ['Active (mayúscula)', [fullRow('Active')], 'Province is reserved'],
+    ['__proto__', [fullRow('__proto__')], 'Province is not valid'], ['constructor', [fullRow('constructor')], 'Province is not valid'],
+    ['con barra', [fullRow('a/b')], 'Province is not valid'], ['con barra invertida', [fullRow('a\\b')], 'Province is not valid'],
+    ['con ..', [fullRow('..')], 'Province is not valid'], ['numérica', [fullRow(5)], 'Province is not valid'],
+    ['con coma (array)', [fullRow('a,b')], 'Province is not valid'], ['51 letras', [fullRow('a'.repeat(51))], 'Province is not valid'],
+    ['dos provincias', [fullRow('Málaga'), fullRow('Sevilla')], 'Excel contains more than one province'],
+    ['otra fila con coma', [fullRow('Málaga'), fullRow('Málaga,Sevilla')], 'Excel contains more than one province'],
+  ];
+  for (const [n, rows, mensaje] of malos) {
+    const antes = argsLog.upload.length;
+    const listadas = argsLog.list.length;
+    const r = await subir(base, rows);
+    record(13, `400 ${n}`, r.status === 400 && isEnvelopeError(r) && r.json.error === mensaje && argsLog.upload.length === antes && argsLog.list.length === listadas,
+      `${r.status} ${r.json?.error} subidas=${argsLog.upload.length - antes} listados=${argsLog.list.length - listadas}`);
+  }
+  // Filas con celdas vacías: el flujo de borrador no cambia y conserva data.draftKey.
+  const borradores = [
+    ['fila posterior sin provincia', [fullRow('Málaga'), fullRow(null)]],
+    ['primera fila con otras celdas vacías', [['Málaga', null, null, null, null, null, null, null, null, null, null]]],
+  ];
+  for (const [n, rows] of borradores) {
+    const antes = argsLog.upload.length;
+    const r = await subir(base, rows);
+    const subidas = argsLog.upload.slice(antes);
+    record(13, `borrador ${n}`, r.status === 400 && r.json?.error === 'Some rows have empty fields.' && /^data\/Málaga\/\d{4}-\d{2}-\d{2}_v\d+\.xlsx$/.test(r.json?.data?.draftKey ?? '') && subidas.length === 1,
+      `${r.status} ${r.json?.error} draftKey=${r.json?.data?.draftKey} subidas=${subidas.length}`);
+  }
+};
+
+const criterio14 = async (base) => {
+  const buena = 'data/Málaga/2026-10-28_v1.xlsx';
+  const nfdKey = `data/${'Málaga'.normalize('NFD')}/2026-10-28_v1.xlsx`;
+  const rutas = [
+    ['POST /upload/confirm (confirmar)', '/upload/confirm', (k) => ({ draftKey: k, confirmed: true }), 'draftKey', argsLog.update],
+    ['POST /upload/confirm (cancelar)', '/upload/confirm', (k) => ({ draftKey: k, confirmed: false }), 'draftKey', argsLog.del],
+    ['POST /update-file', '/update-file', (k) => ({ fileName: k }), 'fileName', argsLog.update],
+    ['POST /delete-file', '/delete-file', (k) => ({ fileName: k }), 'fileName', argsLog.del],
+  ];
+  const invalidas = [
+    ['data/active/2026-10-28_v1.xlsx', 'data/active/2026-10-28_v1.xlsx'], ['data/terms/x.xlsx', 'data/terms/x.xlsx'],
+    ['data/a/b/2026-10-28_v1.xlsx', 'data/a/b/2026-10-28_v1.xlsx'], ['x/Málaga/...', 'x/Málaga/2026-10-28_v1.xlsx'],
+    ['data/Málaga/x.json', 'data/Málaga/x.json'], ['data/Málaga/../active/...', 'data/Málaga/../active/2026-10-28_v1.xlsx'],
+    ['provincia en NFD', nfdKey], ['más de 120 caracteres', `data/Málaga/${'x'.repeat(120)}.xlsx`],
+    ['provincia __proto__', 'data/__proto__/2026-10-28_v1.xlsx'], ['sin extensión', 'data/Málaga/2026-10-28_v1'],
+    ['sin prefijo data/', 'Málaga/2026-10-28_v1.xlsx'], ['provincia vacía', 'data//2026-10-28_v1.xlsx'],
+  ];
+  for (const [n, ruta, cuerpo, campo, log] of rutas) {
+    const antes = log.length;
+    const r = await call(base, 'POST', ruta, { token: validToken, body: cuerpo(buena) });
+    record(14, `${n}: clave válida llega a S3 intacta`, r.status === 200 && log.length === antes + 1 && log[antes][0] === buena, `${r.status} ${JSON.stringify(log[antes])}`);
+    for (const [descr, clave] of invalidas) {
+      const total = spyTotal();
+      const x = await call(base, 'POST', ruta, { token: validToken, body: cuerpo(clave) });
+      record(14, `${n}: 400 con ${descr}`, x.status === 400 && x.json?.error === `Invalid ${campo}` && spyTotal() === total, `${x.status} ${x.json?.error} s3=${spyTotal() - total}`);
+    }
+    for (const valor of [123, ['data/Málaga/2026-10-28_v1.xlsx'], {}, '', null]) {
+      const total = spyTotal();
+      const x = await call(base, 'POST', ruta, { token: validToken, body: cuerpo(valor) });
+      record(14, `${n}: ${JSON.stringify(valor)} mantiene ${campo} is required`, x.status === 400 && x.json?.error === `${campo} is required` && spyTotal() === total, `${x.status} ${x.json?.error}`);
+    }
+  }
+};
+
+// Criterio 15: carga el aws/awsS3connect.js real y parchea S3Client.prototype.send para inspeccionar el Prefix.
+// Guarda y restaura los dos módulos de la caché (aws y getNextVersion) para no dejar la red a los demás criterios.
+const criterio15 = async () => {
+  const { Readable } = require('node:stream');
+  const { S3Client, ListObjectsV2Command, GetObjectCommand } = require('@aws-sdk/client-s3');
+  const awsPath = require.resolve('../aws/awsS3connect.js');
+  const nextPath = require.resolve('../functions/getNextVersion.js');
+  const guardados = [awsPath, nextPath].map((p) => [p, require.cache[p]]);
+  const originalSend = S3Client.prototype.send;
+  const claves = [
+    'data/active/Málaga.json', 'data/activos/Otra.json', 'data/Santa Cruz/2026-10-01_v1.xlsx', 'data/Santa Cruz de Tenerife/2026-10-05_v3.xlsx',
+  ];
+  const xlsx = await makeXlsx([fullRow('Santa Cruz')]);
+  const prefijos = [];
+  const leidas = [];
+  const escritas = [];
+  try {
+    for (const [p] of guardados) delete require.cache[p];
+    const realAws = require('../aws/awsS3connect.js');
+    const realNext = require('../functions/getNextVersion.js');
+    S3Client.prototype.send = async function send(command) {
+      if (command instanceof ListObjectsV2Command) {
+        prefijos.push(command.input.Prefix);
+        return { Contents: claves.filter((k) => k.startsWith(command.input.Prefix)).map((Key) => ({ Key, Size: 10 })) };
+      }
+      if (command instanceof GetObjectCommand) {
+        leidas.push(command.input.Key);
+        return { Body: Readable.from([command.input.Key.endsWith('.xlsx') ? xlsx : Buffer.from('[]')]) };
+      }
+      escritas.push(`${command.constructor.name} ${command.input.Key}`);
+      return {};
+    };
+    const ultimo = () => prefijos[prefijos.length - 1];
+
+    await realAws.getMergedDataInS3Folder('data/active');
+    record(15, "getMergedDataInS3Folder('data/active') lista con barra final", ultimo() === 'data/active/', String(ultimo()));
+    record(15, 'getMergedDataInS3Folder no lee data/activos/', leidas.length === 1 && leidas[0] === 'data/active/Málaga.json', JSON.stringify(leidas));
+
+    await realAws.listFilesInS3Folder('data/');
+    record(15, "listFilesInS3Folder('data/') no duplica la barra", ultimo() === 'data/', String(ultimo()));
+
+    const lista = await realAws.listFilesInS3Folder('data/Santa Cruz');
+    record(15, 'listar Santa Cruz solo ve sus archivos', lista.length === 1 && lista[0].key === 'data/Santa Cruz/2026-10-01_v1.xlsx', JSON.stringify(lista));
+
+    const { version } = await realNext.getNextVersion('Santa Cruz', new Date('2026-10-05T12:00:00Z'));
+    record(15, 'getNextVersion de Santa Cruz no cuenta Santa Cruz de Tenerife', version === 1 && ultimo() === 'data/Santa Cruz/', `version=${version} prefijo=${ultimo()}`);
+
+    leidas.length = 0;
+    await realAws.deleteFileFromS3('data/Santa Cruz/2026-10-02_v2.xlsx');
+    record(15, 'deleteFileFromS3 de Santa Cruz solo considera sus archivos', ultimo() === 'data/Santa Cruz/' && leidas.length === 1 && leidas[0] === 'data/Santa Cruz/2026-10-01_v1.xlsx',
+      `prefijo=${ultimo()} leidas=${JSON.stringify(leidas)} escritas=${JSON.stringify(escritas)}`);
+  } finally {
+    S3Client.prototype.send = originalSend;
+    for (const [p, entrada] of guardados) {
+      delete require.cache[p];
+      if (entrada) require.cache[p] = entrada;
+    }
+  }
+};
+
 // ─── Ejecución ───────────────────────────────────────────────────────────────
 
 const main = async () => {
@@ -665,6 +904,11 @@ const main = async () => {
   criterio8(app);
   await criterio9(base, root);
   await criterio10(base);
+  await criterio11(base);
+  criterio12();
+  await criterio13(base);
+  await criterio14(base);
+  await criterio15();
 
   let fallos = 0;
   for (const id of Object.keys(criteria).sort()) {
@@ -674,8 +918,8 @@ const main = async () => {
     if (lista.length > 8) console.log(`  ... y ${lista.length - 8} más`);
     fallos += lista.length;
   }
-  // Un criterio que no registró ningún caso no se vería arriba: se exige que los criterios 1 a 10 hayan registrado algo.
-  const vacios = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].filter((id) => !criteria[id] || criteria[id].total === 0);
+  // Un criterio que no registró ningún caso no se vería arriba: se exige que los criterios 1 a 15 hayan registrado algo.
+  const vacios = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15].filter((id) => !criteria[id] || criteria[id].total === 0);
   if (vacios.length > 0) console.log(`FALLA: el criterio ${vacios.join(', ')} no registró ningún caso (criterio vacío)`);
   console.log(fallos === 0 && vacios.length === 0 ? 'Resultado: todo pasa' : `Resultado: ${fallos} caso(s) fallan${vacios.length > 0 ? `, ${vacios.length} criterio(s) vacío(s)` : ''}`);
   return fallos === 0 && vacios.length === 0 ? 0 : 1;

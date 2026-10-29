@@ -21,11 +21,11 @@
         └── ...
 ```
 
-Los prefijos están en `config/s3Paths.js`. `active` y `terms` están en `RESERVED_SEGMENTS` para que `/list-files` no los trate como provincias.
+Los prefijos están en `config/s3Paths.js`. `active` y `terms` están en `RESERVED_SEGMENTS` para que `/list-files` no los trate como provincias. Todo listado por prefijo (`listFilesInS3Folder`) añade una `/` final al `Prefix` si falta, así que listar `data/Santa Cruz` no recoge `data/Santa Cruz de Tenerife/...` ni `data/active` recoge `data/activos/...`.
 
 ## Modelo de versionado
 
-- Cada subida de Excel crea un objeto nuevo en `data/{Provincia}/` con nombre `YYYY-MM-DD_vN.xlsx`. `N` empieza en 1 cada día y se incrementa si ya hay subidas ese día.
+- Cada subida de Excel crea un objeto nuevo en `data/{Provincia}/` con nombre `YYYY-MM-DD_vN.xlsx`. La fecha es el día **UTC** (la misma fuente en `getNextVersion` y `formatFileName`; entre las 00:00 UTC y las 01:00-02:00 de España el nombre lleva el día anterior al local). `N` empieza en 1 cada día y se incrementa si ya hay subidas ese día.
 - Los Excel **nunca se modifican**; son el historial.
 - `data/active/{Provincia}.json` es una **proyección** de una de esas versiones: se regenera convirtiendo el Excel elegido. Hay exactamente un activo por provincia.
 - `/get-merged-data` concatena todos los activos: es la fuente de datos pública.
@@ -51,6 +51,21 @@ Operaciones de mantenimiento:
 
 - **Cambiar versión activa**: `POST /update-file` con la clave de cualquier Excel del historial.
 - **Borrar una versión**: `POST /delete-file`. El activo se recalcula con la versión más reciente que quede (orden alfabético = cronológico gracias al formato de fecha). Si la provincia se queda vacía, se borra su activo.
+
+### Regla de provincia
+
+`POST /upload` construye `data/{provincia}/...` y `data/active/{provincia}.json` con la celda `Provincia` de la primera fila, así que la valida antes (`validateProvincia`, `functions/validateProvincia.js`). El valor se recorta (trim) y se normaliza a NFC; ese valor es el que va a las claves de S3. Es válido si:
+
+- Es una cadena de 1 a 50 caracteres (tras recortar y NFC).
+- Son palabras de letras Unicode (con marcas combinantes) separadas por **un solo** espacio o guion, siempre entre letras. Se rechazan `/`, `\`, `.`, dígitos y separadores en los extremos o dobles (`Alicante/Alacant` y `Castellón/Castelló` se rechazan por la barra).
+- No es `active`, `terms` ni `drafts`, no empieza (en minúsculas) por `active` o `terms` y no es un nombre de propiedad de objeto (`__proto__`, `constructor`, `toString`, `prototype`...). `Activos` se acepta: la colisión con `data/active/` la evita el prefijo con barra.
+- Todas las filas que traen la clave `Provincia` la tienen igual (tras trim y NFC) que la primera fila; las que no la traen se guardan bajo la provincia de la primera.
+
+**Límites conocidos**: no se cambian mayúsculas ni acentos más allá de NFC, así que `Málaga`, `Malaga` y `málaga` siguen siendo carpetas distintas; las letras confundibles entre alfabetos (homoglifos, p. ej. una `а` cirílica) no se detectan (M23 en [07](07-estado-y-deuda-tecnica.md)); la carpeta usa la provincia normalizada pero `processedData` (y el JSON activo) conserva el valor original de las celdas; una carpeta existente en NFD o con un nombre que la regla rechace (incluida una posible `Desconocido`) ya no se puede actualizar ni borrar con las rutas de versión **(por confirmar si existen en dev y prod)**.
+
+### Regla de clave de versión
+
+`POST /upload/confirm` (`draftKey`), `POST /update-file` y `POST /delete-file` (`fileName`) validan la clave con `isValidDataKey` (`functions/validateDataKey.js`) antes de usarla. Es válida si es una cadena de hasta 120 caracteres con exactamente tres segmentos separados por `/`: `data`, una provincia que pasa la regla anterior **y** ya está en NFC, y un nombre `AAAA-MM-DD_vN.xlsx` (`DATA_FILE_NAME_PATTERN`; `v\d+` admite `_v0` y `_v007`). La clave del cliente nunca se normaliza ni se reescribe: una provincia en NFD se rechaza. No comprueba que el objeto exista.
 
 ## Formato del JSON activo
 

@@ -64,12 +64,12 @@ Rutas de **lectura** públicas (los datos del portal son públicos): `GET /list-
 
 | Valor | Forma permitida | Dónde se usa |
 |---|---|---|
-| Versión de datos | `data/{provincia}/AAAA-MM-DD_vN.xlsx`, con `provincia` sin `/`, distinta de `active`, `terms` y `__proto__` | `/update-file`, `/delete-file`, `/upload/confirm`, `/get-data` |
+| Versión de datos | `data/{provincia}/AAAA-MM-DD_vN.xlsx` según la [regla de clave de versión de 06](../06-almacenamiento-s3.md#regla-de-clave-de-versión): `provincia` de letras separadas por un solo espacio o guion (sin `/`, `.` ni dígitos), hasta 50 caracteres, en NFC, que no sea `active`, `terms`, `drafts`, no empiece por `active`/`terms` en minúsculas ni sea una propiedad de objeto, y hasta 120 caracteres en total | `/update-file`, `/delete-file`, `/upload/confirm`, `/get-data` |
 | JSON activo | `data/active/{provincia}.json` | `/get-data` |
 | Imagen | `imageKey` según la [regla de 06](../06-almacenamiento-s3.md#regla-de-imagekey): segmentos de letras, números y marcas combinantes Unicode y `. _ - ( ) +` con `/` simple, hasta 200 caracteres y extensión jpg, jpeg, png, gif o webp | `/get-image`, `/delete-image`, `/upload-image` |
 
 - **Cómo:** hoy no hay comprobación automática; se revisa y se cubrirá con tests de entrada.
-- **Estado:** **no cumple**. `provincia` sale de la primera fila del Excel: un valor `active` o `terms` escribe dentro de `data/active/`, y `__proto__` rompe `GET /list-files` con un `TypeError` **(verificado ejecutándolo)** (A4). `fileName` no se valida en `/update-file` ni `/delete-file` (M4). `/get-data` lee cualquier clave (M2). `GET /get-image` y `DELETE /delete-image` ya validan `imageKey` (28/10/2026, `isValidImageKey`; riesgo residual aceptado: se pueden firmar objetos no listados bajo `gallery/`); `POST /upload-image` sigue sin validar el nombre y el `title` solo sustituye espacios (M5). El `imageKey` frente al listado real de la galería está **(por confirmar)**.
+- **Estado:** **cumple en parte**. **Cumple para las claves de versión (28/10/2026)**: la provincia del Excel se valida en `POST /upload` (A4 resuelto; `active`, `terms`, `__proto__` y similares dan 400, `Activos` se acepta porque los listados llevan prefijo con barra) y `draftKey`/`fileName` se validan en `/upload/confirm`, `/update-file` y `/delete-file` sin normalizarlos (M4 cerrado para esas tres rutas). Límites: letras confundibles (homoglifos) no detectadas (M23), `Málaga`/`Malaga` siguen siendo carpetas distintas y la existencia del objeto no se comprueba. **Sigue sin cumplir**: `/get-data` lee cualquier clave (M2). `GET /get-image` y `DELETE /delete-image` ya validan `imageKey` (28/10/2026, `isValidImageKey`; riesgo residual aceptado: se pueden firmar objetos no listados bajo `gallery/`); `POST /upload-image` sigue sin validar el nombre y el `title` solo sustituye espacios (M5). El `imageKey` frente al listado real de la galería está **(por confirmar)**.
 
 ### S5. Subida de archivos
 

@@ -7,6 +7,8 @@ const { tokenAuth } = require('../functions/tokenAuthentication');
 const { convertExcelToJson } = require('../functions/convertExcelToJson');
 const { formatFileName } = require('../functions/formatFileName');
 const { getNextVersion } = require('../functions/getNextVersion');
+const { validateProvincia } = require('../functions/validateProvincia');
+const { isValidDataKey } = require('../functions/validateDataKey');
 const {
     uploadFileToS3,
     getFileFromS3,
@@ -80,9 +82,14 @@ router.post('/upload', tokenAuth, upload.single('file'), async (req, res, next) 
             throw new Error('Excel conversion failed. The data is not valid.');
         }
 
-        const provincia = processedData[0]?.['Provincia'] || 'Desconocido';
-        const { version, provinciaFolder } = await getNextVersion(provincia);
-        const xlsxFileName = formatFileName(version);
+        const { provincia, error: provinciaError } = validateProvincia(processedData);
+        if (provinciaError) {
+            return res.status(400).json({ success: false, error: provinciaError });
+        }
+
+        const now = new Date();
+        const { version, provinciaFolder } = await getNextVersion(provincia, now);
+        const xlsxFileName = formatFileName(version, now);
         const draftKey = `${provinciaFolder}/${xlsxFileName}`;
 
         // Always store the original Excel
@@ -120,6 +127,10 @@ router.post('/upload/confirm', tokenAuth, async (req, res, next) => {
             return res.status(400).json({ success: false, error: 'draftKey is required' });
         }
 
+        if (!isValidDataKey(draftKey)) {
+            return res.status(400).json({ success: false, error: 'Invalid draftKey' });
+        }
+
         if (!confirmed) {
             // Cancel: delete the draft Excel from S3
             await deleteFileFromS3(draftKey);
@@ -142,6 +153,10 @@ router.post('/update-file', tokenAuth, async (req, res, next) => {
             return res.status(400).json({ success: false, error: 'fileName is required' });
         }
 
+        if (!isValidDataKey(fileName)) {
+            return res.status(400).json({ success: false, error: 'Invalid fileName' });
+        }
+
         await updateFileS3(fileName);
         res.json({ success: true, data: 'Active version updated successfully.' });
     } catch (error) {
@@ -154,6 +169,10 @@ router.post('/delete-file', tokenAuth, async (req, res, next) => {
         const { fileName } = req.body;
         if (typeof fileName !== 'string' || !fileName) {
             return res.status(400).json({ success: false, error: 'fileName is required' });
+        }
+
+        if (!isValidDataKey(fileName)) {
+            return res.status(400).json({ success: false, error: 'Invalid fileName' });
         }
 
         await deleteFileFromS3(fileName);

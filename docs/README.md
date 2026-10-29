@@ -52,6 +52,8 @@ sigmetum-backend/
 │   ├── formatFileName.js        # Nombre de fichero versionado por fecha
 │   ├── getNextVersion.js        # Cálculo de la siguiente versión del día
 │   ├── validateImageKey.js      # Lista de permitidos del imageKey (GET /get-image, DELETE /delete-image)
+│   ├── validateProvincia.js     # Validación de la provincia del Excel (POST /upload)
+│   ├── validateDataKey.js       # Lista de permitidos de draftKey y fileName (upload/confirm, update-file, delete-file)
 │   └── validateContactMessage.js # Validación del cuerpo de POST /send-email
 ├── aws/
 │   └── awsS3connect.js          # Todas las operaciones contra S3

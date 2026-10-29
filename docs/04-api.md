@@ -89,8 +89,12 @@ Validación antes de procesar:
 - Campo multipart con otro nombre (`MulterError`, p. ej. `Unexpected field`) → `400` `File upload error: ...` (antes 500).
 
 1. Convierte el Excel a JSON (`convertExcelToJson`).
-2. Toma la provincia de la columna `Provincia` de la primera fila (`Desconocido` si no hay).
-3. Calcula la versión del día y guarda el Excel original en `data/{provincia}/{YYYY-MM-DD}_v{n}.xlsx`.
+2. Toma la provincia de la columna `Provincia` de la primera fila, la recorta y la normaliza a NFC, y la valida (`validateProvincia`, regla en [06](06-almacenamiento-s3.md#regla-de-provincia)). Desde el 28/10/2026 ya no existe el valor `Desconocido`: una provincia ausente o inválida da `400` y no se escribe nada en S3 (A4). Respuestas `400` `{ success: false, error }` con texto fijo:
+   - `Province is required`: primera fila sin `Provincia`, vacía o solo espacios.
+   - `Province is not valid`: no es una cadena (número, array por una coma), mide más de 50 caracteres tras recortar, tiene algo distinto de letras (con acentos) separadas por un solo espacio o guion (`/`, `\`, `.`, dígitos, separadores en los extremos o dobles) o es un nombre de propiedad de objeto (`__proto__`, `constructor`, `toString`, `prototype`...).
+   - `Province is reserved`: es `active`, `terms` o `drafts` exactos, o en minúsculas empieza por `active` o `terms` (`Activeness`, `Termsx`). `Activos` **se acepta**: la colisión con `data/active/` la evita el prefijo con barra de los listados.
+   - `Excel contains more than one province`: otra fila que trae `Provincia` difiere de la primera (tras recortar y NFC, comparación exacta). Las filas sin la clave `Provincia` se ignoran y siguen el flujo de celdas vacías, bajo la provincia de la primera fila.
+3. Calcula la versión del día (UTC) y guarda el Excel original en `data/{provincia}/{YYYY-MM-DD}_v{n}.xlsx`; la versión y el nombre usan el mismo instante de la petición.
 4. Si **no** hay celdas vacías → escribe `data/active/{provincia}.json` y responde `200`:
    ```json
    { "success": true, "data": { "message": "Files uploaded successfully", "key": "data/Malaga/2026-01-15_v1.xlsx" } }
@@ -111,13 +115,14 @@ Body: `{ "draftKey": "data/Malaga/2026-01-15_v2.xlsx", "confirmed": true }`
 
 - `confirmed: true` → activa el borrador (regenera `data/active/{provincia}.json` desde ese Excel).
 - `confirmed: false` → borra el borrador (y recalcula el activo con la última versión restante).
-- `400` `draftKey is required` si falta `draftKey` o no es una cadena (antes, un objeto daba 500). La clave no se valida contra una lista de permitidos (M4).
+- `400` `draftKey is required` si falta `draftKey` o no es una cadena (antes, un objeto daba 500).
+- `400` `Invalid draftKey` si la clave no cumple `data/{provincia}/AAAA-MM-DD_vN.xlsx` (regla de provincia, tres segmentos, máximo 120 caracteres, [06](06-almacenamiento-s3.md#regla-de-clave-de-versión)); se comprueba antes de la bifurcación `confirmed` y sin tocar S3. La clave nunca se normaliza: una provincia en NFD da 400 (M4 cerrado para esta ruta).
 
 ### `POST /update-file` 🔒
-Body: `{ "fileName": "data/Malaga/2026-01-10_v1.xlsx" }` — marca esa versión como la activa de su provincia (rollback/roll-forward). `400` `fileName is required` si falta o no es una cadena (antes 500). La clave no se valida con la forma `data/{provincia}/AAAA-MM-DD_vN.xlsx` (M4).
+Body: `{ "fileName": "data/Malaga/2026-01-10_v1.xlsx" }` — marca esa versión como la activa de su provincia (rollback/roll-forward). `400` `fileName is required` si falta o no es una cadena (antes 500); `400` `Invalid fileName` si no cumple `data/{provincia}/AAAA-MM-DD_vN.xlsx` ([regla](06-almacenamiento-s3.md#regla-de-clave-de-versión); sin normalizar, provincia no NFC = 400; no toca S3). Que el objeto exista no se comprueba.
 
 ### `POST /delete-file` 🔒
-Body: `{ "fileName": "data/Malaga/2026-01-10_v1.xlsx" }` — borra esa versión. Si quedan otras, activa la más reciente por nombre; si no queda ninguna, borra también el JSON activo de la provincia. `400` `fileName is required` si falta o no es una cadena (antes 500); la clave no se valida con la forma de versión (M4).
+Body: `{ "fileName": "data/Malaga/2026-01-10_v1.xlsx" }` — borra esa versión. Si quedan otras, activa la más reciente por nombre; si no queda ninguna, borra también el JSON activo de la provincia. `400` `fileName is required` si falta o no es una cadena (antes 500); `400` `Invalid fileName` si no cumple la forma de versión (misma regla que `/update-file`, no toca S3).
 
 ---
 

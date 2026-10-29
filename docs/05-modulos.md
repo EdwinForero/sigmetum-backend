@@ -43,6 +43,10 @@ Exporta: `validateEnv` (función por defecto).
 | `TERMS_PATH` | `data/terms` | Carpeta del glosario |
 | `TERMS_FILE` | `noLatinTerms.json` | Fichero del glosario |
 | `RESERVED_SEGMENTS` | `['active', 'terms']` | Subcarpetas de `data/` que no son provincias |
+| `PROVINCIA_MAX_LENGTH` | `50` | Longitud máxima de la provincia, medida tras recortar y normalizar a NFC y comprobada antes de ejecutar la expresión |
+| `PROVINCIA_WORD_PATTERN` | `/^\p{L}[\p{L}\p{M}]*$/u` (sin `g`) | Una palabra de provincia: letras Unicode con marcas combinantes. No es un patrón de la provincia entera: `getProvinciaNameError` parte por espacio o guion y valida cada palabra (una parte vacía = separador en los extremos o doble = rechazo) |
+| `PROVINCIA_RESERVED` | `[...RESERVED_SEGMENTS, 'drafts']` | Nombres exactos que no pueden ser carpeta de provincia. `RESERVED_SEGMENTS` no cambia, para no alterar `GET /list-files` |
+| `DATA_FILE_NAME_PATTERN` | `/^\d{4}-\d{2}-\d{2}_v\d+\.xlsx$/` (sin `g`) | Nombre de una versión (D2); lo usa `isValidDataKey`. `getNextVersion` conserva su propio regex equivalente (no lo reutiliza) |
 | `IMAGE_KEY_MAX_LENGTH` | `200` | Longitud máxima de un `imageKey` |
 | `IMAGE_KEY_PATTERN` | expresión regular (banderas `u` e `i`, sin `g`) | Forma permitida de un `imageKey`; se aplica con `isValidImageKey` (regla en [06](06-almacenamiento-s3.md#regla-de-imagekey)). Va en forma plana, con dos lookaheads (`(?!.*\/\/)` y `(?!.*\/[.\p{M}])`, que impide que un segmento tras `/` empiece por `.` o por una marca combinante), para no disparar `security/detect-unsafe-regex` |
 
@@ -68,10 +72,10 @@ Todos los routers declaran sus rutas en un único `router`. `tokenAuth` es el **
 | `GET /list-files` | `listFilesInS3Folder('data/')`, agrupa por el segundo segmento de la clave descartando `RESERVED_SEGMENTS` |
 | `GET /get-data/:path(*)` | `getFileFromS3(path)` |
 | `GET /get-merged-data` | `getMergedDataInS3Folder(ACTIVE_PATH)` |
-| `POST /upload` | Sin `req.file` → 400; extensión distinta de `.xlsx` → 400 (el MIME no se comprueba en esta ruta: lo manda el cliente). Después `convertExcelToJson` → `getNextVersion` → `formatFileName` → `uploadFileToS3` (Excel) → si no hay vacíos, `uploadFileToS3` (JSON activo); si hay vacíos, 400 con `draftKey` |
-| `POST /upload/confirm` | 400 si `draftKey` falta o no es cadena. `confirmed` falso → `deleteFileFromS3(draftKey)`; verdadero → `updateFileS3(draftKey)` |
-| `POST /update-file` | 400 si `fileName` falta o no es cadena; `updateFileS3(fileName)` |
-| `POST /delete-file` | 400 si `fileName` falta o no es cadena; `deleteFileFromS3(fileName)` |
+| `POST /upload` | Sin `req.file` → 400; extensión distinta de `.xlsx` → 400 (el MIME no se comprueba en esta ruta: lo manda el cliente). Después `convertExcelToJson` → `validateProvincia(processedData)` (400 con su mensaje, antes de cualquier escritura) → un único `now = new Date()` pasado a `getNextVersion(provincia, now)` y `formatFileName(version, now)` → `uploadFileToS3` (Excel) → si no hay vacíos, `uploadFileToS3` (JSON activo); si hay vacíos, 400 con `draftKey` |
+| `POST /upload/confirm` | 400 si `draftKey` falta o no es cadena; 400 `Invalid draftKey` si `isValidDataKey` la rechaza. `confirmed` falso → `deleteFileFromS3(draftKey)`; verdadero → `updateFileS3(draftKey)` |
+| `POST /update-file` | 400 si `fileName` falta o no es cadena; 400 `Invalid fileName` si `isValidDataKey` la rechaza; `updateFileS3(fileName)` |
+| `POST /delete-file` | 400 si `fileName` falta o no es cadena; 400 `Invalid fileName` si `isValidDataKey` la rechaza; `deleteFileFromS3(fileName)` |
 
 ### `content.js`
 
@@ -119,6 +123,14 @@ Middleware.
 
 Función pura (no lee el entorno ni llama a S3) que decide si un `imageKey` del cliente puede usarse para construir la clave `gallery/{imageKey}`. Devuelve `true` solo si `key` es una cadena, mide entre 1 y `IMAGE_KEY_MAX_LENGTH` (comprobación previa a ejecutar la expresión), cumple `IMAGE_KEY_PATTERN` y no contiene `..`. La comprobación de `..` es defensa en profundidad: `a../b.jpg` (lo que llega tras decodificar `a%2e%2e/b.jpg`) cumple el patrón. La usan `GET /get-image` y `DELETE /delete-image`. Regla completa: [06](06-almacenamiento-s3.md#regla-de-imagekey).
 
+### `validateProvincia.js` → `getProvinciaNameError(name)` y `validateProvincia(rows)`
+
+Funciones puras (no leen el entorno ni llaman a S3). `getProvinciaNameError(name)` recibe un nombre ya recortado y en NFC y devuelve `null` o un texto fijo, en este orden: `Province is required` (ausente, `null` o `''`); `Province is not valid` (no cadena, más de `PROVINCIA_MAX_LENGTH`, alguna palabra que no cumple `PROVINCIA_WORD_PATTERN` tras partir por espacio o guion, o un nombre de `Object.getOwnPropertyNames(Object.prototype)` y `prototype`, como `constructor` o `toString`); `Province is reserved` (en `PROVINCIA_RESERVED` o, en minúsculas, empieza por `active` o `terms`). `validateProvincia(rows)` aplica trim y NFC solo al valor de la celda `Provincia` de la primera fila, devuelve `{ provincia }` o `{ error }` y, si otra fila trae la clave `Provincia` con un valor distinto (tras trim y NFC, `!==`), devuelve `Excel contains more than one province`. Las filas sin la clave se ignoran. La usa `POST /upload`. Regla: [06](06-almacenamiento-s3.md#regla-de-provincia).
+
+### `validateDataKey.js` → `isValidDataKey(key)`
+
+Función pura que decide si una clave del cliente (`draftKey`, `fileName`) puede usarse tal cual. `true` solo si es una cadena de hasta 120 caracteres, al partir por `/` da exactamente tres segmentos, el primero es `data`, el segundo pasa `getProvinciaNameError` y además `=== normalize('NFC')` (la clave no se reescribe), y el tercero cumple `DATA_FILE_NAME_PATTERN`. La usan `POST /upload/confirm`, `POST /update-file` y `POST /delete-file`. Regla: [06](06-almacenamiento-s3.md#regla-de-clave-de-versión).
+
 ### `validateContactMessage.js` → `validateContactMessage(body)`
 
 Función pura que valida el cuerpo de `POST /send-email` (`body` puede ser `undefined`). Devuelve `{ error }` con un texto fijo en inglés que nombra el campo y la regla, sin reflejar el valor recibido, o `{ value: { username, email, subject, message } }` con los cuatro campos recortados. Reglas, en este orden: los cuatro son cadenas no vacías tras `trim()`; `username` ≤ 100, `subject` ≤ 150, `message` ≤ 2000 y `email` ≤ 254 caracteres (tras recortar); sin ningún carácter de control (`\p{Cc}`: `\r`, `\n`, NUL...) ni U+2028/U+2029 en `username`, `email` ni `subject` (error `username, email and subject must not contain control characters or line breaks`); `message` rechaza `\p{Cc}` salvo `\n`, `\r` y `\t` (error `message must not contain control characters`); `email` pasa una comprobación básica de formato, no un análisis RFC 5322: `^[^\s@,;:<>()'"\\]+@[^\s@,;:<>()'"\\]+\.[^\s@,;:<>()'"\\]+$`. **Límite conocido**: se rechaza un correo con apóstrofo (`o'brien@example.com`), válido en RFC pero poco habitual; si preocupa, **(por confirmar)**. Los límites son constantes del propio archivo.
@@ -155,16 +167,16 @@ Comportamiento:
 
 Helper interno `getCellValue(cell)`: normaliza celdas de ExcelJS — texto enriquecido (`richText`) se concatena, fórmulas devuelven su `result`, `null`/`undefined` → `null`.
 
-### `formatFileName.js` → `formatFileName(version = 1)`
+### `formatFileName.js` → `formatFileName(version = 1, now = new Date())`
 
-Devuelve `YYYY-MM-DD_v{version}.xlsx` con la **fecha local** del servidor.
+Devuelve `YYYY-MM-DD_v{version}.xlsx` con el día **UTC** de `now` (`now.toISOString().slice(0, 10)`; A1 resuelto el 28/10/2026). `now` se inyecta para poder fijar la fecha; la ruta pasa el mismo `now` a `getNextVersion`.
 
-### `getNextVersion.js` → `getNextVersion(provincia)`
+### `getNextVersion.js` → `getNextVersion(provincia, now = new Date())`
 
 Devuelve `Promise<{ version, provinciaFolder }>`.
 
 - `provinciaFolder = data/{provincia}`.
-- Lista la carpeta y, para los ficheros con patrón `YYYY-MM-DD_vN.xlsx` cuya fecha es **hoy (UTC)**, toma el mayor `N` y devuelve `N + 1`. Si no hay ninguno de hoy, `1`.
+- Lista la carpeta y, para los ficheros con patrón `YYYY-MM-DD_vN.xlsx` cuya fecha es **hoy (UTC, el día de `now`)**, toma el mayor `N` y devuelve `N + 1`. Si no hay ninguno de hoy, `1`.
 
 ---
 
@@ -198,7 +210,7 @@ Crea un único cliente `S3` (clase agregada de SDK v3) con `AWS_REGION` y, en lo
 
 | Función | Parámetros | Devuelve | Notas |
 |---|---|---|---|
-| `listFilesInS3Folder` | `folderName` (prefijo) | `[{ name, key }]` | Descarta objetos de tamaño 0 (marcadores de carpeta). Sin paginación: máximo 1000 objetos |
+| `listFilesInS3Folder` | `folderName` (prefijo) | `[{ name, key }]` | El `Prefix` del listado termina siempre en `/` (se añade si falta, sin duplicarlo): `data/Santa Cruz` no ve `data/Santa Cruz de Tenerife/` y `data/active` no ve `data/activos/` (también para `getNextVersion`, `deleteFileFromS3` y `getMergedDataInS3Folder`). Descarta objetos de tamaño 0 (marcadores de carpeta). Sin paginación: máximo 1000 objetos |
 | `getMergedDataInS3Folder` | `folderName` | array | Lista y descarga cada JSON **en secuencia**, concatenando |
 
 ### Escritura
@@ -215,7 +227,7 @@ Crea un único cliente `S3` (clase agregada de SDK v3) con `AWS_REGION` y, en lo
 |---|---|---|---|
 | `deleteImageFromS3` | `filePath, imageKey` | `{ success, error? }` | No lanza; devuelve el error |
 | `deleteTermFromS3` | `termToDelete, fileName, folderName` | `{ success, message? }` | Filtra el término y reescribe el fichero. No lanza |
-| `deleteFileFromS3` | `filePath` (`data/{prov}/{fecha}_vN.xlsx`) | `{ message }` | Borra la versión; si quedan `.xlsx` en la provincia, reconvierte el último (orden alfabético) y reescribe el activo; si no queda ninguno, borra el activo |
+| `deleteFileFromS3` | `filePath` (`data/{prov}/{fecha}_vN.xlsx`) | `{ message }` | Borra la versión; si quedan `.xlsx` en la provincia, reconvierte el último (orden alfabético con `localeCompare`, que pone `_v10` antes que `_v9`: A8 en [07](07-estado-y-deuda-tecnica.md)) y reescribe el activo; si no queda ninguno, borra el activo |
 
 ### Versión activa
 
