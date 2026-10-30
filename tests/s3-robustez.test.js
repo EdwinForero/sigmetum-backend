@@ -282,6 +282,8 @@ describe('deleteFileFromS3 y getNextVersion', () => {
     const activa = 'data/active/Sevilla.json';
     const lista = (...nombres) => { estado.list = () => ({ Contents: nombres.map((n) => ({ Key: `${base}/${n}`, Size: 10 })) }); };
     const sobreActiva = (Clase) => estado.llamadas.filter((c) => c instanceof Clase && c.input.Key === activa);
+    // La regla de la versión activa se ejerce por HTTP: POST /delete-file con el aws real (la orquestación vive en routes/data.js).
+    const borrar = (clave) => request(app).post('/api/v1/delete-file').set('Authorization', `Bearer ${token}`).send({ fileName: clave });
     let xlsx;
     before(async () => { xlsx = await makeXlsx([fullRow('Sevilla')]); });
     beforeEach(() => {
@@ -290,7 +292,8 @@ describe('deleteFileFromS3 y getNextVersion', () => {
 
     test('(a) con _v9 y _v10 regenera el activo desde _v10', async () => {
         lista('2026-10-05_v9.xlsx', '2026-10-05_v10.xlsx');
-        await realAws.deleteFileFromS3(`${base}/2026-10-05_v11.xlsx`);
+        const res = await borrar(`${base}/2026-10-05_v11.xlsx`);
+        assert.equal(res.status, 200);
         const lecturas = estado.llamadas.filter((c) => c instanceof GetObjectCommand).map((c) => c.input.Key);
         assert.deepEqual(lecturas, [`${base}/2026-10-05_v10.xlsx`]);
         const escrituras = sobreActiva(PutObjectCommand);
@@ -300,20 +303,22 @@ describe('deleteFileFromS3 y getNextVersion', () => {
     });
     test('(b) solo .xlsx no estándar: no toca el activo', async () => {
         lista('manual.xlsx');
-        await realAws.deleteFileFromS3(`${base}/2026-10-05_v1.xlsx`);
+        const res = await borrar(`${base}/2026-10-05_v1.xlsx`);
+        assert.equal(res.status, 200);
         assert.equal(sobreActiva(PutObjectCommand).length, 0);
         assert.equal(sobreActiva(DeleteObjectCommand).length, 0);
     });
     test('(c) sin ningún .xlsx: borra el activo', async () => {
         lista('notas.txt');
-        await realAws.deleteFileFromS3(`${base}/2026-10-05_v1.xlsx`);
+        const res = await borrar(`${base}/2026-10-05_v1.xlsx`);
+        assert.equal(res.status, 200);
         assert.equal(sobreActiva(DeleteObjectCommand).length, 1);
         assert.equal(sobreActiva(PutObjectCommand).length, 0);
     });
     test('getNextVersion con _v9 y _v10 del mismo día da 11', async () => {
         lista('2026-10-05_v9.xlsx', '2026-10-05_v10.xlsx');
         const { getNextVersion } = require('../functions/getNextVersion');
-        const { version } = await getNextVersion('Sevilla', new Date('2026-10-05T12:00:00Z'));
+        const { version } = getNextVersion('Sevilla', await realAws.listFilesInS3Folder(base), new Date('2026-10-05T12:00:00Z'));
         assert.equal(version, 11);
     });
 });

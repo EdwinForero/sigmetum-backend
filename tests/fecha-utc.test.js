@@ -43,17 +43,17 @@ for (const huso of ['por defecto', 'Pacific/Kiritimati']) {
         test('formatFileName(1, 2026-10-29T00:30Z) usa el día UTC', () => assert.equal(formatFileName(1, despuesDeNoche), '2026-10-29_v1.xlsx'));
         test('formatFileName conserva el formato con versión', () => assert.equal(formatFileName(7, antesDeNoche), '2026-10-28_v7.xlsx'));
 
-        test('getNextVersion con v1 del mismo día UTC da versión 2', async () => {
+        test('getNextVersion con v1 del mismo día UTC da versión 2', () => {
             seed.list = [{ name: '2026-10-28_v1.xlsx', key: 'data/Málaga/2026-10-28_v1.xlsx' }];
-            assert.equal((await getNextVersion('Málaga', antesDeNoche)).version, 2);
+            assert.equal(getNextVersion('Málaga', seed.list, antesDeNoche).version, 2);
         });
-        test('getNextVersion devuelve la carpeta de la provincia', async () => {
+        test('getNextVersion devuelve la carpeta de la provincia', () => {
             seed.list = [{ name: '2026-10-28_v1.xlsx', key: 'data/Málaga/2026-10-28_v1.xlsx' }];
-            assert.equal((await getNextVersion('Málaga', antesDeNoche)).provinciaFolder, 'data/Málaga');
+            assert.equal(getNextVersion('Málaga', seed.list, antesDeNoche).provinciaFolder, 'data/Málaga');
         });
-        test('getNextVersion el día UTC siguiente vuelve a la versión 1', async () => {
+        test('getNextVersion el día UTC siguiente vuelve a la versión 1', () => {
             seed.list = [{ name: '2026-10-28_v1.xlsx', key: 'data/Málaga/2026-10-28_v1.xlsx' }];
-            assert.equal((await getNextVersion('Málaga', despuesDeNoche)).version, 1);
+            assert.equal(getNextVersion('Málaga', seed.list, despuesDeNoche).version, 1);
         });
 
         // Flujo de POST /upload con la fecha fijada a 2026-10-28T23:30Z (mock de Date): versión y nombre usan el mismo día UTC.

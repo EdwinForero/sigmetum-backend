@@ -1,9 +1,6 @@
 const { S3, GetObjectCommand } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const { fromSSO } = require('@aws-sdk/credential-providers');
-const { convertExcelToJson } = require('../functions/convertExcelToJson');
-const { ACTIVE_PATH, DATA_PATH } = require('../config/s3Paths');
-const { latestVersionFile } = require('../functions/versionName');
 
 const path = require('path');
 
@@ -250,57 +247,28 @@ exports.deleteTermFromS3 = async (termToDelete, fileName, folderName) => {
     }
 };
 
-exports.deleteFileFromS3 = async (filePath) => {
+// Borra el objeto de esa clave; las rutas validan con isValidDataKey antes y el activo se construye con activeKeyOf.
+exports.deleteFileFromS3 = async (key) => {
     try {
-        // filePath: data/{provincia}/{date}_v{n}.xlsx
-        const parts = filePath.split('/');
-        const provincia = parts[1];
-        const provinciaFolder = `${DATA_PATH}/${provincia}`;
-        const activeKey = `${ACTIVE_PATH}/${provincia}.json`;
-
-        await s3.deleteObject({ Bucket: process.env.AWS_BUCKET_NAME, Key: filePath });
-
-        const remaining = await exports.listFilesInS3Folder(provinciaFolder);
-        const latest = latestVersionFile(remaining);
-
-        if (latest) {
-            const buffer = await exports.getBufferFromS3(latest.key);
-            const { processedData } = await convertExcelToJson(buffer);
-            await s3.putObject({
-                Bucket: process.env.AWS_BUCKET_NAME,
-                Key: activeKey,
-                Body: JSON.stringify(processedData, null, 2),
-                ContentType: 'application/json',
-            });
-        } else if (!remaining.some(f => f.name.endsWith('.xlsx'))) {
-            // Ningún .xlsx: se borra el activo. Si quedan .xlsx pero ninguno con nombre estándar, el activo no se toca.
-            await s3.deleteObject({ Bucket: process.env.AWS_BUCKET_NAME, Key: activeKey });
-        }
-
-        return { message: 'File deleted successfully' };
+        await s3.deleteObject({ Bucket: process.env.AWS_BUCKET_NAME, Key: key });
     } catch (error) {
         console.error(`Error deleting file: ${error.message}`);
         throw error;
     }
 };
 
-// ─── Select active version ───────────────────────────────────────────────────
+// ─── Write JSON ──────────────────────────────────────────────────────────────
 
-exports.updateFileS3 = async (filePath) => {
+exports.putJsonToS3 = async (key, data) => {
     try {
-        // filePath: data/{provincia}/{date}_v{n}.xlsx
-        const provincia = filePath.split('/')[1];
-        const buffer = await exports.getBufferFromS3(filePath);
-        const { processedData } = await convertExcelToJson(buffer);
-
         await s3.putObject({
             Bucket: process.env.AWS_BUCKET_NAME,
-            Key: `${ACTIVE_PATH}/${provincia}.json`,
-            Body: JSON.stringify(processedData, null, 2),
+            Key: key,
+            Body: JSON.stringify(data, null, 2),
             ContentType: 'application/json',
         });
     } catch (error) {
-        console.error(`Error setting active version: ${error.message}`);
+        console.error(`Error writing JSON: ${error.message}`);
         throw error;
     }
 };

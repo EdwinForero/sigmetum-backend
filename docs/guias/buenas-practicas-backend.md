@@ -23,9 +23,9 @@ Un cambio está terminado cuando pasan estos comandos y la documentación está 
 
 | Carpeta | Va aquí | No va aquí | Estado |
 |---|---|---|---|
-| `routes/` | La capa HTTP: leer y **validar** la entrada, llamar a la lógica, dar forma a la respuesta, `next(error)` | Lógica de negocio, acceso directo a S3 | Las rutas llaman a `aws/` y a `functions/`. `POST /upload` concentra bastante orquestación (conversión, versión, dos subidas) |
-| `functions/` | Lógica **pura y probable**: recibe datos y devuelve datos (`convertExcelToJson`, `formatFileName`) | Llamadas a S3, lectura de `process.env` al cargar el módulo, `Date` sin poder inyectarla | **No cumple del todo**: `getNextVersion` llama a S3 (M14) y `formatFileName` usa `new Date()` (A1). `tokenAuthentication.js` es un middleware y `userAuthentication.js` un manejador de ruta (B7) |
-| `aws/` | **La única capa que habla con S3**: leer, escribir, listar, borrar, firmar URLs | Decisiones de negocio (qué versión activar, cuándo reconvertir un Excel) | **No cumple**: `deleteFileFromS3` y `updateFileS3` contienen la regla "la versión activa es la última" y llaman a `convertExcelToJson` (M14) |
+| `routes/` | La capa HTTP: leer y **validar** la entrada, llamar a la lógica, dar forma a la respuesta, `next(error)` | Lógica de negocio, acceso directo a S3 | **No cumple del todo**: las rutas llaman a `aws/` y a `functions/`, pero `routes/data.js` conserva la orquestación de la versión activa en dos funciones privadas (`activateFrom` y `removeVersion`) y `POST /upload` concentra bastante (conversión, listado, versión, dos subidas). Decisión del usuario (M14, 29/10/2026): no hay capa de servicio |
+| `functions/` | Lógica **pura y probable**: recibe datos y devuelve datos (`convertExcelToJson`, `formatFileName`, `getNextVersion`, `activeVersion`) | Llamadas a S3, lectura de `process.env` al cargar el módulo, `Date` sin poder inyectarla | **Cumple en las funciones de datos** (M14 resuelto el 29/10/2026): `getNextVersion` y `activeVersion` no importan `aws/` (lo comprueba `tests/capas-importaciones.test.js`) y la fecha se inyecta (`now = new Date()` como valor por defecto; A1 resuelto). **Excepciones (B7)**: `tokenAuthentication.js` es un middleware y `userAuthentication.js` un manejador de ruta que lee `process.env` al cargar el módulo |
+| `aws/` | **La única capa que habla con S3**: leer, escribir, listar, borrar, firmar URLs | Decisiones de negocio (qué versión activar, cuándo reconvertir un Excel) | **Cumple** (M14 resuelto el 29/10/2026): solo hace I/O (`deleteFileFromS3` borra una clave, `putJsonToS3` escribe un JSON); no importa `functions/` ni decide la versión activa |
 | `config/` | Constantes de rutas de S3 (`s3Paths.js`) y validación del entorno (`validateEnv.js`) | Lógica | Cumple |
 | `middleware/` | Middlewares transversales (hoy, `errorHandler`) | Manejadores de una ruta concreta | `tokenAuth` vive en `functions/` (B7) |
 | `app.js` | La app Express: middlewares, montaje de rutas, `notFound` y `errorHandler`; se exporta sin abrir puerto | Lógica de negocio, `dotenv`, `validateEnv`, `listen` | Cumple (M13, 28/10/2026) |
@@ -88,7 +88,7 @@ Cómo validar: **una función de validación por forma de entrada**, con una lis
 
 ## 6. Tiempo y versionado
 
-- **Una sola fuente de fecha para todo el versionado**, en **UTC**, **inyectable** (un parámetro `now = new Date()`) para poder probarla. Hoy `getNextVersion` usa `toISOString()` (UTC) y `formatFileName` usa la fecha local: en el cambio de día la versión vuelve a `v1` y **se sobrescribe un Excel del historial** (A1). El bucket de `sigmetum-infra` tiene el versionado de S3 activado, así que el objeto sobrescrito se podría recuperar **(verificado en `modules/storage/main.tf`; por confirmar que está activo en los dos entornos)**.
+- **Una sola fuente de fecha para todo el versionado**, en **UTC**, **inyectable** (un parámetro `now = new Date()`) para poder probarla. Desde A1 (28/10/2026) `getNextVersion` y `formatFileName` toman el día UTC del mismo `now`; antes `formatFileName` usaba la fecha local y en el cambio de día la versión volvía a `v1` y **se sobrescribía un Excel del historial**. El bucket de `sigmetum-infra` tiene el versionado de S3 activado, así que el objeto sobrescrito se podría recuperar **(verificado en `modules/storage/main.tf`; por confirmar que está activo en los dos entornos)**.
 - El formato `AAAA-MM-DD_vN.xlsx` es **contrato con el frontend** (D2): no se cambia sin [avisarlo](mantenimiento.md#6-avisar-al-frontend-y-a-la-infraestructura).
 - Los borradores (un Excel con celdas vacías pendiente de confirmar) **no son versiones**: deben vivir aparte hasta confirmarse (A2).
 - Un valor que se guarda como **clave de S3** (la provincia del Excel) se valida antes: no puede ser `active` ni `terms`, ni `__proto__`, ni contener `/` (A4).
@@ -149,7 +149,7 @@ Cómo validar: **una función de validación por forma de entrada**, con una lis
 | `node:test` (integrado en Node 20) | Ejecutor y aserciones, sin dependencias. Vitest es la alternativa si se quiere compartir herramienta con el frontend |
 | `supertest` (7.3.1, versión exacta) | Llamar a la app sin abrir un puerto |
 
-**Requisitos previos para poder probar**: la app se exporta sin arrancar el servidor (`app.js`, M13 resuelto) y la fecha se inyecta (A1 resuelto); falta que `functions/` no importe S3 (M14), lo que impide probar el flujo de datos con un S3 simulado con estado.
+**Requisitos previos para poder probar**: la app se exporta sin arrancar el servidor (`app.js`, M13 resuelto) y la fecha se inyecta (A1 resuelto); `functions/` ya no importa S3 (M14 resuelto) y el flujo de datos se prueba con un S3 simulado con estado (`tests/helpers/s3-con-estado.js`).
 
 **Orden de cobertura** (donde están los fallos más caros):
 
@@ -198,11 +198,11 @@ No los repitas al escribir código nuevo:
 |---|---|---|
 | Manejador `async` sin `try/catch` | (`functions/userAuthentication.js` lo tenía; corregido el 28/10/2026) | A7 resuelto |
 | Leer `req.file.buffer` o `term.trim()` sin validar | (corregido el 28/10/2026 en las rutas listadas de A3; quedan las entradas no revisadas) | A3 |
-| Dos fuentes de fecha para el versionado | `getNextVersion.js` y `formatFileName.js` | A1 |
+| Dos fuentes de fecha para el versionado | `getNextVersion.js` y `formatFileName.js` | A1 (resuelto el 28/10/2026) |
 | Tragarse todos los errores y devolver un valor por defecto | `getTextJsonS3` | A6 |
 | Valor del Excel usado como clave de S3 y como clave de un objeto sin validar | `routes/data.js` (`grouped[provincia]`), `POST /upload` | A4 |
-| Lógica de negocio en la capa de S3 | `deleteFileFromS3`, `updateFileS3` | M14 |
-| Una función "pura" que llama a S3 | `getNextVersion` | M14 |
+| Lógica de negocio en la capa de S3 | `deleteFileFromS3`, `updateFileS3` | M14 (resuelto el 29/10/2026) |
+| Una función "pura" que llama a S3 | `getNextVersion` | M14 (resuelto el 29/10/2026) |
 | Devolver `err.message` al cliente (o el `error` del SDK en una respuesta manual, como hacían `delete-image` y `delete-term`) | `middleware/errorHandler.js` | M17 (resuelto el 28/10/2026) |
 | Funciones de S3 que a veces lanzan y a veces devuelven `{ success: false }` | `deleteImageFromS3`, `deleteTermFromS3` | B5 (resuelto el 29/10/2026) |
 | Descargas secuenciales en un bucle | `getMergedDataInS3Folder` | M7 |

@@ -81,10 +81,12 @@ Todos los routers declaran sus rutas en un único `router`. `tokenAuth` es el **
 | `GET /list-files` | `listFilesInS3Folder('data/')`, agrupa por el segundo segmento de la clave descartando `RESERVED_SEGMENTS` |
 | `GET /get-data/:path(*)` | `getFileFromS3(path)` |
 | `GET /get-merged-data` | `getMergedDataInS3Folder(ACTIVE_PATH)` |
-| `POST /upload` | Sin `req.file` → 400; extensión distinta de `.xlsx` → 400 (el MIME no se comprueba en esta ruta: lo manda el cliente). Después `convertExcelToJson` → `validateProvincia(processedData)` (400 con su mensaje, antes de cualquier escritura) → un único `now = new Date()` pasado a `getNextVersion(provincia, now)` y `formatFileName(version, now)` → `uploadFileToS3` (Excel) → si no hay vacíos, `uploadFileToS3` (JSON activo); si hay vacíos, 400 con `draftKey` y `emptyFields` solo con `rowIndex` (sin `processedData` ni `rowData`, D8) |
-| `POST /upload/confirm` | 400 si `draftKey` falta o no es cadena; 400 `Invalid draftKey` si `isValidDataKey` la rechaza. `confirmed` falso → `deleteFileFromS3(draftKey)`; verdadero → `updateFileS3(draftKey)` |
-| `POST /update-file` | 400 si `fileName` falta o no es cadena; 400 `Invalid fileName` si `isValidDataKey` la rechaza; `updateFileS3(fileName)` |
-| `POST /delete-file` | 400 si `fileName` falta o no es cadena; 400 `Invalid fileName` si `isValidDataKey` la rechaza; `deleteFileFromS3(fileName)` |
+| `POST /upload` | Sin `req.file` → 400; extensión distinta de `.xlsx` → 400 (el MIME no se comprueba en esta ruta: lo manda el cliente). Después `convertExcelToJson` → `validateProvincia(processedData)` (400 con su mensaje, antes de cualquier escritura) → un único `now = new Date()` → `listFilesInS3Folder(provinciaFolderOf(provincia))` → `getNextVersion(provincia, filesInFolder, now)` y `formatFileName(version, now)` → `uploadFileToS3` (Excel) → si no hay vacíos, `uploadFileToS3` (JSON activo); si hay vacíos, 400 con `draftKey` y `emptyFields` solo con `rowIndex` (sin `processedData` ni `rowData`, D8) |
+| `POST /upload/confirm` | 400 si `draftKey` falta o no es cadena; 400 `Invalid draftKey` si `isValidDataKey` la rechaza. `confirmed` falso → `removeVersion(draftKey)`; verdadero → `activateFrom(draftKey, provinciaOfKey(draftKey))` |
+| `POST /update-file` | 400 si `fileName` falta o no es cadena; 400 `Invalid fileName` si `isValidDataKey` la rechaza; `activateFrom(fileName, provinciaOfKey(fileName))` |
+| `POST /delete-file` | 400 si `fileName` falta o no es cadena; 400 `Invalid fileName` si `isValidDataKey` la rechaza; `removeVersion(fileName)` |
+| `activateFrom(sourceKey, provincia)` (privada) | Deja `sourceKey` (un `.xlsx` de versión) como activa: `getBufferFromS3(sourceKey)` → `convertExcelToJson` → `putJsonToS3(activeKeyOf(provincia), processedData)`. Aquí vive la orquestación (M14, 29/10/2026): `aws/` solo hace I/O y `functions/` solo reglas puras |
+| `removeVersion(key)` (privada) | Borra una versión y corrige el activo: `deleteFileFromS3(key)` → `listFilesInS3Folder(provinciaFolderOf(p))` → `planActiveAfterDelete`; con `regenerate` llama a `activateFrom(plan.key, p)`; con `delete`, a `deleteFileFromS3(activeKeyOf(p))`; con `keep`, no hace nada. Todo dentro del `try` del manejador: el error original llega a `next(error)` |
 
 ### `content.js`
 
@@ -191,19 +193,30 @@ Helper interno `getCellValue(cell)`: normaliza celdas de ExcelJS — texto enriq
 
 Devuelve `YYYY-MM-DD_v{version}.xlsx` con el día **UTC** de `now` (`now.toISOString().slice(0, 10)`; A1 resuelto el 28/10/2026). `now` se inyecta para poder fijar la fecha; la ruta pasa el mismo `now` a `getNextVersion`.
 
-### `getNextVersion.js` → `getNextVersion(provincia, now = new Date())`
+### `getNextVersion.js` → `getNextVersion(provincia, filesInFolder, now = new Date())`
 
-Devuelve `Promise<{ version, provinciaFolder }>`.
+Función síncrona y pura (no importa `aws/`; M14, 29/10/2026). Recibe el listado de la carpeta (`filesInFolder`: `[{ name, key }]`, que obtiene la ruta con `listFilesInS3Folder`) y devuelve `{ version, provinciaFolder }`.
 
-- `provinciaFolder = data/{provincia}`.
-- Lista la carpeta y, para los ficheros con patrón `YYYY-MM-DD_vN.xlsx` (interpretado con `parseVersionName`) cuya fecha es **hoy (UTC, el día de `now`)**, toma el mayor `N` (entero: `_v9` y `_v10` dan `_v11`) y devuelve `N + 1`. Si no hay ninguno de hoy, `1`.
+- `provinciaFolder = provinciaFolderOf(provincia)` (`data/{provincia}`).
+- Para los ficheros del listado con patrón `YYYY-MM-DD_vN.xlsx` (interpretado con `parseVersionName`) cuya fecha es **hoy (UTC, el día de `now`)**, toma el mayor `N` (entero: `_v9` y `_v10` dan `_v11`) y devuelve `N + 1`. Si no hay ninguno de hoy, `1`.
+
+### `activeVersion.js` → `provinciaFolderOf`, `activeKeyOf`, `provinciaOfKey` y `planActiveAfterDelete`
+
+Reglas de la versión activa (M14, 29/10/2026). Funciones puras: importan solo `config/s3Paths` y `./versionName`; no leen S3, ni el reloj, ni el entorno. Las claves que reciben ya están validadas por las rutas (`isValidDataKey`).
+
+- `provinciaFolderOf(provincia)`: `data/{provincia}`. Fuente única del literal (la usa también `getNextVersion`).
+- `activeKeyOf(provincia)`: `data/active/{provincia}.json`.
+- `provinciaOfKey(filePath)`: el segundo segmento de `data/{prov}/{fecha}_vN.xlsx`.
+- `planActiveAfterDelete(remaining)`: recibe lo que queda en la carpeta (`[{ name, key }]`) y devuelve una acción para el activo, apoyada en `latestVersionFile`: `{ action: 'regenerate', key }` si queda alguna versión estándar (la más reciente); `{ action: 'delete' }` si no queda ningún `.xlsx` (la comprobación es sensible a mayúsculas); `{ action: 'keep' }` si quedan `.xlsx` pero ninguno con nombre estándar (el activo no se toca).
+
+**Dirección de dependencias:** `routes/` → `aws/` y `functions/`; `functions/` → `config/`; `aws/` → `config/`. `aws/` no importa `functions/` ni `functions/` importa `aws/` (lo comprueba `tests/capas-importaciones.test.js`).
 
 ### `versionName.js` → `parseVersionName(name)` y `latestVersionFile(files)`
 
-Funciones puras (no leen el entorno ni llaman a S3); interpretación única del nombre de una versión (A8, 29/10/2026). Está en `functions/` y no en `aws/` para que `aws/` la importe sin dependencia circular con `getNextVersion`.
+Funciones puras (no leen el entorno ni llaman a S3); interpretación única del nombre de una versión (A8, 29/10/2026). Está en `functions/`; la usan `getNextVersion`, `isValidDataKey` y `planActiveAfterDelete`.
 
 - `parseVersionName(name)`: aplica `DATA_FILE_NAME_PATTERN` y devuelve `{ date, version }` (`version` como entero) o `null` si el nombre no es estándar.
-- `latestVersionFile(files)`: recibe `[{ name, key }]` y devuelve el de mayor fecha y, a igual fecha, mayor `N` entero (`_v10` gana a `_v9`). Si también coincide `N` (`_v7` y `_v007`), gana el nombre mayor por unidades de código (`a.name > b.name`, no `localeCompare`), así el resultado no depende del orden del listado. Ignora los nombres no estándar y devuelve `null` si no hay ninguno estándar. La usa `deleteFileFromS3`.
+- `latestVersionFile(files)`: recibe `[{ name, key }]` y devuelve el de mayor fecha y, a igual fecha, mayor `N` entero (`_v10` gana a `_v9`). Si también coincide `N` (`_v7` y `_v007`), gana el nombre mayor por unidades de código (`a.name > b.name`, no `localeCompare`), así el resultado no depende del orden del listado. Ignora los nombres no estándar y devuelve `null` si no hay ninguno estándar. La usa `planActiveAfterDelete`.
 
 ---
 
@@ -239,7 +252,7 @@ Crea un único cliente `S3` (clase agregada de SDK v3) con `AWS_REGION` y, en lo
 
 | Función | Parámetros | Devuelve | Notas |
 |---|---|---|---|
-| `listFilesInS3Folder` | `folderName` (prefijo) | `[{ name, key }]` | El `Prefix` del listado termina siempre en `/` (se añade si falta, sin duplicarlo): `data/Santa Cruz` no ve `data/Santa Cruz de Tenerife/` y `data/active` no ve `data/activos/` (también para `getNextVersion`, `deleteFileFromS3` y `getMergedDataInS3Folder`). Descarta los objetos que no son «reales» (`isRealObject`: clave acabada en `/` o tamaño 0). Recorre todas las páginas con `listAllObjects` (M10: ya no se trunca a 1000 objetos). Formato `{ name, key }` sin cambios |
+| `listFilesInS3Folder` | `folderName` (prefijo) | `[{ name, key }]` | El `Prefix` del listado termina siempre en `/` (se añade si falta, sin duplicarlo): `data/Santa Cruz` no ve `data/Santa Cruz de Tenerife/` y `data/active` no ve `data/activos/` (también para el listado previo de `POST /upload`, el de `removeVersion` y `getMergedDataInS3Folder`). Descarta los objetos que no son «reales» (`isRealObject`: clave acabada en `/` o tamaño 0). Recorre todas las páginas con `listAllObjects` (M10: ya no se trunca a 1000 objetos). Formato `{ name, key }` sin cambios |
 | `getMergedDataInS3Folder` | `folderName` | array | Lista y lee los JSON **en paralelo** (`Promise.all`, M7; sin límite de concurrencia) y concatena en el orden del listado, no en el de finalización. Si una lectura falla, rechaza sin datos parciales |
 
 ### Escritura
@@ -249,6 +262,7 @@ Crea un único cliente `S3` (clase agregada de SDK v3) con `AWS_REGION` y, en lo
 | `uploadFileToS3` | `fileName, body, folderName` | `PutObject` en `folderName/fileName`, sin `ContentType` |
 | `uploadImageToS3` | `file, filePath, fileKey` | Usa `file.buffer` y `file.mimetype` de multer |
 | `uploadTextToJsonS3` | `newText, fileName, folderName` | Lee el JSON, hace `push({ term })`, reescribe (read-modify-write) |
+| `putJsonToS3` | `key, data` | `PutObject` con `Body = JSON.stringify(data, null, 2)` y `ContentType: 'application/json'`. Ante un fallo registra `Error writing JSON: ...` con `console.error` y relanza el error original. Sin lógica de negocio: la usa `activateFrom` para escribir `data/active/{prov}.json` |
 
 ### Borrado
 
@@ -256,13 +270,11 @@ Crea un único cliente `S3` (clase agregada de SDK v3) con `AWS_REGION` y, en lo
 |---|---|---|---|
 | `deleteImageFromS3` | `filePath, imageKey` | nada | Borra `filePath/imageKey`. Ante un fallo registra con `console.error` y lanza el error original (B5, 29/10/2026) |
 | `deleteTermFromS3` | `termToDelete, fileName, folderName` | nada | Filtra el término y reescribe el fichero. Ante un fallo (también de lectura, A6) registra con `console.error` y lanza el error original (B5); no escribe si la lectura falla |
-| `deleteFileFromS3` | `filePath` (`data/{prov}/{fecha}_vN.xlsx`) | `{ message }` | Borra la versión, lista las que quedan y elige con `latestVersionFile` (fecha y luego `N` entero; A8 resuelto). Tres casos: (a) hay algún `.xlsx` con nombre estándar, reconvierte el más reciente y reescribe el activo (los de nombre no estándar se ignoran); (b) solo quedan `.xlsx` no estándar, **no toca el activo** (ni borra ni escribe); (c) no queda ningún `.xlsx` (la comprobación es sensible a mayúsculas), borra el activo. Sigue decidiendo en `aws/` (M14 abierto; B5 resuelto: todas las funciones de `aws/` lanzan), ahora apoyada en una función pura de `functions/` |
+| `deleteFileFromS3` | `key` (clave arbitraria) | nada | Primitivo: un único `DeleteObject` de esa clave, sin listar, leer ni escribir. Ante un fallo registra `Error deleting file: ...` con `console.error` y relanza el error original. Borra tanto una versión `data/{prov}/{fecha}_vN.xlsx` como `data/active/{prov}.json`; las rutas validan con `isValidDataKey` antes y el activo se construye con `activeKeyOf`. La regla de qué activo queda (tres casos: regenerar, borrar o no tocar) vive en `planActiveAfterDelete` y la orquestación en `removeVersion` (`routes/data.js`) |
 
 ### Versión activa
 
-| Función | Parámetros | Notas |
-|---|---|---|
-| `updateFileS3` | `filePath` (`data/{prov}/{fecha}_vN.xlsx`) | Descarga el Excel, lo convierte y sobreescribe `data/active/{prov}.json` |
+`aws/` ya no decide qué versión es la activa (M14, 29/10/2026): `updateFileS3` se eliminó y la sustituyen `activateFrom` (`routes/data.js`) con `getBufferFromS3` y `putJsonToS3`.
 
 ---
 

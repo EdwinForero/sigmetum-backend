@@ -13,7 +13,7 @@ const spyTotal = () => Object.values(calls).reduce((sum, n) => sum + n, 0);
 
 // Errores sembrados (null = comportamiento normal; el doble lanza el error, como aws/) y argumentos recibidos por los espías de versiones.
 const inject = { getTextJson: null, deleteImage: null, deleteTerm: null };
-const argsLog = { upload: [], update: [], del: [], list: [], image: [] };
+const argsLog = { upload: [], getBuffer: [], put: [], del: [], list: [], image: [] };
 const seed = { list: [] };
 
 const reiniciar = () => {
@@ -41,7 +41,14 @@ injectInCache(path.join(ROOT, 'aws', 'awsS3connect.js'), {
     getFileFromS3: other({}),
     getMergedDataInS3Folder: other({}),
     deleteFileFromS3: async (...args) => { calls.s3Other += 1; argsLog.del.push(args); return { success: true }; },
-    updateFileS3: async (...args) => { calls.s3Other += 1; argsLog.update.push(args); },
+    // xlsx válido (require perezoso de ./excel: evita un ciclo de carga, porque excel carga simulados solo al subir).
+    getBufferFromS3: async (...args) => {
+        calls.s3Other += 1;
+        argsLog.getBuffer.push(args);
+        const { fullRow, makeXlsx } = require('./excel');
+        return makeXlsx([fullRow('Málaga')]);
+    },
+    putJsonToS3: async (...args) => { calls.s3Other += 1; argsLog.put.push(args); },
     listFilesInS3Folder: async (...args) => { calls.s3Other += 1; argsLog.list.push(args); return seed.list; },
 });
 

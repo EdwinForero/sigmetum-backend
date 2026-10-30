@@ -1,10 +1,9 @@
-const { listFilesInS3Folder } = require('../aws/awsS3connect');
-const { DATA_PATH } = require('../config/s3Paths');
+const { provinciaFolderOf } = require('./activeVersion');
 const { parseVersionName } = require('./versionName');
 
-const getNextVersion = async (provincia, now = new Date()) => {
-    const provinciaFolder = `${DATA_PATH}/${provincia}`;
-    const filesInFolder = await listFilesInS3Folder(provinciaFolder);
+// Recibe el listado de la carpeta de la provincia (filesInFolder: [{ name, key }]); no accede a S3.
+const getNextVersion = (provincia, filesInFolder, now = new Date()) => {
+    const provinciaFolder = provinciaFolderOf(provincia);
 
     const today = now.toISOString().slice(0, 10); // 'YYYY-MM-DD' en UTC
     let version = 1;

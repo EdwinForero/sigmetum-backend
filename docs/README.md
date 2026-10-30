@@ -51,6 +51,7 @@ sigmetum-backend/
 │   ├── userAuthentication.js    # Handler de login (bcrypt + JWT)
 │   ├── tokenAuthentication.js   # Middleware de verificación JWT
 │   ├── convertExcelToJson.js    # Parser de Excel con columnas fijas
+│   ├── activeVersion.js         # Reglas de la versión activa (carpeta, clave del activo y plan tras borrar)
 │   ├── formatFileName.js        # Nombre de fichero versionado por fecha
 │   ├── getNextVersion.js        # Cálculo de la siguiente versión del día
 │   ├── versionName.js           # Interpretación única del nombre de versión (parseVersionName, latestVersionFile)

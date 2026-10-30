@@ -49,9 +49,11 @@ Los prefijos están en `config/s3Paths.js`. `active` y `terms` están en `RESERV
           respuesta 400 con draftKey
                  │
        POST /upload/confirm
-          ├─ confirmed: true  ─► updateFileS3(draftKey) → activo = borrador
-          └─ confirmed: false ─► deleteFileFromS3(draftKey) → activo = última versión restante (tres casos, ver abajo)
+          ├─ confirmed: true  ─► activateFrom(draftKey) → activo = borrador
+          └─ confirmed: false ─► removeVersion(draftKey) → activo = última versión restante (tres casos, ver abajo)
 ```
+
+El ciclo de vida no cambia con M14 (29/10/2026); solo cambia dónde vive cada regla: `aws/` hace I/O (`deleteFileFromS3` como borrado de clave, `putJsonToS3`), `functions/activeVersion.js` decide (`planActiveAfterDelete`) y `routes/data.js` orquesta (`activateFrom`, `removeVersion`), con las mismas operaciones de S3 en el mismo orden. Ver [05](05-modulos.md).
 
 Operaciones de mantenimiento:
 

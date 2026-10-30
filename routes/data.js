@@ -7,14 +7,16 @@ const { tokenAuth } = require('../functions/tokenAuthentication');
 const { convertExcelToJson } = require('../functions/convertExcelToJson');
 const { formatFileName } = require('../functions/formatFileName');
 const { getNextVersion } = require('../functions/getNextVersion');
+const { provinciaFolderOf, activeKeyOf, provinciaOfKey, planActiveAfterDelete } = require('../functions/activeVersion');
 const { validateProvincia } = require('../functions/validateProvincia');
 const { isValidDataKey } = require('../functions/validateDataKey');
 const {
     uploadFileToS3,
     getFileFromS3,
     getMergedDataInS3Folder,
+    getBufferFromS3,
+    putJsonToS3,
     deleteFileFromS3,
-    updateFileS3,
     listFilesInS3Folder,
 } = require('../aws/awsS3connect');
 const { DATA_PATH, ACTIVE_PATH, RESERVED_SEGMENTS } = require('../config/s3Paths');
@@ -22,6 +24,25 @@ const { DATA_PATH, ACTIVE_PATH, RESERVED_SEGMENTS } = require('../config/s3Paths
 // Maximum accepted file size. multer rejects a size equal to fileSize, so 1 is added to accept exactly the maximum.
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_UPLOAD_BYTES + 1 } });
+
+// ─── Active version orchestration ────────────────────────────────────────────
+
+// Makes sourceKey (an .xlsx version) the active one: read xlsx → convert → write data/active/<provincia>.json.
+const activateFrom = async (sourceKey, provincia) => {
+    const buffer = await getBufferFromS3(sourceKey);
+    const { processedData } = await convertExcelToJson(buffer);
+    await putJsonToS3(activeKeyOf(provincia), processedData);
+};
+
+// Deletes a version and then fixes the active one according to what is left in the province folder.
+const removeVersion = async (key) => {
+    const provincia = provinciaOfKey(key);
+    await deleteFileFromS3(key);
+    const remaining = await listFilesInS3Folder(provinciaFolderOf(provincia));
+    const plan = planActiveAfterDelete(remaining);
+    if (plan.action === 'regenerate') await activateFrom(plan.key, provincia);
+    else if (plan.action === 'delete') await deleteFileFromS3(activeKeyOf(provincia));
+};
 
 // ─── Public routes ───────────────────────────────────────────────────────────
 
@@ -90,7 +111,8 @@ router.post('/upload', tokenAuth, upload.single('file'), async (req, res, next) 
         }
 
         const now = new Date();
-        const { version, provinciaFolder } = await getNextVersion(provincia, now);
+        const filesInFolder = await listFilesInS3Folder(provinciaFolderOf(provincia));
+        const { version, provinciaFolder } = getNextVersion(provincia, filesInFolder, now);
         const xlsxFileName = formatFileName(version, now);
         const draftKey = `${provinciaFolder}/${xlsxFileName}`;
 
@@ -134,12 +156,12 @@ router.post('/upload/confirm', tokenAuth, async (req, res, next) => {
 
         if (!confirmed) {
             // Cancel: delete the draft Excel from S3
-            await deleteFileFromS3(draftKey);
+            await removeVersion(draftKey);
             return res.json({ success: true, data: 'Upload cancelled. Draft removed.' });
         }
 
         // Confirm: activate the draft (read xlsx → convert → write active json)
-        await updateFileS3(draftKey);
+        await activateFrom(draftKey, provinciaOfKey(draftKey));
 
         res.json({ success: true, data: 'Files uploaded successfully after confirmation.' });
     } catch (error) {
@@ -158,7 +180,7 @@ router.post('/update-file', tokenAuth, async (req, res, next) => {
             return res.status(400).json({ success: false, error: 'Invalid fileName' });
         }
 
-        await updateFileS3(fileName);
+        await activateFrom(fileName, provinciaOfKey(fileName));
         res.json({ success: true, data: 'Active version updated successfully.' });
     } catch (error) {
         next(error);
@@ -176,7 +198,7 @@ router.post('/delete-file', tokenAuth, async (req, res, next) => {
             return res.status(400).json({ success: false, error: 'Invalid fileName' });
         }
 
-        await deleteFileFromS3(fileName);
+        await removeVersion(fileName);
         res.json({ success: true, data: 'File deleted successfully.' });
     } catch (error) {
         next(error);

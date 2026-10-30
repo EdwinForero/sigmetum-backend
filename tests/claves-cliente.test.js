@@ -2,7 +2,7 @@
 // (formato, NFC, sin tocar S3). Los nombres de los casos son los mismos que los del script.
 const { test, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
-const { appNueva, argsLog, llamar, reiniciar, spyTotal, validToken } = require('./helpers/simulados');
+const { appNueva, argsLog, llamar, reiniciar, seed, spyTotal, validToken } = require('./helpers/simulados');
 
 const PREFIX = '/api/v1';
 const app = appNueva();
@@ -11,9 +11,9 @@ beforeEach(reiniciar);
 const buena = 'data/Málaga/2026-10-28_v1.xlsx';
 const nfdKey = `data/${'Málaga'.normalize('NFD')}/2026-10-28_v1.xlsx`;
 const rutas = [
-    ['POST /upload/confirm (confirmar)', '/upload/confirm', (k) => ({ draftKey: k, confirmed: true }), 'draftKey', 'update'],
+    ['POST /upload/confirm (confirmar)', '/upload/confirm', (k) => ({ draftKey: k, confirmed: true }), 'draftKey', 'getBuffer'],
     ['POST /upload/confirm (cancelar)', '/upload/confirm', (k) => ({ draftKey: k, confirmed: false }), 'draftKey', 'del'],
-    ['POST /update-file', '/update-file', (k) => ({ fileName: k }), 'fileName', 'update'],
+    ['POST /update-file', '/update-file', (k) => ({ fileName: k }), 'fileName', 'getBuffer'],
     ['POST /delete-file', '/delete-file', (k) => ({ fileName: k }), 'fileName', 'del'],
 ];
 const invalidas = [
@@ -34,6 +34,8 @@ test('las listas de casos del criterio 14 no están vacías', () => {
 
 for (const [n, ruta, cuerpo, campo, log] of rutas) {
     test(`${n}: clave válida llega a S3 intacta`, async () => {
+        // Con una versión estándar restante, borrar regenera el activo (plan 'regenerate'): un solo borrado de la clave del cliente.
+        if (log === 'del') seed.list = [{ name: '2026-10-27_v1.xlsx', key: 'data/Málaga/2026-10-27_v1.xlsx' }];
         const r = await llamar(app, 'POST', `${PREFIX}${ruta}`, { token: validToken, body: cuerpo(buena) });
         assert.equal(r.status, 200, JSON.stringify(r.json));
         assert.equal(argsLog[log].length, 1);
