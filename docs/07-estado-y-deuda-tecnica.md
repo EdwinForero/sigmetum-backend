@@ -1,6 +1,6 @@
 # Estado actual y deuda técnica
 
-- Fecha del análisis: 30/09/2026 (actualizado 29/10/2026).
+- Fecha del análisis: 30/09/2026 (actualizado 30/10/2026).
 - Rama: `feature/sigmetum_v2`, último commit de código `c95a6fe` (29/10/2026).
 - Lo marcado **(verificado)** se comprobó leyendo el código, ejecutándolo o en `sigmetum-infra`; lo marcado **(por confirmar)** se deduce, pero no se probó contra un S3 real ni contra el despliegue.
 - Las normas que salen de estos hallazgos están en [buenas prácticas](guias/buenas-practicas-backend.md) y [seguridad](guias/seguridad.md).
