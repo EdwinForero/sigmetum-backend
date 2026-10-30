@@ -1,10 +1,11 @@
 // Base común de los controles del proyecto (docs-check.mjs y quality-check.mjs).
-// Solo funciones de lectura del repositorio, sin dependencias. No importa nada de plugins/:
+// Funciones de lectura del repositorio y un ejecutor de subprocesos con tiempo máximo (runWithTimeout), sin dependencias. No importa nada de plugins/:
 // el núcleo del plugin se instala en caché y los controles del proyecto no deben depender de él.
 
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, dirname, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { spawn, spawnSync } from 'node:child_process';
 
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -12,7 +13,7 @@ export const read = (file) => readFileSync(join(ROOT, file), 'utf8').replace(/\r
 export const posix = (file) => file.split(sep).join('/');
 export const unique = (list) => [...new Set(list)];
 
-const IGNORED = new Set(['node_modules', '.git', 'uploads']);
+const IGNORED = new Set(['node_modules', '.git']);
 export const walk = (dir) =>
   readdirSync(join(ROOT, dir)).flatMap((name) => {
     if (IGNORED.has(name)) return [];
@@ -46,6 +47,10 @@ export const unparsedRouteLines = () =>
         .flatMap((line, index) => (ROUTE_START.test(line) && !ROUTE_LINE.test(line) ? [{ file, line: index + 1, text: line.trim() }] : []))
     );
 
+// Líneas de un código fuente que declaran una ruta o un montaje (`app.get(`, `router.use(`...) al inicio de línea.
+// index.js solo arranca el servidor: si devuelve algo, hay rutas donde no deben estar. No cuenta `app.listen`.
+export const routesInIndex = (source) => source.split('\n').filter((line) => ROUTE_START.test(line)).map((line) => line.trim());
+
 export const routeDeclarations = () =>
   codeFiles
     .filter((file) => file.startsWith('routes/'))
@@ -69,6 +74,73 @@ export const declaredEnvVars = () => {
   const listFrom = (name) => [...(source.match(new RegExp(`const ${name} = \\[([\\s\\S]*?)\\];`))?.[1] ?? '').matchAll(/'([A-Z0-9_]+)'/g)].map((m) => m[1]);
   return { required: listFrom('required'), requiredLocal: listFrom('requiredLocal') };
 };
+
+// Ejecuta un comando (con shell, como spawnSync) y resuelve { status, stdout, stderr, error }. Si vence `timeout` (ms) o la salida
+// supera `maxBuffer` (bytes aprox.), MATA EL ÁRBOL de procesos (el timeout de spawnSync solo mata el shell y deja huérfanos a sus
+// hijos) y resuelve sin esperar a "close", con error.code ETIMEDOUT o ENOBUFS y status null.
+// Windows: `taskkill /T /F` (el código 128 es "ya terminado"). POSIX: grupo de procesos propio (`detached`) y kill(-pid); el grupo
+// también se libera si el proceso padre sale o recibe SIGINT mientras el hijo corre.
+export const runWithTimeout = (command, args, { timeout, maxBuffer } = {}) =>
+  new Promise((resolvePromise) => {
+    const windows = process.platform === 'win32';
+    const child = spawn(command, args, { cwd: ROOT, shell: true, detached: !windows, windowsHide: true });
+    let stdout = '';
+    let stderr = '';
+    let done = false;
+    let timer = null;
+
+    const killTree = () => {
+      if (child.pid === undefined) return;
+      try {
+        if (windows) spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+        else process.kill(-child.pid, 'SIGKILL');
+      } catch {
+        // El proceso ya había terminado.
+      }
+    };
+    const onExit = () => killTree();
+    const onSigint = () => {
+      killTree();
+      process.exit(130);
+    };
+    const finish = (result) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      // Soltar los flujos: si algún proceso sobreviviera, no debe mantener vivo al llamante.
+      child.stdout.destroy();
+      child.stderr.destroy();
+      child.unref();
+      if (!windows) {
+        process.off('exit', onExit);
+        process.off('SIGINT', onSigint);
+      }
+      resolvePromise({ stdout, stderr, ...result });
+    };
+    const abort = (code) => {
+      killTree();
+      finish({ status: null, error: { code } });
+    };
+
+    if (!windows) {
+      process.on('exit', onExit);
+      process.on('SIGINT', onSigint);
+    }
+    if (timeout !== undefined) timer = setTimeout(() => abort('ETIMEDOUT'), timeout);
+
+    const accumulate = (stream, append) => {
+      stream.setEncoding('utf8');
+      stream.on('data', (chunk) => {
+        if (done) return;
+        append(chunk);
+        if (maxBuffer !== undefined && stdout.length + stderr.length > maxBuffer) abort('ENOBUFS');
+      });
+    };
+    accumulate(child.stdout, (chunk) => (stdout += chunk));
+    accumulate(child.stderr, (chunk) => (stderr += chunk));
+    child.on('error', (error) => finish({ status: null, error }));
+    child.on('close', (status) => finish({ status }));
+  });
 
 // Imprime cada comprobación (✓/✗, sus problemas con "-" y sus notas con "·") y devuelve el número de problemas.
 export const printResults = (results) => {

@@ -9,7 +9,7 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { ROOT, read, walk, codeFiles, routeDeclarations, unparsedRouteLines, usedEnvVars, declaredEnvVars, printResults } from './lib/repo.mjs';
+import { ROOT, read, walk, codeFiles, routeDeclarations, unparsedRouteLines, usedEnvVars, declaredEnvVars, printResults, runWithTimeout } from './lib/repo.mjs';
 
 const run = (command, args, options = {}) => spawnSync(command, args, { cwd: ROOT, encoding: 'utf8', shell: true, ...options });
 
@@ -205,7 +205,7 @@ const ACCEPTED_ADVISORIES = {};
 // omitidos ni pendientes, al menos MIN_TESTS tests y presentes las suites de la pila (estructura-rutas) y de las
 // rutas protegidas (rutas-protegidas). Si añades tests, sube MIN_TESTS; si quitas alguno, hay que justificarlo.
 
-const MIN_TESTS = 1076;
+const MIN_TESTS = 1094;
 // Un test de cada suite imprescindible: el reporter TAP no nombra los archivos, así que se comprueba por existencia
 // del archivo y por este test centinela (su nombre exacto debe aparecer como superado).
 const REQUIRED_SUITES = {
@@ -215,7 +215,7 @@ const REQUIRED_SUITES = {
 
 {
   const problems = [];
-  const suite = run('node', ['--test', '--test-reporter=tap', '"tests/**/*.test.js"'], { timeout: 180000, maxBuffer: 64 * 1024 * 1024 });
+  const suite = await runWithTimeout('node', ['--test', '--test-reporter=tap', '"tests/**/*.test.js"'], { timeout: 180000, maxBuffer: 64 * 1024 * 1024 });
   const output = `${suite.stdout ?? ''}`;
   const counter = (name) => {
     const match = output.match(new RegExp(`^# ${name} (\\d+)\\s*$`, 'm'));

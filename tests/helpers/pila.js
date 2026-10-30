@@ -1,7 +1,7 @@
 // Recorre la pila de Express 4 de forma recursiva: las capas con .route dan método, ruta y manejadores; las capas
 // con name 'router' se recorren entrando en layer.handle.stack; una capa que no es ruta y cuyo manejador es
 // tokenAuth es un use(tokenAuth) a nivel de router.
-const { tokenAuth } = require('../../functions/tokenAuthentication');
+const { tokenAuth } = require('../../middleware/tokenAuthentication');
 
 const declaredRoutes = (app) => {
     if (!app._router || !Array.isArray(app._router.stack)) {

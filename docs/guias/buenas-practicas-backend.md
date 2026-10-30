@@ -24,10 +24,10 @@ Un cambio está terminado cuando pasan estos comandos y la documentación está 
 | Carpeta | Va aquí | No va aquí | Estado |
 |---|---|---|---|
 | `routes/` | La capa HTTP: leer y **validar** la entrada, llamar a la lógica, dar forma a la respuesta, `next(error)` | Lógica de negocio, acceso directo a S3 | **No cumple del todo**: las rutas llaman a `aws/` y a `functions/`, pero `routes/data.js` conserva la orquestación de la versión activa en dos funciones privadas (`activateFrom` y `removeVersion`) y `POST /upload` concentra bastante (conversión, listado, versión, dos subidas). Decisión del usuario (M14, 29/10/2026): no hay capa de servicio |
-| `functions/` | Lógica **pura y probable**: recibe datos y devuelve datos (`convertExcelToJson`, `formatFileName`, `getNextVersion`, `activeVersion`) | Llamadas a S3, lectura de `process.env` al cargar el módulo, `Date` sin poder inyectarla | **Cumple en las funciones de datos** (M14 resuelto el 29/10/2026): `getNextVersion` y `activeVersion` no importan `aws/` (lo comprueba `tests/capas-importaciones.test.js`) y la fecha se inyecta (`now = new Date()` como valor por defecto; A1 resuelto). **Excepciones (B7)**: `tokenAuthentication.js` es un middleware y `userAuthentication.js` un manejador de ruta que lee `process.env` al cargar el módulo |
+| `functions/` | Lógica **pura y probable**: recibe datos y devuelve datos (`convertExcelToJson`, `formatFileName`, `getNextVersion`, `activeVersion`) | Llamadas a S3, lectura de `process.env` al cargar el módulo, `Date` sin poder inyectarla | **Cumple en las funciones de datos** (M14 resuelto el 29/10/2026): `getNextVersion` y `activeVersion` no importan `aws/` (lo comprueba `tests/capas-importaciones.test.js`) y la fecha se inyecta (`now = new Date()` como valor por defecto; A1 resuelto). B7 resuelto el 30/10/2026: el middleware `tokenAuth` pasó a `middleware/` y el manejador de login a `routes/auth.js`, así que `functions/` ya no tiene excepciones |
 | `aws/` | **La única capa que habla con S3**: leer, escribir, listar, borrar, firmar URLs | Decisiones de negocio (qué versión activar, cuándo reconvertir un Excel) | **Cumple** (M14 resuelto el 29/10/2026): solo hace I/O (`deleteFileFromS3` borra una clave, `putJsonToS3` escribe un JSON); no importa `functions/` ni decide la versión activa |
 | `config/` | Constantes de rutas de S3 (`s3Paths.js`) y validación del entorno (`validateEnv.js`) | Lógica | Cumple |
-| `middleware/` | Middlewares transversales (hoy, `errorHandler`) | Manejadores de una ruta concreta | `tokenAuth` vive en `functions/` (B7) |
+| `middleware/` | Middlewares transversales (`errorHandler`, `notFound`, `tokenAuth`) | Manejadores de una ruta concreta; importar `aws/` | **Cumple** (B7 resuelto el 30/10/2026): `tokenAuth` vive aquí y `tests/capas-importaciones.test.js` vigila que `middleware/` no importe `aws/` |
 | `app.js` | La app Express: middlewares, montaje de rutas, `notFound` y `errorHandler`; se exporta sin abrir puerto | Lógica de negocio, `dotenv`, `validateEnv`, `listen` | Cumple (M13, 28/10/2026) |
 | `index.js` | Arranque: `dotenv`, validación del entorno, `require('./app')` y `listen` | Lógica, middlewares y rutas | Cumple |
 
@@ -106,7 +106,7 @@ Cómo validar: **una función de validación por forma de entrada**, con una lis
 
 - **Toda variable nueva** entra por `config/validateEnv.js` (`required`; o `requiredLocal` si solo hace falta con `NODE_ENV=local`), por `.env.example` (con el valor **vacío** si es un secreto) y por el entorno de Beanstalk de `sigmetum-infra`. Las opcionales (`NODE_ENV`, `PORT`, `API_PREFIX`) se declaran en `OPTIONAL_ENV` de `scripts/quality-check.mjs` con su motivo. Procedimiento: skill `env-var-change`.
 - **Se valida el valor, no solo que exista.** `validateEnv` comprueba, además de la presencia, que `ADMIN_PASSWORD` sea un hash bcrypt completo, que `JWT_SECRET` tenga al menos 32 caracteres y que `JWT_EXPIRATION` sea una duración con unidad y positiva (M15 resuelto el 28/10/2026). Es estricto (el arranque falla) salvo con `NODE_ENV` exactamente `local` o `test`, donde solo avisa. Los mensajes nunca llevan el valor.
-- Se lee `process.env` **al usarse o al arrancar, de forma centralizada**, no dispersa. Hoy se lee al cargar los módulos (`userAuthentication.js`) y dentro de las funciones (`awsS3connect.js`).
+- Se lee `process.env` **al usarse o al arrancar, de forma centralizada**, no dispersa. Hoy se lee al cargar los módulos (`routes/auth.js`) y dentro de las funciones (`awsS3connect.js`).
 - Nada de valores por defecto que oculten una configuración ausente en producción.
 
 ## 9. Versionado de la API
@@ -196,7 +196,7 @@ No los repitas al escribir código nuevo:
 
 | Patrón | Dónde | Hallazgo |
 |---|---|---|
-| Manejador `async` sin `try/catch` | (`functions/userAuthentication.js` lo tenía; corregido el 28/10/2026) | A7 resuelto |
+| Manejador `async` sin `try/catch` | (el manejador de login, hoy en `routes/auth.js`, lo tenía; corregido el 28/10/2026) | A7 resuelto |
 | Leer `req.file.buffer` o `term.trim()` sin validar | (corregido el 28/10/2026 en las rutas listadas de A3; quedan las entradas no revisadas) | A3 |
 | Dos fuentes de fecha para el versionado | `getNextVersion.js` y `formatFileName.js` | A1 (resuelto el 28/10/2026) |
 | Tragarse todos los errores y devolver un valor por defecto | `getTextJsonS3` | A6 |
@@ -208,7 +208,6 @@ No los repitas al escribir código nuevo:
 | Descargas secuenciales en un bucle | `getMergedDataInS3Folder` | M7 |
 | Leer, modificar y escribir un objeto entero sin control de concurrencia | `uploadTextToJsonS3`, `deleteTermFromS3` | M1 |
 | `listObjectsV2` sin paginar | `listFilesInS3Folder` | M10 |
-| Middleware fuera de `middleware/` | `functions/tokenAuthentication.js` | B7 |
 
 ## 16. Mantener esta guía
 

@@ -33,9 +33,9 @@ Monolito Express pequeño, sin base de datos. S3 actúa como única capa de pers
 | Arranque | `index.js`, `config/` | `index.js` carga `.env`, valida variables y escucha en el puerto |
 | Aplicación | `app.js` | Construye y exporta la app Express (middlewares, rutas, `notFound`, `errorHandler`) sin abrir puerto |
 | Rutas (controladores) | `routes/` | Validan entrada, orquestan llamadas, dan forma a la respuesta |
-| Lógica auxiliar | `functions/` | Autenticación, parseo de Excel, nombres y versiones de fichero |
+| Lógica auxiliar | `functions/` | Parseo de Excel, nombres y versiones de fichero |
 | Acceso a datos | `aws/awsS3connect.js` | Único punto de contacto con S3 |
-| Errores | `middleware/errorHandler.js`, `middleware/notFound.js` | `errorHandler` traduce excepciones a respuestas JSON uniformes; `notFound` responde el 404 con el mismo envoltorio |
+| Errores y autenticación | `middleware/errorHandler.js`, `middleware/notFound.js`, `middleware/tokenAuthentication.js` | `errorHandler` traduce excepciones a respuestas JSON uniformes; `notFound` responde el 404 con el mismo envoltorio; `tokenAuth` verifica el JWT de las rutas protegidas |
 
 Las rutas no hablan con S3 directamente: siempre pasan por `awsS3connect.js`. Las rutas de S3 (prefijos) no se escriben a mano: salen de `config/s3Paths.js`.
 

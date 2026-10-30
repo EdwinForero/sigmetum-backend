@@ -44,12 +44,10 @@ sigmetum-backend/
 │   ├── validateEnv.js           # Validación de variables de entorno al arrancar
 │   └── s3Paths.js               # Constantes de rutas (prefijos) dentro del bucket
 ├── routes/
-│   ├── auth.js                  # Login y verificación de token
+│   ├── auth.js                  # Login (bcrypt + JWT) y verificación de token
 │   ├── data.js                  # Datos de series de vegetación (Excel/JSON, versiones)
 │   └── content.js               # Galería, términos, email de contacto
 ├── functions/
-│   ├── userAuthentication.js    # Handler de login (bcrypt + JWT)
-│   ├── tokenAuthentication.js   # Middleware de verificación JWT
 │   ├── convertExcelToJson.js    # Parser de Excel con columnas fijas
 │   ├── activeVersion.js         # Reglas de la versión activa (carpeta, clave del activo y plan tras borrar)
 │   ├── formatFileName.js        # Nombre de fichero versionado por fecha
@@ -64,6 +62,7 @@ sigmetum-backend/
 │   └── awsS3connect.js          # Todas las operaciones contra S3
 ├── middleware/
 │   ├── errorHandler.js          # Manejador de errores centralizado
+│   ├── tokenAuthentication.js   # Middleware de verificación JWT (tokenAuth)
 │   └── notFound.js              # 404 con envoltorio para rutas y métodos no definidos
 ├── scripts/
 │   ├── docs-check.mjs           # Comprueba que docs/ coincide con el código (npm run docs:check)

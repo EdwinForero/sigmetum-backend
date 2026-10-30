@@ -1,5 +1,5 @@
-// Dirección de las dependencias entre capas (M14): aws/ no importa de functions/ (salvo PERMITIDAS, hoy vacía) y functions/ no
-// importa aws/. Recorre TODO aws/ y functions/ y resuelve cada especificador relativo contra la raíz del repositorio.
+// Dirección de las dependencias entre capas (M14): aws/ no importa de functions/ (salvo PERMITIDAS, hoy vacía), y functions/ y
+// middleware/ no importan aws/. Recorre TODO aws/, functions/ y middleware/ y resuelve cada especificador relativo contra la raíz del repositorio.
 // config/ no se restringe: la guía permite aws → config y functions → config.
 const { describe, test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -53,6 +53,7 @@ const problemasDe = (archivo, fuente) => {
         if (destino === null) continue;
         const capaDestino = destino.split('/')[0];
         if (capa === 'functions' && capaDestino === 'aws') problemas.push(`${rel(archivo)}: functions/ importa ${destino}`);
+        if (capa === 'middleware' && capaDestino === 'aws') problemas.push(`${rel(archivo)}: middleware/ importa ${destino}`);
         if (capa === 'aws' && capaDestino === 'functions' && !PERMITIDAS.includes(destino)) {
             problemas.push(`${rel(archivo)}: aws/ importa ${destino}`);
         }
@@ -66,15 +67,17 @@ const archivosJs = (carpeta) => fs.readdirSync(carpeta, { withFileTypes: true })
     return /\.(?:js|cjs|mjs)$/.test(entrada.name) ? [ruta] : [];
 });
 
-describe('capas reales: aws/ y functions/', () => {
+describe('capas reales: aws/, functions/ y middleware/', () => {
     const aws = archivosJs(path.join(ROOT, 'aws'));
     const functions = archivosJs(path.join(ROOT, 'functions'));
+    const middleware = archivosJs(path.join(ROOT, 'middleware'));
 
-    test('se recorren archivos de las dos carpetas', () => {
+    test('se recorren archivos de las tres carpetas', () => {
         assert.ok(aws.length > 0, 'aws/ sin archivos');
         assert.ok(functions.length > 0, 'functions/ sin archivos');
+        assert.ok(middleware.length > 0, 'middleware/ sin archivos');
     });
-    for (const archivo of [...aws, ...functions]) {
+    for (const archivo of [...aws, ...functions, ...middleware]) {
         test(`${rel(archivo)} respeta la dirección de las dependencias`, () => {
             assert.deepEqual(problemasDe(archivo, fs.readFileSync(archivo, 'utf8')), []);
         });
@@ -84,6 +87,7 @@ describe('capas reales: aws/ y functions/', () => {
 describe('detector de importaciones (fuentes en cadena)', () => {
     const enAws = path.join(ROOT, 'aws', 'x.js');
     const enFunctions = path.join(ROOT, 'functions', 'x.js');
+    const enMiddleware = path.join(ROOT, 'middleware', 'x.js');
 
     test('comilla simple', () => {
         assert.deepEqual(importacionesDe("const a = require('../functions/foo');"), [{ spec: '../functions/foo' }]);
@@ -136,6 +140,21 @@ describe('detector de importaciones (fuentes en cadena)', () => {
     });
     test('una importación no literal falla explícitamente', () => {
         const problemas = problemasDe(enFunctions, 'const a = require(nombre);');
+        assert.equal(problemas.length, 1);
+        assert.match(problemas[0], /no literal/);
+    });
+    test('middleware/ importando aws/ falla', () => {
+        assert.equal(problemasDe(enMiddleware, "require('../aws/awsS3connect');").length, 1);
+    });
+    test('middleware/: un camino con .. que acaba en aws/ falla', () => {
+        assert.equal(problemasDe(enMiddleware, "require('../middleware/../aws/awsS3connect');").length, 1);
+    });
+    test('middleware/ puede importar config/ y su propia capa', () => {
+        assert.deepEqual(problemasDe(enMiddleware, "require('../config/s3Paths');"), []);
+        assert.deepEqual(problemasDe(enMiddleware, "require('./errorHandler');"), []);
+    });
+    test('middleware/: una importación no literal falla explícitamente', () => {
+        const problemas = problemasDe(enMiddleware, 'const a = require(nombre);');
         assert.equal(problemas.length, 1);
         assert.match(problemas[0], /no literal/);
     });

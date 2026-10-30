@@ -4,7 +4,7 @@ const path = require('path');
 const { randomUUID } = require('crypto');
 const router = express.Router();
 
-const { tokenAuth } = require('../functions/tokenAuthentication');
+const { tokenAuth } = require('../middleware/tokenAuthentication');
 const { convertExcelToJson } = require('../functions/convertExcelToJson');
 const { formatFileName } = require('../functions/formatFileName');
 const { getNextVersion } = require('../functions/getNextVersion');

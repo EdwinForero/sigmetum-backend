@@ -1,6 +1,6 @@
 // B8: el algoritmo del JWT queda fijado a HS256 al firmar y al verificar.
 const { TEST_SECRET } = require('./helpers/entorno');
-// userAuthentication.js lee el entorno al cargarse: el hash se fija antes de crear la app.
+// routes/auth.js lee el entorno al cargarse: el hash se fija antes de crear la app.
 process.env.ADMIN_PASSWORD = require('bcrypt').hashSync('x', 4);
 const { test, describe } = require('node:test');
 const assert = require('node:assert/strict');

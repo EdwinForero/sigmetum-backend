@@ -6,7 +6,7 @@
 
 import { readFileSync, existsSync } from 'node:fs';
 import { join, dirname, relative, resolve, basename } from 'node:path';
-import { ROOT, read, posix, unique, walk, codeFiles, routeDeclarations, usedEnvVars, declaredEnvVars, printResults } from './lib/repo.mjs';
+import { ROOT, read, posix, unique, walk, codeFiles, routeDeclarations, routesInIndex, usedEnvVars, declaredEnvVars, printResults } from './lib/repo.mjs';
 
 const FRONTEND_DOC = resolve(ROOT, '..', 'sigmetum-frontend', 'docs', 'integracion', 'para-backend.md');
 
@@ -196,6 +196,7 @@ const anchorsOf = (text) => {
   }
   check('Rutas y endpoints (routes/*.js e app.js → 04-api.md)', problems);
 }
+check('index.js no declara rutas (solo arranca el servidor)', routesInIndex(read('index.js')).map((line) => `index.js declara una ruta: ${line}`));
 
 // ─── 4. Variables de entorno ────────────────────────────────────────────────
 

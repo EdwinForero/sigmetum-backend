@@ -9,7 +9,7 @@ const nodePlugin = require('eslint-plugin-n');
 // Las reglas y su motivo están en docs/guias/buenas-practicas-backend.md y docs/guias/seguridad.md.
 
 module.exports = [
-  { ignores: ['node_modules/**', 'uploads/**'] },
+  { ignores: ['node_modules/**'] },
   js.configs.recommended,
   security.configs.recommended,
   {

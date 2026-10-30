@@ -96,12 +96,7 @@
       "docs/05-modulos.md",
       "docs/06-almacenamiento-s3.md"
     ],
-    "functions/tokenAuthentication.js": [
-      "docs/03-configuracion.md",
-      "docs/04-api.md",
-      "docs/05-modulos.md"
-    ],
-    "functions/userAuthentication.js": [
+    "middleware/tokenAuthentication.js": [
       "docs/03-configuracion.md",
       "docs/04-api.md",
       "docs/05-modulos.md"
@@ -142,8 +137,7 @@
     "functions/convertExcelToJson.js",
     "functions/formatFileName.js",
     "functions/getNextVersion.js",
-    "functions/tokenAuthentication.js",
-    "functions/userAuthentication.js",
+    "middleware/tokenAuthentication.js",
     ".env.example",
     "package.json",
     ".github/**"

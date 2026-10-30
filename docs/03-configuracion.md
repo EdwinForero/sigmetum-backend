@@ -60,7 +60,7 @@ Política: es **estricta** (el arranque falla con un error que nombra variable y
 
 ### Generar el hash de `ADMIN_PASSWORD`
 
-`userAuthentication.js` hace `bcrypt.compare(password, ADMIN_PASSWORD)`, así que la variable debe contener un hash:
+`routes/auth.js` (manejador de login) hace `bcrypt.compare(password, ADMIN_PASSWORD)`, así que la variable debe contener un hash:
 
 ```bash
 node -e "require('bcrypt').hash('mi-contraseña', 10).then(console.log)"

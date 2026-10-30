@@ -4,7 +4,7 @@ const nodemailer = require('nodemailer');
 const rateLimit = require('express-rate-limit');
 const router = express.Router();
 
-const { tokenAuth } = require('../functions/tokenAuthentication');
+const { tokenAuth } = require('../middleware/tokenAuthentication');
 const { validateContactMessage } = require('../functions/validateContactMessage');
 const { isValidImageKey } = require('../functions/validateImageKey');
 const { validateImageUpload } = require('../functions/validateImageUpload');

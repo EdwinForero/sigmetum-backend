@@ -72,6 +72,7 @@ Todos los routers declaran sus rutas en un único `router`. `tokenAuth` es el **
 | Elemento | Descripción |
 |---|---|
 | `loginLimiter` | `rateLimit({ windowMs: 15 min, limit: 10 })` con cabeceras estándar `RateLimit-*` |
+| `userAuth(req, res, next)` (privada, no se exporta) | Manejador de login, movido desde `functions/userAuthentication.js` el 30/10/2026 (B7) sin cambiar su comportamiento. Construye en memoria un array `users` con un único usuario `{ id: 1, username: ADMIN_USERNAME, password: ADMIN_PASSWORD }`. Todo el cuerpo va dentro de `try/catch`; un fallo inesperado llega a `errorHandler` con `next(error)`. Si `username` o `password` no son cadenas (ausentes, número, objeto, `null`) → 400 `Username and password are required and must be strings`. Busca por `username`; si no existe → 401. `bcrypt.compare(password, user.password)`; si falla → 401 (**`ADMIN_PASSWORD` debe ser un hash bcrypt**). Firma `jwt.sign({ userId }, JWT_SECRET, { expiresIn: JWT_EXPIRATION, algorithm: 'HS256' })` y responde `{ success: true, data: { token } }`. `JWT_SECRET`, `JWT_EXPIRATION`, `ADMIN_USERNAME` y `ADMIN_PASSWORD` se leen al cargar `routes/auth.js`, no en cada petición |
 | `POST /log` | `loginLimiter` → `userAuth` |
 | `GET /auth` | `tokenAuth` → responde `Authorized` |
 
@@ -109,29 +110,6 @@ Todos los routers declaran sus rutas en un único `router`. `tokenAuth` es el **
 ---
 
 ## `functions/`
-
-### `userAuthentication.js` → `userAuth(req, res, next)`
-
-Handler de login (no es middleware: solo llama a `next(error)` ante un fallo inesperado).
-
-- Construye en memoria un array `users` con un único usuario `{ id: 1, username: ADMIN_USERNAME, password: ADMIN_PASSWORD }`.
-- Todo el cuerpo va dentro de `try/catch`; un fallo inesperado llega a `errorHandler` con `next(error)`.
-- Si `username` o `password` no son cadenas (ausentes, número, objeto, `null`) → 400 `Username and password are required and must be strings`.
-- Busca por `username`; si no existe → 401.
-- `bcrypt.compare(password, user.password)`; si falla → 401. **`ADMIN_PASSWORD` debe ser un hash bcrypt.**
-- Firma `jwt.sign({ userId }, JWT_SECRET, { expiresIn: JWT_EXPIRATION, algorithm: 'HS256' })` y responde `{ token }`.
-
-Las variables se leen al cargar el módulo, no en cada petición.
-
-### `tokenAuthentication.js` → `tokenAuth(req, res, next)`
-
-Middleware.
-
-- Lee `Authorization`, toma lo que va tras el primer espacio (`Bearer <token>`).
-- Sin token → 401 `No token provided`.
-- `jwt.verify` con `JWT_SECRET`: error → 401 `Token expired` o `Invalid token`.
-- Éxito → `req.user = payload` y `next()`.
-- `jwt.verify` fija `algorithms: ['HS256']` (B8): un token firmado con otro algoritmo o con `alg: none` da 401 `Invalid token`; los emitidos antes siguen valiendo porque `jsonwebtoken` firma con HS256 por defecto.
 
 ### `validateImageKey.js` → `isValidImageKey(key)`
 
@@ -216,7 +194,7 @@ Reglas de la versión activa (M14, 29/10/2026). Funciones puras: importan solo `
 - `provinciaOfDraftKey(draftKey)`: el tercer segmento de `data/drafts/{prov}/{uuid}.xlsx`.
 - `planActiveAfterDelete(remaining)`: recibe lo que queda en la carpeta (`[{ name, key }]`) y devuelve una acción para el activo, apoyada en `latestVersionFile`: `{ action: 'regenerate', key }` si queda alguna versión estándar (la más reciente); `{ action: 'delete' }` si no queda ningún `.xlsx` (la comprobación es sensible a mayúsculas); `{ action: 'keep' }` si quedan `.xlsx` pero ninguno con nombre estándar (el activo no se toca).
 
-**Dirección de dependencias:** `routes/` → `aws/` y `functions/`; `functions/` → `config/`; `aws/` → `config/`. `aws/` no importa `functions/` ni `functions/` importa `aws/` (lo comprueba `tests/capas-importaciones.test.js`).
+**Dirección de dependencias:** `routes/` → `aws/`, `functions/` y `middleware/`; `functions/` → `config/`; `aws/` → `config/`; `middleware/` → `config/` y su propia capa. `aws/` no importa `functions/`, `functions/` no importa `aws/` y `middleware/` no importa `aws/` (lo comprueba `tests/capas-importaciones.test.js`, que desde B7 recorre también `middleware/`).
 
 ### `versionName.js` → `parseVersionName(name)` y `latestVersionFile(files)`
 
@@ -282,6 +260,22 @@ Crea un único cliente `S3` (clase agregada de SDK v3) con `AWS_REGION` y, en lo
 ### Versión activa
 
 `aws/` ya no decide qué versión es la activa (M14, 29/10/2026): `updateFileS3` se eliminó y la sustituyen `activateFrom` (`routes/data.js`) con `getBufferFromS3` y `putJsonToS3`.
+
+---
+
+## `middleware/`
+
+Middlewares transversales: `errorHandler`, `notFound` y `tokenAuth`. `middleware/` puede importar `config/` y su propia capa, no `aws/`.
+
+## `middleware/tokenAuthentication.js` → `tokenAuth(req, res, next)`
+
+Movido desde `functions/tokenAuthentication.js` el 30/10/2026 (B7), sin cambios de comportamiento. Lo importan `routes/auth.js`, `routes/data.js` y `routes/content.js`.
+
+- Lee `Authorization`, toma lo que va tras el primer espacio (`Bearer <token>`).
+- Sin token → 401 `No token provided`.
+- `jwt.verify` con `JWT_SECRET`: error → 401 `Token expired` o `Invalid token`.
+- Éxito → `req.user = payload` y `next()`.
+- `jwt.verify` fija `algorithms: ['HS256']` (B8): un token firmado con otro algoritmo o con `alg: none` da 401 `Invalid token`; los emitidos antes siguen valiendo porque `jsonwebtoken` firma con HS256 por defecto.
 
 ---
 

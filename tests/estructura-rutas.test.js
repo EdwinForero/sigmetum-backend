@@ -11,7 +11,7 @@ const app = appNueva();
 // notFound y errorHandler se requieren después de appNueva(): son los mismos módulos que cargó app.js.
 const notFound = require('../middleware/notFound');
 const errorHandler = require('../middleware/errorHandler');
-const { tokenAuth } = require('../functions/tokenAuthentication');
+const { tokenAuth } = require('../middleware/tokenAuthentication');
 const authRoutes = require('../routes/auth');
 const dataRoutes = require('../routes/data');
 const contentRoutes = require('../routes/content');
