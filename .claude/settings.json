@@ -5,12 +5,52 @@
         "source": "github",
         "repo": "anthropics/claude-plugins-official"
       }
+    },
+    "superpowers-marketplace": {
+      "source": {
+        "source": "github",
+        "repo": "obra/superpowers-marketplace"
+      }
+    },
+    "understand-anything": {
+      "source": {
+        "source": "github",
+        "repo": "Egonex-AI/Understand-Anything"
+      }
+    },
+    "diagram-design": {
+      "source": {
+        "source": "github",
+        "repo": "cathrynlavery/diagram-design"
+      }
+    },
+    "i-have-adhd": {
+      "source": {
+        "source": "github",
+        "repo": "ayghri/i-have-adhd"
+      }
     }
   },
   "enabledPlugins": {
-    "superpowers@claude-plugins-official": true,
+    "superpowers@superpowers-marketplace": true,
     "deploy-on-aws@claude-plugins-official": true,
     "aws-startup-advisor@claude-plugins-official": true,
-    "42crunch-api-security-testing@claude-plugins-official": true
-  }
+    "42crunch-api-security-testing@claude-plugins-official": true,
+    "understand-anything@understand-anything": true,
+    "diagram-design@diagram-design": true,
+    "i-have-adhd@i-have-adhd": true
+  },
+  "permissions": {
+    "ask": [
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(git add:*)",
+      "Bash(git stash:*)",
+      "PowerShell(git commit *)",
+      "PowerShell(git push *)",
+      "PowerShell(git add *)",
+      "PowerShell(git stash *)"
+    ]
+  },
+  "autoMemoryEnabled": false
 }

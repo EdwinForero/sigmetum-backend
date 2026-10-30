@@ -5,9 +5,6 @@ node_modules/
 .env*
 !.env.example
 
-# Uploads temporales
-uploads/
-
 # Logs
 *.log
 npm-debug.log*
@@ -26,3 +23,11 @@ Thumbs.db
 
 # Tests
 coverage/
+
+# Salidas de herramientas de análisis y espacio de trabajo temporal de agentes
+.understand-anything/
+.ua/
+.superpowers/
+
+# Ajustes personales de Claude Code (cada desarrollador tiene los suyos; no se comparten)
+.claude/settings.local.json

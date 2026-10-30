@@ -3,32 +3,34 @@
 Documento para quien mantiene `sigmetum-infra`. Explica **qué necesita este backend para arrancar y funcionar** en cada entorno. Sigue la convención de [../guias/mantenimiento.md](../guias/mantenimiento.md#6-avisar-al-frontend-y-a-la-infraestructura).
 
 - Lo verificado contra el código de Terraform está marcado **(verificado)**; lo que depende de la cuenta real de AWS, **(por confirmar)**.
-- Fecha de la verificación: 30/09/2026 (actualizado 03/10/2026). Backend: rama `feature/sigmetum_v2`. Infraestructura: rama `feature/testing`, commit `19bdde3`.
+- Fecha de la verificación: 30/09/2026 (actualizado 04/10/2026). Backend: rama `feature/sigmetum_v2`. Infraestructura: rama `feature/testing`, commit `f35dd3a`.
 - No se han leído secretos ni `terraform.tfvars`: solo nombres de variables y los `.tfvars.example`.
 
 ## 1. Resumen
 
 | Id | Problema | Efecto |
 |---|---|---|
-| **I1** | `HealthCheckPath` de Beanstalk es `/`, pero el backend solo responde `200` en `/healthcheck` (`/` no tiene ruta definida) | El entorno puede figurar como no saludable **(verificado en el código de ambos repos; por confirmar en el entorno real, porque Express podría responder algo distinto a un healthcheck fallido)** |
-| **I2** | ~~No hay `trust proxy` configurado en el backend~~ | **Resuelto (03/10/2026)**: `app.set('trust proxy', 1)` añadido en `index.js`. Cadena verificada: ALB → nginx (loopback) → Express; 1 salto externo. El rate-limiter de login ya lee la IP real del cliente. |
-| **I3** | `terraform.tfvars.example` de `dev` y `prod` **ya incluyen** `ALLOWED_ORIGIN`, `ADMIN_USERNAME` y `ADMIN_PASSWORD` **(verificado, 30/09/2026)** | El documento del frontend (`para-infra.md` de `sigmetum-frontend`, I5) decía que faltaban: **puede estar resuelto**. Confirmar con quien mantiene `sigmetum-infra` si el `terraform.tfvars` real (no el ejemplo) también las tiene aplicadas |
-| **I4** | `load_balancer_type = "single"` en dev, es decir, **sin ALB**: `backend_url` se construye como `http://${module.beanstalk.endpoint_url}` (ver `environments/dev/main.tf`) | El backend de dev se sirve por HTTP; si el frontend de dev se sirve por HTTPS (Amplify), el navegador bloquea las peticiones por contenido mixto (coincide con `frontend:I4`) |
-| **I5** | No hay regla de grupo de seguridad explícita para la salida a `smtp.gmail.com:587` en el módulo `beanstalk` | Se asume la salida por defecto del grupo de seguridad del VPC por defecto (normalmente abierta a todo el tráfico saliente), pero no está verificado en el código **(por confirmar)** |
-| **I6** | No hay ningún paso de despliegue automatizado para el backend: el README de `sigmetum-infra` dice "sube un zip por consola o CI/CD" | El despliegue es manual hoy; no hay pipeline que aplique `npm ci && npm run lint && npm run quality` antes de subir el paquete |
+| ~~**I1**~~ | ~~`HealthCheckPath` de Beanstalk es `/`~~ | **Resuelto (feature/testing de infra)**: `HealthCheckPath = "/healthcheck"` en `modules/beanstalk/main.tf` **(verificado)** |
+| ~~**I2**~~ | ~~No hay `trust proxy` configurado en el backend~~ | **Resuelto (03/10/2026)**: `app.set('trust proxy', 1)` añadido en `index.js`. Cadena verificada: nginx (loopback) → Express; 1 salto. El rate-limiter de login ya lee la IP real del cliente. |
+| ~~**I3**~~ | ~~`app_env_vars` no incluía `ALLOWED_ORIGIN`, `ADMIN_USERNAME` ni `ADMIN_PASSWORD`~~ | **Resuelto (30/09/2026)**: los `.tfvars.example` de `dev` y `prod` incluyen todas las variables obligatorias más `PORT` **(verificado)** |
+| ~~**I4**~~ | ~~dev sin HTTPS: contenido mixto con el frontend en Amplify~~ | **Resuelto (feature/testing de infra)**: `enable_cdn = true` en dev añade CloudFront como terminador HTTPS delante de Beanstalk; `backend_url` ya apunta a `module.beanstalk.backend_cdn_url` **(verificado)** |
+| **I5** | No hay regla de grupo de seguridad explícita para la salida a `smtp.gmail.com:587` | Se asume la salida por defecto del VPC por defecto (normalmente abierta), pero no está verificado en el entorno real **(por confirmar)** |
+| ~~**I6**~~ | ~~Sin pipeline de despliegue automatizado para el backend~~ | **Resuelto (04/10/2026)**: módulo `backend-ci-iam` en infra crea el rol OIDC para GitHub Actions; el workflow del backend ya despliega en Beanstalk automáticamente al hacer push a la rama de dev |
 
 ## 2. Variables de entorno
 
 Nombres únicamente; nunca valores reales. Fuente: `config/validateEnv.js` **(verificado)**.
 
+**Condición previa de despliegue (M15, 28/10/2026), a cargo del usuario y por confirmar.** `validateEnv` valida ahora el valor de `JWT_SECRET` (mínimo 32 caracteres), `ADMIN_PASSWORD` (hash bcrypt completo) y `JWT_EXPIRATION` (con unidad y mayor que cero) y es **estricto salvo con `NODE_ENV` exactamente `local` o `test`**: sin `NODE_ENV` (el caso de los `.tfvars.example`) o con cualquier otro valor, un valor incumplidor hace que el backend **no arranque**. Antes de desplegar hay que comprobar que los valores reales de dev y prod en Beanstalk cumplen las reglas, y cuál es su `NODE_ENV` real. **No se han visto valores reales** de ninguna de estas variables (por confirmar).
+
 ### Obligatorias en todos los entornos
 
 | Variable | Secreto | Notas |
 |---|---|---|
-| `JWT_SECRET` | Sí | Ver [../guias/seguridad.md](../guias/seguridad.md#s2-autenticación): largo y aleatorio, distinto por entorno |
-| `JWT_EXPIRATION` | No | Formato de `jsonwebtoken` (p. ej. `8h`). El `.tfvars.example` de infra usa `10m`; el `.env.example` del backend usa `8h`: son solo valores de ejemplo, no una discrepancia, pero conviene que ambos repositorios usen el mismo valor de referencia |
+| `JWT_SECRET` | Sí | Ver [../guias/seguridad.md](../guias/seguridad.md#s2-autenticación): largo y aleatorio, distinto por entorno. Mínimo 32 caracteres (lo exige `validateEnv`) |
+| `JWT_EXPIRATION` | No | Formato de `jsonwebtoken` con unidad y mayor que cero (p. ej. `8h`; `3600` sin unidad, `0` y los negativos se rechazan). El `10m` del `.tfvars.example` es válido. El `.tfvars.example` de infra usa `10m`; el `.env.example` del backend usa `8h`: son solo valores de ejemplo, no una discrepancia, pero conviene que ambos repositorios usen el mismo valor de referencia |
 | `ADMIN_USERNAME` | Sí (es una credencial) | — |
-| `ADMIN_PASSWORD` | Sí | **Debe ser un hash bcrypt**, nunca la contraseña en claro. Cómo generarlo: [../03-configuracion.md](../03-configuracion.md#generar-el-hash-de-admin_password) |
+| `ADMIN_PASSWORD` | Sí | **Debe ser un hash bcrypt completo**, nunca la contraseña en claro (`validateEnv` lo comprueba). Cómo generarlo: [../03-configuracion.md](../03-configuracion.md#generar-el-hash-de-admin_password) |
 | `EMAIL` | Sí | Cuenta Gmail del formulario de contacto |
 | `EMAIL_PASSWORD` | Sí | Contraseña de aplicación de Gmail, no la contraseña de la cuenta |
 | `AWS_REGION` | No | `eu-west-3` en ambos entornos **(verificado)** |
@@ -47,7 +49,7 @@ Nombres únicamente; nunca valores reales. Fuente: `config/validateEnv.js` **(ve
 |---|---|---|
 | `PORT` | `8000` | El `.tfvars.example` ya la fija en `8000`: coincide |
 | `API_PREFIX` | `/api/v1` | No está en `app_env_vars` de ningún ejemplo; si no se define, el backend usa el valor por defecto, que es el esperado por el frontend |
-| `NODE_ENV` | (ninguno; cualquier valor que no sea `local` se trata como no-local) | No está en ningún `.tfvars.example`; conviene **no** definirlo como `local` en Beanstalk, porque activaría credenciales SSO (que no existen en la instancia) en vez del rol IAM |
+| `NODE_ENV` | (ninguno; cualquier valor que no sea `local` se trata como no-local) | Sin definir, `validateEnv` es estricto (M15), igual que con `production`; solo `local` y `test` se conforman con avisos. El valor real en Beanstalk **(por confirmar)**. No está en ningún `.tfvars.example`; conviene **no** definirlo como `local` en Beanstalk, porque activaría credenciales SSO (que no existen en la instancia) en vez del rol IAM |
 
 **Estado de `app_env_vars` en los ejemplos (03/10/2026, verificado):** `dev` y `prod` incluyen las 9 obligatorias más `PORT`. I3 resuelto: el doc de infra confirma que `app_env_vars` ya incluye `ALLOWED_ORIGIN`, `ADMIN_USERNAME` y `ADMIN_PASSWORD`.
 
@@ -58,10 +60,11 @@ Nombres únicamente; nunca valores reales. Fuente: `config/validateEnv.js` **(ve
 | Runtime | Node.js 22 (`64bit Amazon Linux 2023 v6.11.9 running Node.js 22`) | Sí, en `modules/beanstalk/variables.tf` |
 | Comando de arranque | `npm start` (`node index.js`), el que usa Beanstalk por convención para una app Node | Por confirmar: no hay un `Procfile` en este repositorio; Beanstalk infiere `npm start` de `package.json` |
 | Puerto interno | `PORT` (8000 por defecto); Beanstalk enruta el puerto 80 externo hacia él | Sí (`app.listen(PORT)` en `index.js`, `Port = 80` en `modules/beanstalk/main.tf`) |
-| `package.json` → `engines` | `"node": "22.x"` declarado **(resuelto 03/10/2026, B3; actualizado a 22.x 03/10/2026)** | Sí |
+| `package.json` → `engines` | `"node": "22"` declarado **(resuelto 03/10/2026, B3)** | Sí |
 | Health check | `GET /healthcheck` → `200 ok`, texto plano, sin auth ni CORS (se registra antes de esos middlewares) | Sí, en `index.js` |
-| **`HealthCheckPath` en Terraform** | `/` (no `/healthcheck`) | Sí, en `modules/beanstalk/main.tf` → **I1** |
-| Despliegue | Subir un zip del código por consola o CI/CD; sin pipeline automatizado hoy | Sí, según el README de `sigmetum-infra` → I6 |
+| `HealthCheckPath` en Terraform | `/healthcheck` **(I1 resuelto)** | Sí, en `modules/beanstalk/main.tf` |
+| Rutas no definidas (M21, entrega 3, 28/10/2026) | Todo lo que ningún router resuelve (incluida `/`) responde `404` JSON `{ success: false, error: "Not found" }` en vez del `404` HTML de Express: mismo estado. `/healthcheck` no cambia (se atiende antes). El `para-infra.md` del frontend aún cita `HealthCheckPath = "/"` (I6, resuelto en infra); si algún entorno desplegado siguiera apuntando a `/`, seguiría viendo `404`, ahora en JSON; que solo mire el código de estado y no el cuerpo está **(por confirmar con infra)**. No bloquea | Revisión, sin cambios |
+| Despliegue | GitHub Actions (OIDC) → zip a S3 → `CreateApplicationVersion` → `UpdateEnvironment` **(I6 resuelto)**. El zip incluye `app.js` y excluye `tests/*`; el job `verify` ejecuta antes `npm test` y `npm audit --audit-level=high` | Sí, módulo `backend-ci-iam` en infra (el contenido real del zip en la CI está por confirmar) |
 
 ## 4. Permisos IAM sobre S3
 
@@ -77,6 +80,10 @@ Acciones que usa el código, deducidas de `aws/awsS3connect.js` **(verificado)**
 
 **Lo que concede `modules/storage/main.tf`** (política `aws_iam_role_policy.beanstalk_s3`, verificado): `s3:GetObject`, `s3:PutObject`, `s3:DeleteObject`, `s3:ListBucket` sobre el bucket y sus objetos. **Coincide exactamente** con lo que usa el código: no faltan ni sobran permisos.
 
+- **Robustez de S3 (A5, A6, A8, M7, M10; 29/10/2026): sin cambios en variables de entorno ni en la política.** La paginación de los listados usa la misma acción `s3:ListBucket`. **Riesgo (por confirmar)**: desde A6 solo `NoSuchKey` equivale a «el glosario no existe»; sin `s3:ListBucket`, S3 responde `AccessDenied` (no `NoSuchKey`) cuando falta el objeto y `GET /list-terms` daría 500. El rol de Beanstalk sí lo tiene (política `beanstalk_s3`, arriba); que el perfil SSO local lo tenga está **(por confirmar)**. Sin impacto en `sigmetum-infra`.
+- **A2 y A9 (29/10/2026): prefijo nuevo `data/drafts/{provincia}/` para los borradores de `POST /upload`; sin acciones ni permisos de S3 nuevos** (`GetObject`, `PutObject`, `DeleteObject`, `ListBucket`; la política de `modules/storage/main.tf` ya cubre todo el bucket) **y sin variables de entorno nuevas**. El chequeo de existencia del borrador y su descarte listan `data/drafts/{provincia}/`, así que dependen de `s3:ListBucket` (misma comprobación **(por confirmar)** del perfil SSO local que B9). Si el bucket tiene reglas de ciclo de vida por prefijo, `data/drafts/` queda disponible para una futura caducidad de borradores abandonados (no está configurada). Los borradores guardados antes del despliegue siguen en `data/{provincia}/` como versiones hasta que el administrador los borre.
+- **B5 y B9 (29/10/2026): sin cambios en variables de entorno ni en la política.** Misma comprobación **(por confirmar)** de `s3:ListBucket` en el perfil SSO local: sin ese permiso, S3 responde `AccessDenied` en vez de `NoSuchKey` ante una clave inexistente y el `404` de B9 podría no verse en local.
+
 - El rol se asigna por nombre fijo (`aws-elasticbeanstalk-ec2-role`), no por referencia al recurso del rol: si ese nombre cambia en el futuro, esta política deja de aplicarse sin que Terraform avise **(verificado, es una observación sobre el propio Terraform, no un hallazgo del backend)**.
 - Sin local: en Beanstalk no hay `AWS_PROFILE`; el SDK usa la cadena de credenciales por defecto, que resuelve al rol de la instancia (`IamInstanceProfile = aws-elasticbeanstalk-ec2-role` en `modules/beanstalk/main.tf`).
 
@@ -89,11 +96,11 @@ Acciones que usa el código, deducidas de `aws/awsS3connect.js` **(verificado)**
 | Acceso público | Bloqueado (`block_public_acls`, `block_public_policy`, `ignore_public_acls`, `restrict_public_buckets` todos `true`) **(verificado)**. Correcto: el backend sirve todo por URL prefirmada o por la propia API, nunca por acceso directo al bucket |
 | Cifrado | AES256 en reposo **(verificado)** |
 | Versionado | Activado **(verificado)**; relevante para el hallazgo interno A1 (una versión sobrescrita por el fallo de zona horaria se podría recuperar desde el historial de versiones de S3) |
-| Prefijos que usa el código | `gallery/`, `data/`, `data/active/`, `data/terms/` (constantes en `config/s3Paths.js`). No requieren ninguna configuración especial del bucket: son solo convenciones de clave |
+| Prefijos que usa el código | `gallery/`, `data/`, `data/active/`, `data/terms/`, `data/drafts/` (constantes en `config/s3Paths.js`). No requieren ninguna configuración especial del bucket: son solo convenciones de clave |
 
 **`ALLOWED_ORIGIN` por entorno:**
 
-`ALLOWED_ORIGIN` acepta **una lista de orígenes separados por coma**. El backend los divide, elimina espacios y permite el acceso si el origen del request está en la lista o si no hay origen (llamadas server-side). Formato: `https://a.com,https://b.com` (sin barra final, sin espacios extra).
+`ALLOWED_ORIGIN` acepta **una lista de orígenes separados por coma**. El backend los divide, elimina espacios y permite el acceso si el origen del request está en la lista o si no hay origen (llamadas server-side). Formato: `https://a.com,https://b.com` (sin barra final, sin espacios extra). **Desde el 28/10/2026 (M22)** un origen no permitido recibe `403` `Origin not allowed` (antes `500` con el origen reflejado) y el backend registra `CORS: origin not allowed: "<origen>"` con `console.warn`. El valor y el formato de `ALLOWED_ORIGIN` no cambian; no hay variables, permisos IAM ni endpoints nuevos. **(Por confirmar con infra)**: si hay monitorización o alarmas por `500` que contaran las peticiones CORS rechazadas, dejarán de contarlas (ahora son `403`), y los mensajes de error de producción ya no revelan detalles internos, solo la consola.
 
 | Entorno | Qué poner en `ALLOWED_ORIGIN` | Estado |
 |---|---|---|
@@ -104,10 +111,11 @@ Acciones que usa el código, deducidas de `aws/awsS3connect.js` **(verificado)**
 
 | Aspecto | Estado |
 |---|---|
-| `trust proxy` | **No configurado en el backend** (`index.js` no llama a `app.set('trust proxy', ...)`) → I2 |
-| HTTPS | `prod` usa ALB con `ssl_certificate_arn` (HTTPS en el 443); `dev` usa `load_balancer_type = "single"` (sin ALB, solo HTTP) → I4 |
+| `trust proxy` | `app.set('trust proxy', 1)` en `index.js` **(I2 resuelto)**. Cadena: nginx (loopback) → Express; 1 salto. |
+| Límite de `POST /send-email` (M21 entregas 1 y 2, 28/10/2026) | 5 peticiones cada 15 minutos por IP (`express-rate-limit` 8.5.2, mismo mecanismo que el login). **Desde la entrega 2 la ruta es pública (sin token), así que el cupo lo consume cualquier visitante anónimo y también cuentan los `400`.** **Obligatorio ANTES DE DESPLEGAR, aún sin hacer (por confirmar con infra)**: confirmar cuántos saltos de proxy hay entre el cliente y Express. `index.js` (líneas 28-29) comenta "ALB → nginx → Express" con `trust proxy 1`, y este documento (fila anterior y I2) describe "nginx (loopback) → Express"; las dos descripciones no coinciden. Si hay un salto más de los que cuenta `trust proxy 1`, `req.ip` sería la IP del proxy intermedio para todos los clientes y un solo cliente podría agotar el cupo de 5 por 15 minutos para todos; si hay uno menos, la cabecera `X-Forwarded-For` se podría falsificar y no se limitaría a nadie. Si el resultado exige cambiar `trust proxy`, es un cambio fuera de la entrega 2 (vuelve a `architect`). Resultado de la confirmación: **(por confirmar)**. Depende de `trust proxy 1`: que `req.ip` sea el cliente real detrás de nginx y el balanceador está **(por confirmar con infra)** en producción; si llegara la IP del proxy, el cupo lo compartirían todos los usuarios, y si se pudiera falsificar la cabecera, no limitaría a nadie. **Almacén en memoria** (`MemoryStore`, el de por defecto): el contador se reinicia al reiniciar o desplegar y cada instancia (1 a 3 en prod) lleva el suyo, así que el tope real por IP es de hasta 5 por instancia. **Usuarios tras un mismo NAT** (oficina, universidad) comparten el cupo. **IPv6**: la versión instalada agrupa por defecto las direcciones IPv6 por subred /56 (opción `ipv6Subnet`, valor por defecto 56; leído en `node_modules/express-rate-limit/dist/index.cjs`, no probado con tráfico real), de modo que varias direcciones de una misma /56 comparten cupo; las IPv4 mapeadas en IPv6 se tratan como IPv4. Sin variables de entorno ni permisos IAM nuevos |
+| HTTPS | `prod` usa ALB con `ssl_certificate_arn` (HTTPS en el 443); `dev` usa CloudFront como terminador HTTPS delante de Beanstalk (`enable_cdn = true`) **(I4 resuelto)** |
 | Salida SMTP (`smtp.gmail.com:587`) | Sin regla de grupo de seguridad específica en el módulo `beanstalk`; se asume la salida por defecto del grupo del VPC por defecto **(por confirmar)** |
-| Memoria e instancia | `t3.nano` (0.5 GiB de RAM) en los dos entornos, 1 a 3 instancias en prod, 1 fija en dev. El backend carga los Excel enteros en memoria (`multer` sin límite de tamaño, hallazgo interno M6): con `t3.nano`, un Excel grande es un riesgo real de memoria, no solo teórico |
+| Memoria e instancia | `t3.nano` (0.5 GiB de RAM) en los dos entornos, 1 a 3 instancias en prod, 1 fija en dev. El backend carga los Excel enteros en memoria (`multer` limita la subida a 10 MB en `/upload` y 5 MB en `/upload-image` desde el 28/10/2026, M6; el `.xlsx` sigue descomprimiéndose en memoria, M9): con `t3.nano`, un Excel grande sigue siendo un riesgo de memoria. Que el proxy no imponga un límite de cuerpo menor **(por confirmar)** |
 
 ## 7. Tabla de discrepancias
 
@@ -115,12 +123,12 @@ Ver el resumen de la sección 1. Estado y responsable:
 
 | Id | Responsable | Acción |
 |---|---|---|
-| **I1** | ~~Infraestructura~~ | **Resuelto** (`feature/testing` de infra): `HealthCheckPath = "/healthcheck"` |
-| **I2** | ~~Infraestructura y backend~~ | **Resuelto (03/10/2026)**: `app.set('trust proxy', 1)` en `index.js` |
-| **I3** | ~~Ambos~~ | **Resuelto (03/10/2026)**: `para-backend.md` de infra confirma que `app_env_vars` incluye todas las obligatorias. Región actualizada a `eu-west-3`, bucket a `sigmetum-app-assets-*` |
-| **I4** | Infraestructura y frontend | Decidir si dev necesita HTTPS (ALB con certificado, o un dominio con proxy). Coincide con `frontend:I4` |
-| **I5** | Infraestructura | Confirmar o documentar explícitamente la regla de salida a `smtp.gmail.com:587` |
-| **I6** | Infraestructura | Valorar automatizar el despliegue del backend (zip) tras pasar `npm run lint`, `npm run quality` y `npm run docs:check` en CI. No se implanta en este documento: es una decisión de infraestructura |
+| ~~**I1**~~ | ~~Infraestructura~~ | **Resuelto (feature/testing de infra)**: `HealthCheckPath = "/healthcheck"` en `modules/beanstalk/main.tf` |
+| ~~**I2**~~ | ~~Backend~~ | **Resuelto (03/10/2026)**: `app.set('trust proxy', 1)` en `index.js` |
+| ~~**I3**~~ | ~~Ambos~~ | **Resuelto (30/09/2026)**: `app_env_vars` incluye todas las obligatorias en los `.tfvars.example` |
+| ~~**I4**~~ | ~~Infraestructura y frontend~~ | **Resuelto (feature/testing de infra)**: CloudFront (`enable_cdn = true`) termina HTTPS en dev |
+| **I5** | Infraestructura | Confirmar que el grupo de seguridad del VPC por defecto permite salida a `smtp.gmail.com:587` **(por confirmar en la cuenta real)** |
+| ~~**I6**~~ | ~~Infraestructura~~ | **Resuelto (04/10/2026)**: módulo `backend-ci-iam` + GitHub Actions workflow; el CI despliega automáticamente en Beanstalk |
 
 ## 8. Si cambias algo en la infraestructura
 
@@ -130,7 +138,7 @@ Ver el resumen de la sección 1. Estado y responsable:
 | El rol IAM de la instancia (nombre o permisos) | Que siga permitiendo `GetObject`, `PutObject`, `DeleteObject`, `ListBucket` sobre el bucket (sección 4) |
 | `HealthCheckPath` | Que coincida con `/healthcheck` (I1) |
 | El balanceador (de `single` a `application`, o el certificado) | `ALLOWED_ORIGIN` sigue siendo el origen correcto; si pasa a HTTPS, avisar al frontend |
-| El tipo de instancia | Revisar el límite de tamaño de `multer` (hoy no hay ninguno; sección 6) |
+| El tipo de instancia | Revisar el límite de tamaño de `multer` (10 MB y 5 MB; sección 6) |
 | `app_env_vars` | Que siga cubriendo la tabla de la sección 2 (obligatorias) |
 | El dominio de `prod` o de `dev` | `ALLOWED_ORIGIN` de ese entorno, y avisar al frontend si cambia la URL que consume |
 

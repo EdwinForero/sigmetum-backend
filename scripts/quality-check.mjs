@@ -1,32 +1,17 @@
 // Puerta de calidad y seguridad del backend.
 // Uso: npm run quality
 // Comprueba: patrones prohibidos en el código, rutas que modifican estado sin autenticación, variables de
-// entorno sin declarar, secretos, vulnerabilidades de las dependencias de producción y ESLint.
+// entorno sin declarar, secretos, vulnerabilidades de las dependencias de producción, ESLint y la suite de tests
+// (tests/), que comprueba las rutas contra la pila real de Express.
 // Las reglas y su motivo están en docs/guias/seguridad.md y docs/guias/buenas-practicas-backend.md.
 // Sin dependencias: solo módulos de Node (y las herramientas que ya usa el proyecto: npm, git y eslint).
 
-import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
-import { join, dirname, resolve, sep } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { ROOT, read, walk, codeFiles, routeDeclarations, unparsedRouteLines, usedEnvVars, declaredEnvVars, printResults, runWithTimeout } from './lib/repo.mjs';
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const posix = (file) => file.split(sep).join('/');
-const read = (file) => readFileSync(join(ROOT, file), 'utf8').replace(/\r\n/g, '\n');
-const unique = (list) => [...new Set(list)];
-
-const IGNORED = new Set(['node_modules', '.git', 'uploads']);
-const walk = (dir) =>
-  readdirSync(join(ROOT, dir)).flatMap((name) => {
-    if (IGNORED.has(name)) return [];
-    const path = posix(join(dir, name));
-    return statSync(join(ROOT, path)).isDirectory() ? walk(path) : [path];
-  });
-
-const CODE_DIRS = ['routes', 'config', 'functions', 'aws', 'middleware'];
-const codeFiles = ['index.js', ...CODE_DIRS.flatMap((dir) => walk(dir)).filter((file) => file.endsWith('.js'))];
-
-const run = (command, args) => spawnSync(command, args, { cwd: ROOT, encoding: 'utf8', shell: true });
+const run = (command, args, options = {}) => spawnSync(command, args, { cwd: ROOT, encoding: 'utf8', shell: true, ...options });
 
 const results = [];
 const check = (name, problems, notes = []) => results.push({ name, problems, notes });
@@ -37,7 +22,7 @@ const check = (name, problems, notes = []) => results.push({ name, problems, not
 // Rutas que modifican estado (POST, PUT, PATCH, DELETE) y NO exigen token. Es una lista cerrada.
 const PUBLIC_MUTATING_ROUTES = {
   'POST /log': 'Es el login: no puede exigir un token que todavía no existe. Lleva limitador de intentos.',
-  'POST /send-email': 'Formulario de contacto público. Falta límite de peticiones y validación (hallazgo M3 de docs/07).',
+  'POST /send-email': 'Formulario de contacto público: no exige token. Lleva límite de 5 peticiones cada 15 minutos por IP (cuenta también el tráfico anónimo y los 400) y validación de sus cuatro campos (M3).',
 };
 
 // Variables que el código lee pero que NO son obligatorias (no están en config/validateEnv.js).
@@ -78,17 +63,13 @@ const ACCEPTED_ADVISORIES = {};
 {
   const problems = [];
   const seen = new Set();
-  for (const file of codeFiles.filter((f) => f.startsWith('routes/'))) {
-    read(file).split('\n').forEach((line, index) => {
-      const match = line.match(/^\s*(router|protectedRouter)\.(post|put|patch|delete)\(\s*(['"`])([^'"`]+)\3(.*)$/);
-      if (!match) return;
-      const [, owner, method, , path, rest] = match;
-      const id = `${method.toUpperCase()} ${path}`;
-      if (owner === 'protectedRouter' || /\btokenAuth\b/.test(rest)) return;
-      seen.add(id);
-      if (!(id in PUBLIC_MUTATING_ROUTES)) problems.push(`${file}:${index + 1} ${id} modifica estado y no cuelga de protectedRouter ni usa tokenAuth`);
-    });
+  for (const route of routeDeclarations()) {
+    if (route.method === 'GET' || route.protected) continue;
+    const id = `${route.method} ${route.path}`;
+    seen.add(id);
+    if (!(id in PUBLIC_MUTATING_ROUTES)) problems.push(`${route.file}:${route.line} ${id} modifica estado y no lleva tokenAuth como primer manejador de la ruta`);
   }
+  for (const u of unparsedRouteLines()) problems.push(`${u.file}:${u.line} declaración de ruta que la detección estática no interpreta (¿partida en varias líneas?): ${u.text}`);
   for (const id of Object.keys(PUBLIC_MUTATING_ROUTES)) {
     if (!seen.has(id)) problems.push(`La excepción "${id}" de PUBLIC_MUTATING_ROUTES ya no existe o ya está protegida: quítala`);
   }
@@ -99,9 +80,9 @@ const ACCEPTED_ADVISORIES = {};
 
 {
   const problems = [];
-  const validateSrc = read('config/validateEnv.js');
-  const declared = [...validateSrc.matchAll(/'([A-Z][A-Z0-9_]+)'/g)].map((m) => m[1]);
-  const used = unique(codeFiles.flatMap((file) => [...read(file).matchAll(/process\.env\.([A-Z][A-Z0-9_]*)/g)].map((m) => m[1])));
+  const { required, requiredLocal } = declaredEnvVars();
+  const declared = [...required, ...requiredLocal];
+  const used = usedEnvVars();
   for (const name of used) {
     if (!declared.includes(name) && !(name in OPTIONAL_ENV)) problems.push(`process.env.${name} se usa en el código y no está en config/validateEnv.js ni en OPTIONAL_ENV`);
   }
@@ -126,11 +107,11 @@ const ACCEPTED_ADVISORIES = {};
   ];
   const files = [
     ...codeFiles,
+    ...(existsSync(join(ROOT, 'tests')) ? walk('tests').filter((file) => file.endsWith('.js')) : []),
     '.env.example',
     'package.json',
     'README.md',
     'CLAUDE.md',
-    ...['INTEGRACION.md'].filter((file) => existsSync(join(ROOT, file))),
     ...walk('docs').filter((file) => file.endsWith('.md')),
     ...(existsSync(join(ROOT, '.claude')) ? walk('.claude') : []),
   ];
@@ -219,14 +200,56 @@ const ACCEPTED_ADVISORIES = {};
   );
 }
 
+// ─── 7. Rutas y suite de tests: pila real de Express (tests/) ───────────────
+// Ejecuta la suite entera (npm test) con el reporter TAP y exige que no se haya vaciado: sin fallos, sin tests
+// omitidos ni pendientes, al menos MIN_TESTS tests y presentes las suites de la pila (estructura-rutas) y de las
+// rutas protegidas (rutas-protegidas). Si añades tests, sube MIN_TESTS; si quitas alguno, hay que justificarlo.
+
+const MIN_TESTS = 1094;
+// Un test de cada suite imprescindible: el reporter TAP no nombra los archivos, así que se comprueba por existencia
+// del archivo y por este test centinela (su nombre exacto debe aparecer como superado).
+const REQUIRED_SUITES = {
+  'tests/estructura-rutas.test.js': 'la tabla de rutas y la pila declarada no están vacías',
+  'tests/rutas-protegidas.test.js': 'la lista de rutas protegidas tiene las nueve rutas y los tres estados de token',
+};
+
+{
+  const problems = [];
+  const suite = await runWithTimeout('node', ['--test', '--test-reporter=tap', '"tests/**/*.test.js"'], { timeout: 180000, maxBuffer: 64 * 1024 * 1024 });
+  const output = `${suite.stdout ?? ''}`;
+  const counter = (name) => {
+    const match = output.match(new RegExp(`^# ${name} (\\d+)\\s*$`, 'm'));
+    return match ? Number(match[1]) : null;
+  };
+  const tests = counter('tests');
+  const fail = counter('fail');
+  const skipped = counter('skipped');
+  const todo = counter('todo');
+  if (suite.status !== 0) {
+    const reason = suite.error?.code === 'ETIMEDOUT' ? 'superó el tiempo máximo de 180 s' : `terminó con código ${suite.status}`;
+    problems.push(`La suite de tests (node --test "tests/**/*.test.js") ${reason}`);
+  }
+  if ([tests, fail, skipped, todo].includes(null)) {
+    problems.push('No hay resumen del reporter TAP (# tests, # fail, # skipped, # todo): no se puede dar por buena la suite');
+  } else {
+    if (fail !== 0) problems.push(`La suite tiene ${fail} test(s) que fallan`);
+    if (skipped !== 0) problems.push(`La suite tiene ${skipped} test(s) omitidos (skip): no se admiten`);
+    if (todo !== 0) problems.push(`La suite tiene ${todo} test(s) pendientes (todo): no se admiten`);
+    if (tests < MIN_TESTS) problems.push(`La suite ejecuta ${tests} tests y el mínimo es ${MIN_TESTS}: ¿se han quitado tests o se ha vaciado un bucle?`);
+  }
+  for (const [file, sentinel] of Object.entries(REQUIRED_SUITES)) {
+    if (!existsSync(join(ROOT, file))) problems.push(`Falta ${file}`);
+    else if (!output.split('\n').some((line) => /^ok \d+ - /.test(line) && line.endsWith(` - ${sentinel}`))) problems.push(`${file} no se ha ejecutado o su test centinela no ha pasado: "${sentinel}"`);
+  }
+  if (problems.length > 0) {
+    const tail = `${output}\n${suite.stderr ?? ''}`.split('\n').filter((line) => /^not ok|^# (tests|fail|skipped|todo)/.test(line)).slice(0, 15);
+    tail.forEach((line) => problems.push(`  ${line.trim()}`));
+  }
+  check('Rutas protegidas y públicas (suite de tests con la pila real de Express, tests/)', problems);
+}
+
 // ─── Resultado ──────────────────────────────────────────────────────────────
 
-let failed = 0;
-for (const { name, problems, notes } of results) {
-  console.log(`${problems.length === 0 ? '✓' : '✗'} ${name}`);
-  problems.forEach((problem) => console.log(`    - ${problem}`));
-  notes.forEach((note) => console.log(`    · ${note}`));
-  failed += problems.length;
-}
+const failed = printResults(results);
 console.log(failed === 0 ? '\nCalidad y seguridad: sin problemas nuevos.' : `\n${failed} problema(s). Ver docs/guias/seguridad.md.`);
 process.exit(failed === 0 ? 0 : 1);

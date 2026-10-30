@@ -1,0 +1,8 @@
+{
+  "name": "backend-general",
+  "version": "0.1.0",
+  "description": "Skills generales de backend que se usan siempre: cambio de variables de entorno y seguridad antes de fusionar.",
+  "author": {
+    "name": "EdwinForero"
+  }
+}

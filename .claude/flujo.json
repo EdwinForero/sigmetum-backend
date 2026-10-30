@@ -1,0 +1,146 @@
+{
+  "guias": [
+    "docs/guias/buenas-practicas-backend.md",
+    "docs/guias/seguridad.md",
+    "docs/guias/mantenimiento.md"
+  ],
+  "integracion": [
+    "docs/integracion/para-frontend.md",
+    "docs/integracion/para-infra.md"
+  ],
+  "skillsProyecto": [
+    "plugins/backend-general/skills",
+    "plugins/dominio-api-express/skills",
+    "plugins/dominio-aws-s3/skills"
+  ],
+  "marketplaceLocal": "plugins",
+  "estado": "docs/07-estado-y-deuda-tecnica.md",
+  "estadoFecha": "Fecha del análisis: [^\\n]*?actualizado (\\d{2}/\\d{2}/\\d{4})",
+  "verificacion": {
+    "lint": "npm run lint",
+    "quality": "npm run quality",
+    "docs:check": "npm run docs:check",
+    "docs:gate": "npm run docs:gate",
+    "agentes:test": "npm run agentes:test"
+  },
+  "docsRegla": "docs/guias/mantenimiento.md",
+  "specsDir": "docs/specs",
+  "maxVueltas": 3,
+  "consultor": "ninguno",
+  "estilo": "i-have-adhd",
+  "perfiles": [
+    "base",
+    "backend",
+    "api-express",
+    "aws-s3"
+  ],
+  "criticidad": [
+    "autenticación y JWT",
+    "claves de S3",
+    "dependencias",
+    "contrato con el frontend",
+    "CI"
+  ],
+  "docsObligatorios": [
+    "docs/07-estado-y-deuda-tecnica.md"
+  ],
+  "docsPorArea": {
+    "routes/**": [
+      "docs/04-api.md",
+      "docs/05-modulos.md"
+    ],
+    "index.js": [
+      "docs/04-api.md",
+      "docs/05-modulos.md",
+      "docs/01-arquitectura.md",
+      "docs/03-configuracion.md"
+    ],
+    "app.js": [
+      "docs/04-api.md",
+      "docs/05-modulos.md",
+      "docs/01-arquitectura.md",
+      "docs/03-configuracion.md"
+    ],
+    "middleware/**": [
+      "docs/05-modulos.md"
+    ],
+    "functions/**": [
+      "docs/05-modulos.md"
+    ],
+    "aws/**": [
+      "docs/05-modulos.md",
+      "docs/06-almacenamiento-s3.md"
+    ],
+    "config/**": [
+      "docs/05-modulos.md"
+    ],
+    "config/s3Paths.js": [
+      "docs/05-modulos.md",
+      "docs/06-almacenamiento-s3.md"
+    ],
+    "config/validateEnv.js": [
+      "docs/03-configuracion.md"
+    ],
+    ".env.example": [
+      "docs/03-configuracion.md"
+    ],
+    "functions/convertExcelToJson.js": [
+      "docs/05-modulos.md",
+      "docs/06-almacenamiento-s3.md"
+    ],
+    "functions/formatFileName.js": [
+      "docs/05-modulos.md",
+      "docs/06-almacenamiento-s3.md"
+    ],
+    "functions/getNextVersion.js": [
+      "docs/05-modulos.md",
+      "docs/06-almacenamiento-s3.md"
+    ],
+    "middleware/tokenAuthentication.js": [
+      "docs/03-configuracion.md",
+      "docs/04-api.md",
+      "docs/05-modulos.md"
+    ],
+    "package.json": [
+      "docs/02-tecnologias.md",
+      "docs/03-configuracion.md"
+    ],
+    "eslint.config.js": [
+      "docs/02-tecnologias.md",
+      "docs/guias/buenas-practicas-backend.md"
+    ],
+    ".github/**": [
+      "docs/01-arquitectura.md"
+    ],
+    "scripts/**": [
+      "docs/guias/mantenimiento.md",
+      "docs/guias/seguridad.md"
+    ],
+    ".claude/**": [
+      "docs/README.md"
+    ],
+    "plugins/**": [
+      "plugins/README.md",
+      "docs/README.md"
+    ],
+    "package-lock.json": [
+      "docs/02-tecnologias.md"
+    ]
+  },
+  "areasContrato": [
+    "index.js",
+    "app.js",
+    "routes/**",
+    "middleware/errorHandler.js",
+    "config/s3Paths.js",
+    "config/validateEnv.js",
+    "functions/convertExcelToJson.js",
+    "functions/formatFileName.js",
+    "functions/getNextVersion.js",
+    "middleware/tokenAuthentication.js",
+    ".env.example",
+    "package.json",
+    ".github/**"
+  ],
+  "avisoPR": "docs/specs/*-aviso-pr.md"
+}

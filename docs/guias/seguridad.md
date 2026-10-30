@@ -2,7 +2,7 @@
 
 Normas para no introducir vulnerabilidades en este repositorio, con el estado real de cada una. Cada regla dice **por qué**, **cómo se comprueba** y **cómo está hoy**.
 
-- Complementa a [buenas-practicas-backend.md](buenas-practicas-backend.md). El procedimiento de revisión paso a paso está en la skill `.claude/skills/security-pre-merge`; las normas y su motivo, aquí.
+- Complementa a [buenas-practicas-backend.md](buenas-practicas-backend.md). El procedimiento de revisión paso a paso está en la skill `security-pre-merge` ([plugins/README.md](../../plugins/README.md)); las normas y su motivo, aquí.
 - Lo que depende de la infraestructura está en `sigmetum-infra`; lo que depende del frontend, en `../sigmetum-frontend/docs/integracion/para-backend.md`.
 - Los hallazgos con id (A, M, B, D, I) están en [07](../07-estado-y-deuda-tecnica.md). Esta guía **no los repite**: los referencia y los convierte en reglas.
 - Si un cambio contradice una regla de esta guía, **avisa y pregunta** antes de hacerlo.
@@ -33,12 +33,12 @@ Toda la seguridad real está aquí: el frontend solo evita errores y no facilita
 
 | Regla | Por qué | Se comprueba | Estado |
 |---|---|---|---|
-| `ADMIN_PASSWORD` contiene un **hash bcrypt**, nunca la contraseña en claro | `userAuth` hace `bcrypt.compare`: con un valor que no sea un hash, **todos los logins dan 401** sin avisar | Revisión | **No se valida al arrancar** (M15). Cómo generarlo: [03](../03-configuracion.md#generar-el-hash-de-admin_password) |
-| `JWT_SECRET` es largo y aleatorio (al menos 32 bytes; por ejemplo `node -e "console.log(require('crypto').randomBytes(48).toString('base64'))"`), **distinto por entorno** | Con un secreto corto se pueden falsificar tokens por fuerza bruta | Revisión | `validateEnv` solo comprueba que exista (M15). La fortaleza de los valores reales **(por confirmar)** |
+| `ADMIN_PASSWORD` contiene un **hash bcrypt**, nunca la contraseña en claro | `userAuth` hace `bcrypt.compare`: con un valor que no sea un hash, **todos los logins dan 401** sin avisar | Revisión | `validateEnv` comprueba al arrancar que tiene forma de hash bcrypt completo (M15 resuelto el 28/10/2026; estricto salvo `NODE_ENV` `local` o `test`, donde solo avisa). Cómo generarlo: [03](../03-configuracion.md#generar-el-hash-de-admin_password) |
+| `JWT_SECRET` es largo y aleatorio (al menos 32 bytes; por ejemplo `node -e "console.log(require('crypto').randomBytes(48).toString('base64'))"`), **distinto por entorno** | Con un secreto corto se pueden falsificar tokens por fuerza bruta | Revisión | `validateEnv` exige al menos 32 caracteres (M15 resuelto el 28/10/2026; estricto salvo `NODE_ENV` `local` o `test`). La aleatoriedad y los valores reales de despliegue **(por confirmar)** |
 | **Rotación** de `JWT_SECRET`: al sospechar una filtración o cuando cambie quien lo conoce | Cambiarlo invalida todos los tokens, lo que con un único administrador es aceptable | Revisión | Sin procedimiento escrito |
-| Los tokens **caducan** (`JWT_EXPIRATION`, `8h` en el ejemplo) y el valor es el mínimo útil | Un token robado deja de servir | `validateEnv` exige la variable | Cumple |
-| `jwt.verify` fija el algoritmo (`algorithms: ['HS256']`) | No depender del valor por defecto de la librería | Revisión | **No cumple** (B8) |
-| El login tiene **límite de intentos** y `trust proxy` bien configurado | Detrás del ALB, sin `trust proxy`, todos los clientes comparten una IP y el mismo contador: cualquiera puede bloquear el login del administrador | `routes/auth.js` | Límite de 10 intentos cada 15 minutos. **Falta `trust proxy`** (M12, por confirmar en el despliegue). La opción `max` está obsoleta (B6) |
+| Los tokens **caducan** (`JWT_EXPIRATION`, `8h` en el ejemplo) y el valor es el mínimo útil | Un token robado deja de servir | `validateEnv` exige la variable y que sea una duración con unidad y mayor que cero (M15) | Cumple |
+| `jwt.verify` fija el algoritmo (`algorithms: ['HS256']`) | No depender del valor por defecto de la librería | Test (`tests/jwt-algoritmo.test.js`) | Cumple desde el 28/10/2026 (B8): `jwt.verify` con `algorithms: ['HS256']` y `jwt.sign` con `algorithm: 'HS256'` |
+| El login tiene **límite de intentos** y `trust proxy` bien configurado | Detrás del ALB, sin `trust proxy`, todos los clientes comparten una IP y el mismo contador: cualquiera puede bloquear el login del administrador | `routes/auth.js` | Límite de 10 intentos cada 15 minutos. **Falta `trust proxy`** (M12, por confirmar en el despliegue). Los limitadores usan `limit` (B6 resuelto el 28/10/2026) |
 | Un manejador de login **no puede quedarse colgado** | Quien conoce el usuario puede agotar conexiones enviando peticiones sin contraseña | Test (cuando existan) | **No cumple**: `userAuth` sin `try/catch` deja la petición sin respuesta **(verificado ejecutándolo)** (A7) |
 | Mensaje único para usuario y contraseña incorrectos | No revela qué usuarios existen | Revisión | Cumple (`Invalid credentials`) |
 | Las dependencias de autenticación están al día | `jsonwebtoken` depende de `jws`, con un aviso alto sobre la verificación de firmas HMAC | `npm run quality` | **No cumple** (M16); el alcance real del aviso, **por confirmar** |
@@ -46,14 +46,14 @@ Toda la seguridad real está aquí: el frontend solo evita errores y no facilita
 ### S3. Autorización
 
 - **Por qué:** `tokenAuth` es la única barrera. Hay un solo rol: cualquier token válido es el administrador.
-- **Reglas:** toda ruta `POST`, `PUT`, `PATCH` o `DELETE` cuelga de `protectedRouter` (o lleva `tokenAuth`). Una ruta pública que modifica estado es una **excepción registrada y justificada**.
-- **Cómo:** `npm run quality` falla con una ruta mutante sin autenticación que no esté en `PUBLIC_MUTATING_ROUTES` (y con una excepción que ya no exista).
+- **Reglas:** toda ruta `POST`, `PUT`, `PATCH` o `DELETE` lleva `tokenAuth` como **primer manejador de la propia ruta** (`router.post('/x', tokenAuth, ...)`, y antes de `multer` en las subidas). No se usa `router.use(tokenAuth)` sin ruta: intercepta peticiones de otras rutas (M21). Una ruta pública que modifica estado es una **excepción registrada y justificada**.
+- **Cómo:** `npm run quality` falla con una ruta mutante cuyo `tokenAuth` no sea el primer manejador y que no esté en `PUBLIC_MUTATING_ROUTES` (y con una excepción que ya no exista). Además ejecuta la suite de `tests/` (`--test-reporter=tap`), que recorre la pila real de `app.js`: `tests/estructura-rutas.test.js` falla con una ruta sin clasificar, una protegida sin `tokenAuth` como primer manejador, una pública con `tokenAuth` o un `use(tokenAuth)` a nivel de router, y `tests/rutas-protegidas.test.js` comprueba el `401` de las protegidas, incluido `GET /auth`, y de toda ruta mutante de la pila. La detección estática no ve `router.route()`, `router.all`, `router.use` ni rutas en variables: solo la pila real las cubre. Tampoco ve una declaración partida en varias líneas (limitación en el lado inseguro: una mutante así no se marcaría como sin proteger); por eso `quality` suma como problema, con `unparsedRouteLines()` de `scripts/lib/repo.mjs`, toda línea de `routes/` que empieza por `router.`, `protectedRouter.` o `app.` seguido de `get|post|put|patch|delete|all|use|route(` y no casa con el patrón completo, y esa ruta hay que escribirla en una sola línea. La suite carga la `app.js` real (incluidos `cors`, `compression` y `morgan`, este último silenciado en los tests) con S3 y nodemailer simulados; el 403 de CORS se comprueba por comportamiento (sin reflejar el origen, `publicMessage` en el cuerpo y `warn` truncado). Un arranque real con entorno ficticio sigue siendo la prueba del despliegue.
 - **Estado:** cumple **(verificado)**. Excepciones vigentes:
 
 | Ruta | Por qué es pública | Condición para mantenerla |
 |---|---|---|
 | `POST /log` | Es el login | Límite de intentos y arreglar A7 y M12 |
-| `POST /send-email` | Formulario de contacto | Límite de peticiones y validación (M3). Hoy no los tiene |
+| `POST /send-email` | Formulario de contacto: no exige token (ni lo ejecuta, desde la entrega 2 de M21) | Límite de peticiones y validación (M3). Los tiene desde el 28/10/2026: 5 por 15 minutos por IP (almacén en memoria; cuenta también el tráfico anónimo y los 400) y validación de los cuatro campos. El límite depende de que `trust proxy 1` cuente bien los saltos delante de Express **(por confirmar con infra)** |
 
 Rutas de **lectura** públicas (los datos del portal son públicos): `GET /list-files`, `GET /get-data/:path`, `GET /get-merged-data`, `GET /list-images`, `GET /get-image`, `GET /list-terms` y `GET /healthcheck`. Una lectura nueva se hace pública **a propósito**. `GET /get-data/:path` es la excepción problemática: lee cualquier clave del bucket (M2, y D1 antes de cerrarlo).
 
@@ -64,19 +64,20 @@ Rutas de **lectura** públicas (los datos del portal son públicos): `GET /list-
 
 | Valor | Forma permitida | Dónde se usa |
 |---|---|---|
-| Versión de datos | `data/{provincia}/AAAA-MM-DD_vN.xlsx`, con `provincia` sin `/`, distinta de `active`, `terms` y `__proto__` | `/update-file`, `/delete-file`, `/upload/confirm`, `/get-data` |
+| Versión de datos | `data/{provincia}/AAAA-MM-DD_vN.xlsx` según la [regla de clave de versión de 06](../06-almacenamiento-s3.md#regla-de-clave-de-versión): `provincia` de letras latinas con diacríticos (cirílico, griego y otros alfabetos se rechazan, M23) separadas por un solo espacio o guion (sin `/`, `.` ni dígitos), hasta 50 caracteres, en NFC, que no sea `active`, `terms`, `drafts`, no empiece por `active`/`terms` en minúsculas ni sea una propiedad de objeto, y hasta 120 caracteres en total | `/update-file`, `/delete-file`, `/get-data` |
+| Clave de borrador | `data/drafts/{provincia}/<uuid>.xlsx` según la [regla de clave de borrador de 06](../06-almacenamiento-s3.md#regla-de-clave-de-borrador): UUID en minúsculas generado por el servidor, misma regla de provincia (NFC, sin normalizar) y hasta 120 caracteres; una clave de versión no vale aquí ni una de borrador vale como versión | `/upload/confirm` |
 | JSON activo | `data/active/{provincia}.json` | `/get-data` |
-| Imagen | Un nombre simple (sin `/`) bajo `gallery/` | `/get-image`, `/delete-image`, `/upload-image` |
+| Imagen | `imageKey` según la [regla de 06](../06-almacenamiento-s3.md#regla-de-imagekey): segmentos de letras, números y marcas combinantes Unicode y `. _ - ( ) +` con `/` simple, hasta 200 caracteres y extensión jpg, jpeg, png, gif o webp | `/get-image`, `/delete-image`, `/upload-image` |
 
 - **Cómo:** hoy no hay comprobación automática; se revisa y se cubrirá con tests de entrada.
-- **Estado:** **no cumple**. `provincia` sale de la primera fila del Excel: un valor `active` o `terms` escribe dentro de `data/active/`, y `__proto__` rompe `GET /list-files` con un `TypeError` **(verificado ejecutándolo)** (A4). `fileName` no se valida en `/update-file` ni `/delete-file` (M4). `/get-data` lee cualquier clave (M2). El `title` de las imágenes solo sustituye espacios (M5).
+- **Estado:** **cumple en parte**. **Cumple para las claves de versión (28/10/2026)**: la provincia del Excel se valida en `POST /upload` (A4 resuelto; `active`, `terms`, `__proto__` y similares dan 400, `Activos` se acepta porque los listados llevan prefijo con barra) y `draftKey` (`isValidDraftKey`) y `fileName` (`isValidDataKey`) se validan en `/upload/confirm`, `/update-file` y `/delete-file` sin normalizarlos (M4 cerrado para esas tres rutas). Desde A2 (29/10/2026) los borradores viven en `data/drafts/` y cada ruta rechaza la clave del otro tipo. `GET /get-data/:path(*)` sigue pudiendo leer cualquier clave, borradores incluidos (M2, fuera de alcance de A2). Desde M23 (30/10/2026) la provincia solo admite escritura latina, así que un homoglifo de otro alfabeto da 400. Límites: siguen sin detectarse los confundibles dentro del latín (`I`/`l`, ancho completo, `ª`, `º`, `ɑ`, `ɡ`, `ı`, `ſ`, `ᴀ`), `Málaga`/`Malaga` siguen siendo carpetas distintas y la existencia del objeto no se comprueba. **Sigue sin cumplir**: `/get-data` lee cualquier clave (M2). `GET /get-image` y `DELETE /delete-image` ya validan `imageKey` (28/10/2026, `isValidImageKey`; riesgo residual aceptado: se pueden firmar objetos no listados bajo `gallery/`); `POST /upload-image` valida desde el 29/10/2026 (M5) el tipo, el título y la firma del contenido, y la clave que construye cumple siempre `isValidImageKey` (`functions/validateImageUpload.js`); los objetos subidos antes pueden tener claves que la regla rechaza (sin migración). El `imageKey` frente al listado real de la galería está **(por confirmar)**.
 
 ### S5. Subida de archivos
 
 | Regla | Por qué | Estado |
 |---|---|---|
-| `multer` con `limits.fileSize` | `memoryStorage` guarda el fichero entero en RAM: un fichero enorme tumba el proceso | **No cumple** (M6) |
-| Se valida la **extensión y el tipo**: `.xlsx` para datos; `image/jpeg`, `image/png`, `image/webp` para la galería | El backend solo procesa `.xlsx`; el `ContentType` de las imágenes lo pone el cliente | **No cumple** (D3, M5) |
+| `multer` con `limits.fileSize` | `memoryStorage` guarda el fichero entero en RAM: un fichero enorme tumba el proceso | Cumple desde el 28/10/2026 (M6): 10 MB en `/upload` y 5 MB en `/upload-image`, máximo aceptado exacto; 400 `File exceeds the maximum allowed size` |
+| Se valida la **extensión y el tipo**: para datos (`/upload`), la extensión `.xlsx`, sin comprobar el MIME porque lo manda el cliente; para la galería (`/upload-image`), extensión `jpg`/`jpeg`/`png`/`gif`/`webp`, MIME canónico exacto y firma (magic bytes) del contenido | El backend solo procesa `.xlsx`; el `ContentType` de las imágenes lo fija el backend desde el tipo validado (M5, 29/10/2026). Un fichero con nombre `.xlsx` se carga entero en memoria y `exceljs` lo descomprime sin límite (M9); la ruta exige JWT y es solo del administrador | **Cumple en parte**: imágenes cumple desde el 29/10/2026 (M5; la firma no sustituye un reprocesado: un polyglot imagen+script con cabecera válida pasa); datos **no cumple** (D3) |
 | Un `.xlsx` es un zip: se trata como **no confiable** (zip bomb, libros con millones de filas) | `exceljs` lo carga entero en memoria y no hay límite de descompresión **(por confirmar)** | Sin límites (M9). Mitigado porque solo el administrador sube ficheros |
 | El procesamiento pesado sale de la petición si el volumen crece | Una conversión larga bloquea el event loop | M9 |
 | Se comprueba que la subida llegó a S3 antes de dar el éxito | Un fallo parcial deja datos a medias | Cumple: se espera a cada `putObject` |
@@ -88,10 +89,10 @@ Rutas de **lectura** públicas (los datos del portal son públicos): `GET /list-
 | CORS con **un único origen** por entorno (`ALLOWED_ORIGIN`) | Solo el frontend debe poder llamar desde un navegador | `quality` prohíbe `origin: '*'` y `cors()` sin opciones | Cumple |
 | Límite del cuerpo JSON explícito | `express.json()` usa el valor por defecto de `body-parser` (100 kb) **(verificado en 1.20.3)**: suficiente hoy, pero implícito | Revisión | Cumple por defecto |
 | Cabeceras de seguridad (`helmet`) | Limitan el daño si algo falla (por ejemplo, `nosniff` en las respuestas) | Revisión | **No cumple** (B1) |
-| **Límite de peticiones** en los endpoints públicos que cuestan (`/send-email`; valorar `/get-merged-data`) | Sin límite, cualquiera puede agotar la cuota de Gmail o la CPU | Revisión | Solo el login lo tiene (M3) |
-| `/send-email` valida **todos** los campos: que existan, que sean cadenas, el formato de `email` y longitudes máximas | `subject`, `username` y `email` entran en el asunto y en `replyTo`; sin validar pueden colarse saltos de línea o direcciones distintas. `nodemailer` normaliza muchas de estas cosas, pero **no confíes en ello** (por confirmar) | Revisión | **No cumple** (M3) |
+| **Límite de peticiones** en los endpoints públicos que cuestan (`/send-email`; valorar `/get-merged-data`) | Sin límite, cualquiera puede agotar la cuota de Gmail o la CPU | Revisión | Cumple en el login y en `/send-email` (5 por 15 minutos por IP, M3 resuelto el 28/10/2026; almacén en memoria, IP real tras el proxy **(por confirmar con infra)**). `/get-merged-data` sin límite |
+| `/send-email` valida **todos** los campos: que existan, que sean cadenas, el formato básico de `email`, longitudes máximas y ausencia de caracteres de control | `subject`, `username` y `email` entran en el asunto y en `replyTo`; sin validar pueden colarse saltos de línea o direcciones distintas. `nodemailer` normaliza muchas de estas cosas, pero **no confíes en ello** (por confirmar) | Revisión | Cumple desde el 28/10/2026 (`validateContactMessage`; M3) |
 | `nodemailer` actualizado | El aviso alto de `nodemailer` incluye **inyección de comandos SMTP** y envío a un dominio no previsto, y el destinatario de respuesta (`replyTo`) sale del usuario | `npm run quality` | **No cumple** (M16) |
-| Sin ejecución de código ni de procesos a partir de la entrada | Es la vulnerabilidad más grave posible | `quality` y ESLint prohíben `eval`, `new Function` y `child_process` | Cumple **(verificado)** |
+| Sin ejecución de código ni de procesos a partir de la entrada | Es la vulnerabilidad más grave posible | `quality` y ESLint prohíben `eval`, `new Function` y `child_process` en el código de la API (los scripts de `scripts/` son herramientas de desarrollo y quedan fuera: `quality-check` lanza la suite con `runWithTimeout` de `scripts/lib/repo.mjs`, que al agotarse el tiempo máximo mata el árbol de procesos y no deja huérfanos, M24 b; `docs-check` falla si `index.js` declara rutas, M24 a) | Cumple **(verificado)** |
 | Sin peticiones del servidor a URLs que da el cliente | Evita SSRF | Revisión | Cumple: el servidor solo habla con S3 y SMTP **(verificado)** |
 
 ### S7. S3 e IAM
@@ -110,19 +111,19 @@ Rutas de **lectura** públicas (los datos del portal son públicos): `GET /list-
 - **Por qué:** un error revela cómo está hecho el sistema; un log lo leen más personas de las que crees.
 - **Reglas:**
   - Sin trazas de pila en producción: solo en local (`isDev` en `errorHandler`). Cumple.
-  - Los mensajes al cliente son **controlados**. **No cumple:** `errorHandler` devuelve `err.message` de cualquier error no mapeado (por ejemplo, un `JSON.parse` fallido o un error del SDK) también en producción (M17).
+  - Los mensajes al cliente son **controlados**. **Cumple (M17 y M22, 28/10/2026):** `errorHandler` solo devuelve textos fijos o mapeados (`Internal server error` para todo lo no mapeado; `Invalid JSON`, `Payload too large`, `Bad request`, `Token expired`, etc.); el `err.message` real queda en la consola. Un `Origin` no permitido responde `403` `Origin not allowed` sin el origen; el origen rechazado se registra con `console.warn('CORS: origin not allowed:', JSON.stringify(origin.slice(0, 200)))` (el origen se trunca a 200 caracteres y `JSON.stringify` neutraliza saltos de línea y comillas de un valor que controla el cliente) y no se devuelve. Los mapeados de almacenamiento (`NoSuchKey`, `NoSuchBucket`, `AccessDenied`, `NetworkingError` / `ECONNREFUSED`) conservan su texto por decisión (28/10/2026): revelan al cliente el tipo de fallo de almacenamiento, no datos de la petición.
   - Nada sensible en los logs (ver S1). `morgan('combined')` registra método, URL completa, IP, `User-Agent` y `Referer`, pero no cabeceras de autenticación ni cuerpos: por eso **los tokens no pueden ir en la URL**.
   - `console.error(..., error)` con el objeto del SDK: aceptable hoy; no añadas datos de la petición.
 
 ### S9. Dependencias
 
 - **Por qué:** el código de terceros es casi todo lo que se ejecuta.
-- **Cómo:** `npm run quality` ejecuta `npm audit --omit=dev` y **falla con vulnerabilidades altas o críticas** que no estén aceptadas por escrito en `ACCEPTED_ADVISORIES` (`scripts/quality-check.mjs`); las demás se cuentan como aviso. También falla si una excepción ya no hace falta.
+- **Cómo:** `npm run quality` ejecuta `npm audit --omit=dev` (la CI añade `npm audit --audit-level=high` sobre todas las dependencias, incluidas las de desarrollo como `supertest`) y **falla con vulnerabilidades altas o críticas** que no estén aceptadas por escrito en `ACCEPTED_ADVISORIES` (`scripts/quality-check.mjs`); las demás se cuentan como aviso. También falla si una excepción ya no hace falta.
 - **Reglas:**
   - Se confirma `package-lock.json` y se instala con `npm ci`.
   - Se corrige con `npm audit fix`, **nunca con `--force`** (subiría `nodemailer` a otra versión mayor sin avisar).
   - **Solo se acepta** lo que no es alcanzable en producción o no tiene arreglo, con la justificación escrita. Que exista un arreglo con cambios mayores **no** es motivo para aceptar un aviso alcanzable.
-  - Antes de añadir una librería: mantenimiento, licencia, tamaño y que funcione con Node 20.
+  - Antes de añadir una librería: mantenimiento, licencia, tamaño y que funcione con Node 22 (`engines` de `package.json`).
 - **Excepciones vigentes** (en `ACCEPTED_ADVISORIES`):
 
 | Dependencia | Gravedad | Por qué se acepta |
@@ -131,7 +132,7 @@ Rutas de **lectura** públicas (los datos del portal son públicos): `GET /list-
 | `@mapbox/node-pre-gyp` | Alta | Herramienta de instalación de `bcrypt`. No se carga en ejecución |
 | `brace-expansion` | Alta | Llega por `minimatch`, en la instalación de `bcrypt` y en `archiver` (que usa `exceljs` al escribir `.xlsx`). Los patrones son internos y no hay entrada del usuario (por confirmar en `exceljs`) |
 
-- **Sin aceptar, alcanzables en producción (M16):** `express` y `path-to-regexp`, `jws` (vía `jsonwebtoken`), `nodemailer`, `fast-xml-parser` (vía el SDK de AWS) e `ip-address` (vía `express-rate-limit`). La puerta de calidad **falla** por ellas hasta que se actualicen. `npm audit fix` resuelve las que no exigen un cambio mayor; `nodemailer` sí lo exige.
+- **Avisos de producción:** sin excepciones aceptadas (`ACCEPTED_ADVISORIES` vacío). M16 y M20 están resueltos; solo queda el moderado de `uuid` vía `exceljs` (M20), cuyo único arreglo exige `--force`. `npm audit fix` resuelve lo que no exige un cambio mayor.
 
 ### S10. Privacidad
 
@@ -151,7 +152,7 @@ Solo nombres de categoría; el detalle de cada riesgo está en la fuente.
 | API5 Broken Function Level Authorization | S3 (rutas mutantes protegidas) |
 | API6 Unrestricted Access to Sensitive Business Flows | S6 (`/send-email`: M3) |
 | API7 Server Side Request Forgery | S6 (no hay peticiones a URLs del cliente) |
-| API8 Security Misconfiguration | S6 (B1), S8 (M17), S9, M12 |
+| API8 Security Misconfiguration | S6 (B1), S8 (M17 y M22, resueltos), S9, M12 |
 | API9 Improper Inventory Management | Prefijo `/api/v1`, inventario en [04](../04-api.md) y versionado ([buenas prácticas](buenas-practicas-backend.md#9-versionado-de-la-api)) |
 | API10 Unsafe Consumption of APIs | S5 y S7: lo que se lee de S3 se trata como entrada (A6); SMTP y AWS SDK (M16) |
 
@@ -164,12 +165,12 @@ Solo nombres de categoría; el detalle de cada riesgo está en la fuente.
 | `.env` versionado / `package-lock.json` versionado | **No** / **Sí** |
 | Rutas que modifican estado sin autenticación | Solo `POST /log` y `POST /send-email` (excepciones registradas) |
 | Variables de entorno que usa el código y no están declaradas | **Ninguna** |
-| `npm audit` de producción (alta o crítica) | **Falla**: `express`, `path-to-regexp`, `jws`, `nodemailer`, `fast-xml-parser` e `ip-address` sin aceptar (M16). `tar`, `@mapbox/node-pre-gyp` y `brace-expansion` aceptadas |
+| `npm audit` de producción (alta o crítica) | **Pasa**: sin avisos altos o críticos y sin excepciones aceptadas. Solo queda el moderado de `uuid` vía `exceljs` (M20) |
 | ESLint | Sin errores; avisos en el tope (ver [buenas prácticas](buenas-practicas-backend.md#14-eslint-y-el-tope-de-avisos)) |
 | Login con el usuario correcto y sin contraseña | La petición **no recibe respuesta** (A7) |
-| `trust proxy`, `helmet`, límite de `multer`, límite en `/send-email` | Ninguno configurado (M12, B1, M6, M3) |
+| `trust proxy`, `helmet`, límite de `multer`, límite en `/send-email` | `trust proxy` y el límite de `/send-email` configurados; `helmet` no (B1); el límite de `multer` configurado desde el 28/10/2026 (M6) |
 | Validación de la entrada de las rutas | Parcial: ver la tabla de [buenas prácticas](buenas-practicas-backend.md#4-validación-de-entrada) |
-| `errorHandler` y mensajes al cliente | Sin trazas en producción; devuelve `err.message` sin filtrar (M17) |
+| `errorHandler` y mensajes al cliente | Sin trazas en producción; mensajes fijos o mapeados, sin `err.message` (M17, resuelto el 28/10/2026); CORS rechazado como `403` sin el origen (M22) |
 | Bucket: acceso público bloqueado, cifrado y versionado; IAM mínimo | Sí **(verificado en `sigmetum-infra`)** |
 | Declaración de Node (`engines`) | No está (B3) |
 
@@ -178,7 +179,7 @@ Solo nombres de categoría; el detalle de cada riesgo está en la fuente.
 Márcala **siempre** que el cambio toque autenticación, rutas, subida de archivos, S3, CORS, correo, dependencias, secretos o logs.
 
 - [ ] `npm run lint`, `npm run quality` y `npm run docs:check` en verde.
-- [ ] Toda ruta nueva que modifica estado cuelga de `protectedRouter`; si es pública, está justificada en `PUBLIC_MUTATING_ROUTES` y en la tabla de S3.
+- [ ] Toda ruta nueva que modifica estado lleva `tokenAuth` como primer manejador; si es pública, está justificada en `PUBLIC_MUTATING_ROUTES` y en la tabla de S3.
 - [ ] Toda entrada (cuerpo, parámetros, consulta, `req.file`) se valida en tipo y forma **antes** de usarse; ninguna clave de S3 se construye con un valor sin validar.
 - [ ] Todo manejador `async` captura sus errores y llama a `next(error)`.
 - [ ] No se escribe ningún dato sensible en un log, ni se devuelve `err.message` de un error interno al cliente.

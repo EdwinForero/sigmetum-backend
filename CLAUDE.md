@@ -7,7 +7,21 @@ API REST de SIGMETUM-A en Node.js + Express; la persistencia es Amazon S3 (no ha
 - `npm start`: arranca el servidor (puerto `PORT`, 8000 por defecto); `GET /healthcheck` comprueba que responde
 - `npm run lint`: ESLint 9 (errores y tope de avisos) · `npm run quality`: seguridad (patrones, rutas sin autenticación, variables sin declarar, secretos, `npm audit`) y lint
 - `npm run docs:check`: comprueba que la documentación no se ha quedado atrás
-- `npm test` es el placeholder de `npm init` (aún no hay tests; ver M11 en `docs/07-estado-y-deuda-tecnica.md`)
+- `npm test`: suite de la API en `tests/` (`node:test` + `supertest`, sin red ni credenciales); cobertura parcial (M11 en `docs/07-estado-y-deuda-tecnica.md`)
+- `npm run docs:gate`: cierre documental de una iteración (documentos de cada archivo cambiado, `docs/07` con fecha de hoy, aviso para PR); compara con `HEAD`, así que va antes del commit
+- `npm run agentes:test`: pruebas de `plugins/` (núcleo `ciclo-agentico` y marketplace local, `node:test`); no son tests de la API
+- `npm run agentes:bootstrap`: en un equipo nuevo, detecta los plugins del flujo agéntico que faltan y pregunta antes de instalar cada uno (`-- --dry-run` solo informa)
+
+## Ciclo de desarrollo (ciclo-agentico)
+
+Las features y los fixes con agentes pasan por `/ciclo <tarea>` (plugin [ciclo-agentico](plugins/ciclo-agentico/README.md); configuración en `.claude/flujo.json`, que se valida con `/ciclo-init`; instalación en [docs/README.md](docs/README.md#equipo-nuevo)). Roles:
+
+- `requirements`: convierte la tarea en un borrador de spec en `docs/specs/`; no propone solución técnica.
+- `architect`: solo lee; entrega un plan por pasos contrastado con las guías y la integración, o un veto motivado.
+- `developer`: implementa el plan con el cambio mínimo (TDD cuando haya base de tests); no edita documentos.
+- `tester-documentador`: ejecuta la verificación, pone los documentos al día y propone el mensaje de commit; no edita código.
+
+Hay puerta humana tras requisitos, tras arquitectura y al final. Ningún rol hace commit, push ni `git add`: el commit lo hace el usuario entre iteraciones. Principios de trabajo: skill [principios](plugins/ciclo-agentico/skills/principios/SKILL.md).
 
 ## Antes de empezar: lee la guía que corresponda a la tarea
 
@@ -21,7 +35,7 @@ Las guías están en `docs/guias/`. Léelas **antes** de escribir código, no de
 
 Si lo que te piden **contradice una guía, avisa y pregunta antes de hacerlo**. Si la guía y el código se contradicen, dilo: no des por buena ninguna de las dos.
 
-Las guías contienen las normas y su motivo; las skills de `.claude/skills/` (`new-endpoint`, `s3-operation-review`, `env-var-change`, `security-pre-merge`) son el procedimiento paso a paso y enlazan a las guías. Se usan juntas.
+Las guías contienen las normas y su motivo; las skills del proyecto (cuáles hay y dónde están: [plugins/README.md](plugins/README.md)) son el procedimiento paso a paso y remiten a las guías. Se usan juntas.
 
 ## Integración con otros repositorios
 
@@ -35,7 +49,7 @@ Cambios **compatibles** no necesitan versión nueva; cambios **incompatibles** s
 ## Lo que nunca se hace (resumen; el detalle y el motivo están en las guías)
 
 - Escribir secretos, tokens o contraseñas en el repositorio, en `.env.example`, en la documentación o en un log.
-- Añadir una ruta que modifique estado (`POST`, `PUT`, `PATCH`, `DELETE`) fuera de `protectedRouter`, salvo una excepción registrada y justificada.
+- Añadir una ruta que modifique estado (`POST`, `PUT`, `PATCH`, `DELETE`) sin `tokenAuth` como primer manejador de la propia ruta, salvo una excepción registrada y justificada.
 - Construir una clave de S3 o de un objeto con texto del cliente o de un Excel sin validarlo antes contra una lista de permitidos.
 - Dejar un manejador `async` sin `try/catch` y `next(error)`, o devolver al cliente el `err.message` de un error interno.
 - Usar `eval`, `new Function` o `child_process`.
@@ -46,16 +60,17 @@ Cambios **compatibles** no necesitan versión nueva; cambios **incompatibles** s
 ## Al terminar cualquier feature o fix
 
 1. Actualiza los documentos que indica `docs/guias/mantenimiento.md` (sección 2) **en el mismo commit**.
-2. Ejecuta `npm run lint`, `npm run quality` y `npm run docs:check`, y `npm test` cuando haya tests: deben pasar. Si corregiste avisos de ESLint, baja `--max-warnings` al número real. Si `quality` falla por algo que **ya estaba** (por ejemplo, el aviso M16 de dependencias), no lo tapes ni lo aceptes para que pase: dilo en el resumen.
+2. Ejecuta `npm run lint`, `npm run quality` y `npm run docs:check`, y `npm test`: deben pasar. Si corregiste avisos de ESLint, baja `--max-warnings` al número real. Si `quality` falla por algo que **ya estaba** (por ejemplo, el aviso M20 de dependencias), no lo tapes ni lo aceptes para que pase: dilo en el resumen.
 3. Contrasta lo que escribas con el código; lo que no puedas comprobar, márcalo como **(por confirmar)**.
 4. Si el cambio toca el contrato con el frontend (rutas, formato de respuestas, columnas del Excel, nombres de versión, JWT, CORS, `/get-data`), revisa la sección 6 de `docs/guias/mantenimiento.md` y dilo en el resumen final.
 5. Las cifras (archivos, endpoints, funciones, variables, dependencias, tests, guías) solo viven en la tabla de métricas de `docs/07-estado-y-deuda-tecnica.md`.
+6. Cierre documental obligatorio: toda iteración actualiza `docs/07-estado-y-deuda-tecnica.md` (como mínimo, la fecha "actualizado") y `npm run docs:gate` pasa antes del commit; si tocaste `plugins/`, también `npm run agentes:test`.
 
 ## Reglas de trabajo
 
-- Los fallos se corrigen con TDD: primero un test que falle **por el motivo correcto**, después el cambio mínimo (cuando exista la base de tests, M11).
+- Los fallos se corrigen con TDD: primero un test en `tests/` que falle **por el motivo correcto**, después el cambio mínimo (la base de tests existe; es parcial, M11). Una ruta nueva se clasifica en `tests/estructura-rutas.test.js`; si añades tests, sube `MIN_TESTS` en `scripts/quality-check.mjs`.
 - Cada ruta responde `{ success: true, data }` o `{ success: false, error }`; los fallos se pasan con `next(error)` a `middleware/errorHandler.js`.
-- Las rutas protegidas cuelgan del `protectedRouter` con `tokenAuth`.
+- Las rutas protegidas llevan `tokenAuth` como primer manejador de la propia ruta.
 - Las claves de S3 salen de `config/s3Paths.js`; las variables de entorno, de `config/validateEnv.js` y `.env.example`.
 - Este repositorio no corrige nada del frontend ni de `sigmetum-infra`: si un cambio los afecta, se documenta y se avisa en la PR.
 - No guardes secretos en `.env.example` ni en la documentación.

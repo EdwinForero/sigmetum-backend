@@ -11,12 +11,21 @@ Orden de ejecución:
 1. `require('dotenv').config()` — carga `.env`.
 2. Registra `process.on('uncaughtException')` (log + `exit(1)`) y `process.on('unhandledRejection')` (sólo log).
 3. `validateEnv()` — lanza si faltan variables; el proceso no arranca.
-4. Crea la app Express y registra, en este orden:
+4. `require('./app')` — después de validar, porque `aws/awsS3connect.js` lee `AWS_REGION` al cargarse.
+5. `app.listen(PORT)`.
+
+---
+
+## `app.js` — la aplicación Express
+
+Construye y exporta la app (`module.exports = app`) sin abrir puerto, sin `dotenv` y sin `validateEnv`, de modo que los tests la importan con `supertest` (M13 resuelto). Registra, en este orden:
    - `/healthcheck` (antes de todo lo demás)
    - `morgan('combined')`, `cors({ origin: ALLOWED_ORIGIN })`, `express.json()`, `compression()`
    - `authRoutes`, `dataRoutes`, `contentRoutes` bajo `API_PREFIX`
+   - `notFound` (tras los tres routers)
    - `errorHandler` (último)
-5. `app.listen(PORT)`.
+
+`trust proxy` vale 1 (ALB → nginx → Express). El 403 de CORS (`originNotAllowed`) vive aquí.
 
 ---
 
@@ -28,7 +37,7 @@ Orden de ejecución:
 |---|---|
 | `required` | Array con las variables siempre obligatorias |
 | `requiredLocal` | `['AWS_PROFILE']`, obligatorias sólo si `NODE_ENV === 'local'` |
-| `validateEnv()` | Recorre ambas listas y lanza `Error("Variables de entorno requeridas no definidas: ...")` con todas las que falten |
+| `validateEnv()` | Recorre ambas listas y lanza `Error("Variables de entorno requeridas no definidas: ...")` con todas las que falten. Después valida el valor de las presentes (M15): `ADMIN_PASSWORD` hash bcrypt completo, `JWT_SECRET` de al menos 32 caracteres y `JWT_EXPIRATION` con unidad y mayor que cero (`isValidExpiration`: rechaza solo números y duraciones <= 0, y delega el formato en `jsonwebtoken`). Si `NODE_ENV` no es exactamente `local` ni `test` lanza `Error("Variables de entorno con valor no válido: ...")`; en `local` y `test` solo emite `console.warn` con prefijo `[validateEnv]`. Los mensajes nombran variable y regla, nunca el valor. Detalle en [03](03-configuracion.md#variables-de-entorno) |
 
 Exporta: `validateEnv` (función por defecto).
 
@@ -41,19 +50,29 @@ Exporta: `validateEnv` (función por defecto).
 | `ACTIVE_PATH` | `data/active` | JSON activos, uno por provincia |
 | `TERMS_PATH` | `data/terms` | Carpeta del glosario |
 | `TERMS_FILE` | `noLatinTerms.json` | Fichero del glosario |
-| `RESERVED_SEGMENTS` | `['active', 'terms']` | Subcarpetas de `data/` que no son provincias |
+| `DRAFTS_PATH` | `data/drafts` | Borradores de `POST /upload` con celdas vacías: `data/drafts/{provincia}/<uuid>.xlsx`. No son versiones (A2, A9) |
+| `RESERVED_SEGMENTS` | `['active', 'terms', 'drafts']` | Subcarpetas de `data/` que no son provincias; `GET /list-files` las descarta, así que ya no muestra los borradores |
+| `PROVINCIA_MAX_LENGTH` | `50` | Longitud máxima de la provincia, medida tras recortar y normalizar a NFC y comprobada antes de ejecutar la expresión |
+| `PROVINCIA_WORD_PATTERN` | Expresión con bandera `u` y sin `g`: empieza y termina en letra, cada letra es `\p{L}` y `\p{Script=Latin}` a la vez, y tras una letra solo admite marcas combinantes del bloque U+0300 a U+036F, salvo U+0345 y U+034F (el literal está en `config/s3Paths.js`) | Una palabra de provincia: letras latinas con diacríticos (M23, 30/10/2026; antes, cualquier letra Unicode). Rechaza cirílico, griego y otros alfabetos, los números romanos (U+2160 a U+2188, categoría Nl), la marca invisible U+034F y la griega U+0345, y una marca combinante cirílica (p. ej. U+0483) tras una letra latina. No es un patrón de la provincia entera: `getProvinciaNameError` parte por espacio o guion y valida cada palabra (una parte vacía = separador en los extremos o doble = rechazo) |
+| `PROVINCIA_RESERVED` | `[...RESERVED_SEGMENTS]` | Nombres exactos que no pueden ser carpeta de provincia (desde A2, `drafts` ya está en `RESERVED_SEGMENTS`) |
+| `DRAFT_FILE_NAME_PATTERN` | `/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}.xlsx$/` (sin `g`) | Nombre de un borrador: UUID en minúsculas y `.xlsx`. Lo usan `isValidDraftKey` y el descarte de borradores de `routes/data.js` |
+| `DATA_FILE_NAME_PATTERN` | `/^(\d{4}-\d{2}-\d{2})_v(\d+)\.xlsx$/` (sin `g`, dos grupos de captura: fecha y `N`) | Nombre de una versión (D2). Fuente única: `parseVersionName` (`functions/versionName.js`) lo usa para interpretar el nombre, y con él `getNextVersion` y `deleteFileFromS3`; `isValidDataKey` solo lo usa con `.test()` |
+| `IMAGE_KEY_MAX_LENGTH` | `200` | Longitud máxima de un `imageKey` |
+| `IMAGE_KEY_PATTERN` | expresión regular (banderas `u` e `i`, sin `g`) | Forma permitida de un `imageKey`; se aplica con `isValidImageKey` (regla en [06](06-almacenamiento-s3.md#regla-de-imagekey)). Va en forma plana, con dos lookaheads (`(?!.*\/\/)` y `(?!.*\/[.\p{M}])`, que impide que un segmento tras `/` empiece por `.` o por una marca combinante), para no disparar `security/detect-unsafe-regex` |
+| `IMAGE_UPLOAD_TYPES` | `{ jpg, jpeg, png, gif, webp }` → MIME canónico (`image/jpeg`, `image/jpeg`, `image/png`, `image/gif`, `image/webp`) | Tipos que acepta `POST /upload-image`: extensión en minúsculas → MIME exigido y `ContentType` guardado. Se consulta solo por sus entradas propias (`constructor` o `__proto__` no pasan). Sus claves deben seguir siendo un subconjunto de las extensiones de `IMAGE_KEY_PATTERN` (un test lo comprueba) |
 
 ---
 
 ## `routes/`
 
-Todos los routers siguen el mismo patrón: un `router` con rutas públicas y un `protectedRouter` con `tokenAuth`, montado al final con `router.use(protectedRouter)`.
+Todos los routers declaran sus rutas en un único `router`. `tokenAuth` es el **primer manejador de cada ruta protegida**, en la propia línea de la declaración (`router.post('/upload', tokenAuth, upload.single('file'), ...)`, antes de `multer`); las públicas no lo llevan. No hay `router.use(tokenAuth)` a nivel de router, así que la protección no depende del orden de montaje en `app.js` (M21, entrega 2, ver [07](07-estado-y-deuda-tecnica.md)). `npm run quality` lo vigila con la suite de `tests/` (pila real de `app.js`: `tests/estructura-rutas.test.js` y `tests/rutas-protegidas.test.js`) y con `scripts/lib/repo.mjs`: `routeDeclarations()` lee las declaraciones de una línea y `unparsedRouteLines()` lista las líneas de `routes/` que parecen una declaración (`router.`/`protectedRouter.`/`app.` con `get|post|put|patch|delete|all|use|route(`) y no casan con el patrón completo, p. ej. partidas en varias líneas; `quality` las cuenta como problema. La suite monta la `app.js` real, con S3 y SMTP simulados.
 
 ### `auth.js`
 
 | Elemento | Descripción |
 |---|---|
-| `loginLimiter` | `rateLimit({ windowMs: 15 min, max: 10 })` con cabeceras estándar `RateLimit-*` |
+| `loginLimiter` | `rateLimit({ windowMs: 15 min, limit: 10 })` con cabeceras estándar `RateLimit-*` |
+| `userAuth(req, res, next)` (privada, no se exporta) | Manejador de login, movido desde `functions/userAuthentication.js` el 30/10/2026 (B7) sin cambiar su comportamiento. Construye en memoria un array `users` con un único usuario `{ id: 1, username: ADMIN_USERNAME, password: ADMIN_PASSWORD }`. Todo el cuerpo va dentro de `try/catch`; un fallo inesperado llega a `errorHandler` con `next(error)`. Si `username` o `password` no son cadenas (ausentes, número, objeto, `null`) → 400 `Username and password are required and must be strings`. Busca por `username`; si no existe → 401. `bcrypt.compare(password, user.password)`; si falla → 401 (**`ADMIN_PASSWORD` debe ser un hash bcrypt**). Firma `jwt.sign({ userId }, JWT_SECRET, { expiresIn: JWT_EXPIRATION, algorithm: 'HS256' })` y responde `{ success: true, data: { token } }`. `JWT_SECRET`, `JWT_EXPIRATION`, `ADMIN_USERNAME` y `ADMIN_PASSWORD` se leen al cargar `routes/auth.js`, no en cada petición |
 | `POST /log` | `loginLimiter` → `userAuth` |
 | `GET /auth` | `tokenAuth` → responde `Authorized` |
 
@@ -61,53 +80,64 @@ Todos los routers siguen el mismo patrón: un `router` con rutas públicas y un 
 
 | Elemento | Descripción |
 |---|---|
-| `upload` | Instancia `multer({ storage: memoryStorage() })` |
+| `upload` | Instancia `multer({ storage: memoryStorage(), limits: { fileSize: MAX_UPLOAD_BYTES + 1 } })` con `MAX_UPLOAD_BYTES` = 10 MB. Se suma 1 porque multer rechaza el tamaño igual a `fileSize`: así 10 MB exactos se aceptan y 10 MB + 1 byte da `LIMIT_FILE_SIZE` (400) |
 | `GET /list-files` | `listFilesInS3Folder('data/')`, agrupa por el segundo segmento de la clave descartando `RESERVED_SEGMENTS` |
 | `GET /get-data/:path(*)` | `getFileFromS3(path)` |
 | `GET /get-merged-data` | `getMergedDataInS3Folder(ACTIVE_PATH)` |
-| `POST /upload` | `convertExcelToJson` → `getNextVersion` → `formatFileName` → `uploadFileToS3` (Excel) → si no hay vacíos, `uploadFileToS3` (JSON activo); si hay vacíos, 400 con `draftKey` |
-| `POST /upload/confirm` | `confirmed` falso → `deleteFileFromS3(draftKey)`; verdadero → `updateFileS3(draftKey)` |
-| `POST /update-file` | `updateFileS3(fileName)` |
-| `POST /delete-file` | `deleteFileFromS3(fileName)` |
+| `POST /upload` | Sin `req.file` → 400; extensión distinta de `.xlsx` → 400 (el MIME no se comprueba en esta ruta: lo manda el cliente). Después `convertExcelToJson` → `validateProvincia(processedData)` (400 con su mensaje, antes de cualquier escritura). **Con vacíos (A2, A9)**: `draftKey = newDraftKeyOf(provincia, randomUUID())` → `uploadFileToS3` del Excel en `draftFolderOf(provincia)` → `discardDrafts(provincia, draftKey)` (lista la carpeta de borradores y borra los previos que pasen `isValidDraftKey`; si falla, el error se propaga) → 400 con `draftKey` y `emptyFields` solo con `rowIndex` (sin `processedData` ni `rowData`, D8). No lista versiones ni llama a `getNextVersion`: no se crea ninguna versión. **Sin vacíos**: un único `now = new Date()` → `listFilesInS3Folder(provinciaFolderOf(provincia))` → `getNextVersion(provincia, filesInFolder, now)` y `formatFileName(version, now)` → `uploadFileToS3` (Excel) → `uploadFileToS3` (JSON activo) → `discardDrafts(provincia)` como mejor esfuerzo (`try/catch`: si falla se registra y la respuesta sigue siendo 200) |
+| `POST /upload/confirm` | 400 si `draftKey` falta o no es cadena; 400 `Invalid draftKey` si `isValidDraftKey` la rechaza (una clave de versión también). `provincia = provinciaOfDraftKey(draftKey)`; `listFilesInS3Folder(draftFolderOf(provincia))` y, si no hay una entrada con esa clave, 404 `Draft not found` (error con `status: 404` y `publicMessage`, por `next(error)`). `confirmed` falso → solo `deleteFileFromS3(draftKey)` (no toca versiones ni activo). Verdadero → `getBufferFromS3(draftKey)` → `convertExcelToJson` (antes de escribir nada) → `listFilesInS3Folder(provinciaFolderOf(provincia))` → `getNextVersion` y `formatFileName` con un único `now` → `uploadFileToS3` (versión nueva) → `putJsonToS3(activeKeyOf(provincia), processedData)` (sin releer la versión recién escrita) → `deleteFileFromS3(draftKey)` |
+| `POST /update-file` | 400 si `fileName` falta o no es cadena; 400 `Invalid fileName` si `isValidDataKey` la rechaza; `activateFrom(fileName, provinciaOfKey(fileName))` |
+| `POST /delete-file` | 400 si `fileName` falta o no es cadena; 400 `Invalid fileName` si `isValidDataKey` la rechaza; `removeVersion(fileName)` |
+| `activateFrom(sourceKey, provincia)` (privada) | Deja `sourceKey` (un `.xlsx` de versión) como activa: `getBufferFromS3(sourceKey)` → `convertExcelToJson` → `putJsonToS3(activeKeyOf(provincia), processedData)`. Aquí vive la orquestación (M14, 29/10/2026): `aws/` solo hace I/O y `functions/` solo reglas puras |
+| `removeVersion(key)` (privada) | Borra una versión y corrige el activo: `deleteFileFromS3(key)` → `listFilesInS3Folder(provinciaFolderOf(p))` → `planActiveAfterDelete`; con `regenerate` llama a `activateFrom(plan.key, p)`; con `delete`, a `deleteFileFromS3(activeKeyOf(p))`; con `keep`, no hace nada. Todo dentro del `try` del manejador: el error original llega a `next(error)` |
 
 ### `content.js`
 
 | Elemento | Descripción |
 |---|---|
-| `upload` | Instancia `multer` en memoria |
+| `upload` | Instancia `multer` en memoria con `limits.fileSize` = 5 MB + 1 (mismo motivo que en `data.js`): 5 MB exactos se aceptan y 5 MB + 1 byte da 400 |
 | `transporter` | `nodemailer.createTransport` contra `smtp.gmail.com:587` (`secure: false` → STARTTLS) con `EMAIL`/`EMAIL_PASSWORD` |
-| `POST /send-email` | Construye `mailOptions` (from/to = `EMAIL`, `replyTo` = email del usuario) y `transporter.sendMail` |
+| `sendEmailLimiter` | `rateLimit({ windowMs: 15 min, limit: 5 })` con cabeceras estándar; al superarlo responde 429 con `{ success: false, error }`. Almacén en memoria (se reinicia al reiniciar y se multiplica por instancia). Copia de `loginLimiter`; los dos usan `limit` (B6 resuelto) |
+| `POST /send-email` | `sendEmailLimiter` → `validateContactMessage(req.body)`; si devuelve `error`, 400; si no, construye `mailOptions` con los valores recortados (from/to = `EMAIL`, `replyTo` = email del usuario) y `transporter.sendMail`. Todo el cuerpo va dentro de `try/catch` con `next(error)`. Ruta pública (sin `tokenAuth`). El limitador es el primer manejador, cuenta antes de validar y cuenta también el tráfico anónimo |
 | `GET /list-images` | `getPresignedUrlsFromS3Folder(GALLERY_PATH)` |
-| `GET /get-image` | `getPresignedUrlFromS3(GALLERY_PATH, imageKey)` |
+| `GET /get-image` | 400 si `imageKey` falta, está vacío o no es cadena; 400 `imageKey is not valid` si `isValidImageKey` lo rechaza; si no, `getPresignedUrlFromS3(GALLERY_PATH, imageKey)` |
 | `GET /list-terms` | `getTextJsonS3(TERMS_FILE, TERMS_PATH)` |
-| `POST /upload-image` | Sustituye espacios del `title` por `_`, añade la extensión del fichero original, `uploadImageToS3` |
-| `DELETE /delete-image` | `deleteImageFromS3`; si devuelve `success: false` responde 500 |
-| `POST /upload-term` | `uploadTextToJsonS3(term, ...)` |
-| `DELETE /delete-term` | `deleteTermFromS3`; si devuelve `success: false` responde 500 |
+| `POST /upload-image` | 400 `File and title are required` si falta el fichero o `title` no es cadena o está vacío; `validateImageUpload` da los otros tres 400 (tipo, título, contenido) o la clave y el MIME canónico; `uploadImageToS3` guarda con ese MIME, no con el del cliente |
+| `DELETE /delete-image` | 400 si `imageKey` falta o no es cadena; 400 `imageKey is not valid` si `isValidImageKey` lo rechaza; `await deleteImageFromS3` y responde 200 `Image deleted successfully`; si lanza, `next(error)` con el error original (B5, 29/10/2026), así que `errorHandler` da el texto mapeado con 500 |
+| `POST /upload-term` | 400 si `term` no es cadena o está vacío tras `trim()`; `uploadTextToJsonS3(term, ...)` |
+| `DELETE /delete-term` | 400 si `term` falta, está vacío o no es cadena; `await deleteTermFromS3` y responde 200 `Term deleted successfully`; si lanza, `next(error)` con el error original (B5, 29/10/2026) |
 
 ---
 
 ## `functions/`
 
-### `userAuthentication.js` → `userAuth(req, res)`
+### `validateImageKey.js` → `isValidImageKey(key)`
 
-Handler de login (no middleware: no llama a `next`).
+Función pura (no lee el entorno ni llama a S3) que decide si un `imageKey` del cliente puede usarse para construir la clave `gallery/{imageKey}`. Devuelve `true` solo si `key` es una cadena, mide entre 1 y `IMAGE_KEY_MAX_LENGTH` (comprobación previa a ejecutar la expresión), cumple `IMAGE_KEY_PATTERN` y no contiene `..`. La comprobación de `..` es defensa en profundidad: `a../b.jpg` (lo que llega tras decodificar `a%2e%2e/b.jpg`) cumple el patrón. La usan `GET /get-image` y `DELETE /delete-image`. Regla completa: [06](06-almacenamiento-s3.md#regla-de-imagekey).
 
-- Construye en memoria un array `users` con un único usuario `{ id: 1, username: ADMIN_USERNAME, password: ADMIN_PASSWORD }`.
-- Busca por `username`; si no existe → 401.
-- `bcrypt.compare(password, user.password)`; si falla → 401. **`ADMIN_PASSWORD` debe ser un hash bcrypt.**
-- Firma `jwt.sign({ userId }, JWT_SECRET, { expiresIn: JWT_EXPIRATION })` y responde `{ token }`.
+### `validateImageUpload.js` → `validateImageUpload({ file, title })`
 
-Las variables se leen al cargar el módulo, no en cada petición.
+Función pura (no lee el entorno ni llama a S3) de `POST /upload-image`. Devuelve `{ error }` con un texto fijo o `{ value: { key, contentType } }`, donde `key` es relativa a `gallery/` y `contentType` es el MIME canónico de `IMAGE_UPLOAD_TYPES`. Orden de comprobación, y el primero que falla decide:
 
-### `tokenAuthentication.js` → `tokenAuth(req, res, next)`
+1. **Tipo** (`Image type not allowed`): la extensión (lo que hay tras el último `.` de `originalname`, en minúsculas) debe estar en `IMAGE_UPLOAD_TYPES` y el MIME declarado, en minúsculas, debe ser exactamente el canónico de esa extensión. `image/jpg`, un MIME vacío y `application/octet-stream` se rechazan.
+2. **Título** (`Image title is not valid`): `title.trim()` con el blanco (`\s+`, incluidos `\t` y `\n`) sustituido por `_` y sin puntos finales. Se rechaza si supera `IMAGE_KEY_MAX_LENGTH` tras sanear el blanco (antes de quitar los puntos finales), si queda vacío (también solo puntos), si lleva `/` o `\`, o si `isValidImageKey(título + '.' + extensión)` es falso (cubre `..`, los caracteres de control que no son blanco y la longitud máxima de toda la clave).
+3. **Firma** (`File content does not match the image type`): los primeros bytes de `file.buffer` según el tipo canónico (JPEG `FF D8 FF`; PNG `89 50 4E 47 0D 0A 1A 0A`; GIF `GIF87a` o `GIF89a`; WebP `RIFF` en los bytes 0-3 y `WEBP` en 8-11). Un buffer más corto que la firma no coincide.
 
-Middleware.
+Sin dependencias. La búsqueda del tipo usa `Object.entries(IMAGE_UPLOAD_TYPES)` y no un acceso con índice variable (este último añadía un aviso `security/detect-object-injection`). Límite: un polyglot imagen+script con cabecera válida pasa; la firma no sustituye un reprocesado de la imagen. La ruta ([04](04-api.md)) pasa a `uploadImageToS3` un objeto con el buffer original y el MIME canónico; `aws/` no cambia.
 
-- Lee `Authorization`, toma lo que va tras el primer espacio (`Bearer <token>`).
-- Sin token → 401 `No token provided`.
-- `jwt.verify` con `JWT_SECRET`: error → 401 `Token expired` o `Invalid token`.
-- Éxito → `req.user = payload` y `next()`.
+### `validateProvincia.js` → `getProvinciaNameError(name)` y `validateProvincia(rows)`
+
+Funciones puras (no leen el entorno ni llaman a S3). `getProvinciaNameError(name)` recibe un nombre ya recortado y en NFC y devuelve `null` o un texto fijo, en este orden: `Province is required` (ausente, `null` o `''`); `Province is not valid` (no cadena, más de `PROVINCIA_MAX_LENGTH`, alguna palabra que no cumple `PROVINCIA_WORD_PATTERN` tras partir por espacio o guion, o un nombre de `Object.getOwnPropertyNames(Object.prototype)` y `prototype`, como `constructor` o `toString`); `Province is reserved` (en `PROVINCIA_RESERVED` o, en minúsculas, empieza por `active` o `terms`). `validateProvincia(rows)` aplica trim y NFC solo al valor de la celda `Provincia` de la primera fila, devuelve `{ provincia }` o `{ error }` y, si otra fila trae la clave `Provincia` con un valor distinto (tras trim y NFC, `!==`), devuelve `Excel contains more than one province`. Las filas sin la clave se ignoran. La usa `POST /upload`. Regla: [06](06-almacenamiento-s3.md#regla-de-provincia).
+
+### `validateDataKey.js` → `isValidDataKey(key)` e `isValidDraftKey(key)`
+
+`isValidDataKey`: función pura que decide si una clave del cliente (`draftKey`, `fileName`) puede usarse tal cual. `true` solo si es una cadena de hasta 120 caracteres, al partir por `/` da exactamente tres segmentos, el primero es `data`, el segundo pasa `getProvinciaNameError` y además `=== normalize('NFC')` (la clave no se reescribe), y el tercero cumple `DATA_FILE_NAME_PATTERN`. La usan `POST /upload/confirm`, `POST /update-file` y `POST /delete-file`. Rechaza las claves de borrador (`drafts` está reservado). Regla: [06](06-almacenamiento-s3.md#regla-de-clave-de-versión).
+
+`isValidDraftKey`: lista de permitidos de la clave de un borrador. `true` solo si es una cadena de hasta 120 caracteres, al partir por `/` da exactamente cuatro segmentos, los dos primeros son `data/drafts` (`DRAFTS_PATH`), el tercero pasa `getProvinciaNameError` y es NFC, y el cuarto cumple `DRAFT_FILE_NAME_PATTERN`. Solo la usa `POST /upload/confirm` (y el descarte de borradores de `POST /upload`). Regla: [06](06-almacenamiento-s3.md#regla-de-clave-de-borrador).
+
+### `validateContactMessage.js` → `validateContactMessage(body)`
+
+Función pura que valida el cuerpo de `POST /send-email` (`body` puede ser `undefined`). Devuelve `{ error }` con un texto fijo en inglés que nombra el campo y la regla, sin reflejar el valor recibido, o `{ value: { username, email, subject, message } }` con los cuatro campos recortados. Reglas, en este orden: los cuatro son cadenas no vacías tras `trim()`; `username` ≤ 100, `subject` ≤ 150, `message` ≤ 2000 y `email` ≤ 254 caracteres (tras recortar); sin ningún carácter de control (`\p{Cc}`: `\r`, `\n`, NUL...) ni U+2028/U+2029 en `username`, `email` ni `subject` (error `username, email and subject must not contain control characters or line breaks`); `message` rechaza `\p{Cc}` salvo `\n`, `\r` y `\t` (error `message must not contain control characters`); `email` pasa una comprobación básica de formato, no un análisis RFC 5322: `^[^\s@,;:<>()'"\\]+@[^\s@,;:<>()'"\\]+\.[^\s@,;:<>()'"\\]+$`. **Límite conocido**: se rechaza un correo con apóstrofo (`o'brien@example.com`), válido en RFC pero poco habitual; si preocupa, **(por confirmar)**. Los límites son constantes del propio archivo.
 
 ### `convertExcelToJson.js` → `convertExcelToJson(input)`
 
@@ -137,20 +167,41 @@ Comportamiento:
   | 11 | Especies Características |
 
 - Valores con coma se convierten en array (`"Quercus, Pistacia"` → `["Quercus", "Pistacia"]`).
-- Celdas vacías no se incluyen en el objeto de la fila; la fila se añade a `emptyFields` como `{ rowIndex, rowData }` pero **también** se incluye en `processedData`.
+- Celdas vacías no se incluyen en el objeto de la fila; la fila se añade a `emptyFields` como `{ rowIndex, rowData }` pero **también** se incluye en `processedData`. La función sigue construyendo ambos, pero `POST /upload` ya no los expone: desde el 29/10/2026 (D8) su `400` solo devuelve `emptyFields[].rowIndex` y `draftKey`; `processedData` se usa dentro de la ruta (provincia y JSON activo) y `rowData` no se usa fuera de la función.
 
 Helper interno `getCellValue(cell)`: normaliza celdas de ExcelJS — texto enriquecido (`richText`) se concatena, fórmulas devuelven su `result`, `null`/`undefined` → `null`.
 
-### `formatFileName.js` → `formatFileName(version = 1)`
+### `formatFileName.js` → `formatFileName(version = 1, now = new Date())`
 
-Devuelve `YYYY-MM-DD_v{version}.xlsx` con la **fecha local** del servidor.
+Devuelve `YYYY-MM-DD_v{version}.xlsx` con el día **UTC** de `now` (`now.toISOString().slice(0, 10)`; A1 resuelto el 28/10/2026). `now` se inyecta para poder fijar la fecha; la ruta pasa el mismo `now` a `getNextVersion`.
 
-### `getNextVersion.js` → `getNextVersion(provincia)`
+### `getNextVersion.js` → `getNextVersion(provincia, filesInFolder, now = new Date())`
 
-Devuelve `Promise<{ version, provinciaFolder }>`.
+Función síncrona y pura (no importa `aws/`; M14, 29/10/2026). Recibe el listado de la carpeta (`filesInFolder`: `[{ name, key }]`, que obtiene la ruta con `listFilesInS3Folder`) y devuelve `{ version, provinciaFolder }`.
 
-- `provinciaFolder = data/{provincia}`.
-- Lista la carpeta y, para los ficheros con patrón `YYYY-MM-DD_vN.xlsx` cuya fecha es **hoy (UTC)**, toma el mayor `N` y devuelve `N + 1`. Si no hay ninguno de hoy, `1`.
+- `provinciaFolder = provinciaFolderOf(provincia)` (`data/{provincia}`).
+- Para los ficheros del listado con patrón `YYYY-MM-DD_vN.xlsx` (interpretado con `parseVersionName`) cuya fecha es **hoy (UTC, el día de `now`)**, toma el mayor `N` (entero: `_v9` y `_v10` dan `_v11`) y devuelve `N + 1`. Si no hay ninguno de hoy, `1`.
+
+### `activeVersion.js` → `provinciaFolderOf`, `activeKeyOf`, `provinciaOfKey`, `draftFolderOf`, `newDraftKeyOf`, `provinciaOfDraftKey` y `planActiveAfterDelete`
+
+Reglas de la versión activa (M14, 29/10/2026). Funciones puras: importan solo `config/s3Paths` y `./versionName`; no leen S3, ni el reloj, ni el entorno. Las claves que reciben ya están validadas por las rutas (`isValidDataKey`, `isValidDraftKey`). `newDraftKeyOf` no genera el UUID: lo recibe inyectado (la ruta pasa `crypto.randomUUID()`), así que la función sigue siendo pura.
+
+- `provinciaFolderOf(provincia)`: `data/{provincia}`. Fuente única del literal (la usa también `getNextVersion`).
+- `activeKeyOf(provincia)`: `data/active/{provincia}.json`.
+- `provinciaOfKey(filePath)`: el segundo segmento de `data/{prov}/{fecha}_vN.xlsx`.
+- `draftFolderOf(provincia)`: `data/drafts/{provincia}`.
+- `newDraftKeyOf(provincia, id)`: `data/drafts/{provincia}/{id}.xlsx`, con el `id` (UUID) inyectado.
+- `provinciaOfDraftKey(draftKey)`: el tercer segmento de `data/drafts/{prov}/{uuid}.xlsx`.
+- `planActiveAfterDelete(remaining)`: recibe lo que queda en la carpeta (`[{ name, key }]`) y devuelve una acción para el activo, apoyada en `latestVersionFile`: `{ action: 'regenerate', key }` si queda alguna versión estándar (la más reciente); `{ action: 'delete' }` si no queda ningún `.xlsx` (la comprobación es sensible a mayúsculas); `{ action: 'keep' }` si quedan `.xlsx` pero ninguno con nombre estándar (el activo no se toca).
+
+**Dirección de dependencias:** `routes/` → `aws/`, `functions/` y `middleware/`; `functions/` → `config/`; `aws/` → `config/`; `middleware/` → `config/` y su propia capa. `aws/` no importa `functions/`, `functions/` no importa `aws/` y `middleware/` no importa `aws/` (lo comprueba `tests/capas-importaciones.test.js`, que desde B7 recorre también `middleware/`).
+
+### `versionName.js` → `parseVersionName(name)` y `latestVersionFile(files)`
+
+Funciones puras (no leen el entorno ni llaman a S3); interpretación única del nombre de una versión (A8, 29/10/2026). Está en `functions/`; la usan `getNextVersion`, `isValidDataKey` y `planActiveAfterDelete`.
+
+- `parseVersionName(name)`: aplica `DATA_FILE_NAME_PATTERN` y devuelve `{ date, version }` (`version` como entero) o `null` si el nombre no es estándar.
+- `latestVersionFile(files)`: recibe `[{ name, key }]` y devuelve el de mayor fecha y, a igual fecha, mayor `N` entero (`_v10` gana a `_v9`). Si también coincide `N` (`_v7` y `_v007`), gana el nombre mayor por unidades de código (`a.name > b.name`, no `localeCompare`), así el resultado no depende del orden del listado. Ignora los nombres no estándar y devuelve `null` si no hay ninguno estándar. La usa `planActiveAfterDelete`.
 
 ---
 
@@ -164,12 +215,14 @@ Crea un único cliente `S3` (clase agregada de SDK v3) con `AWS_REGION` y, en lo
 |---|---|
 | `streamToString(stream)` | Lee un stream de S3 a string UTF-8 |
 | `streamToBuffer(stream)` | Lee un stream de S3 a `Buffer` |
+| `isRealObject(item)` | «Objeto real» de un listado: clave sin `/` final y `Size > 0` (excluye el marcador de carpeta y los objetos vacíos). Lo comparten `listFilesInS3Folder` y `getPresignedUrlsFromS3Folder`, de modo que no pueden divergir |
+| `listAllObjects(prefix)` | `Contents` de **todas** las páginas de `ListObjectsV2`, sin tope de páginas. Una página sin `Contents` aporta `[]` y continúa. Guardia contra bucle infinito: lanza si `IsTruncated` es verdadero y falta `NextContinuationToken`, o si el token ya se usó |
 
 ### URLs prefirmadas
 
 | Función | Parámetros | Devuelve | Notas |
 |---|---|---|---|
-| `getPresignedUrlsFromS3Folder` | `folderPath` | `[{ fileName, url }]` | `ListObjectsV2` + `getSignedUrl` por objeto, en paralelo. Expiran en 3600 s. **Lanza si la carpeta está vacía** |
+| `getPresignedUrlsFromS3Folder` | `folderPath` | `[{ fileName, url }]` | `listAllObjects` + `getSignedUrl` por objeto real, en paralelo. Expiran en 3600 s. Devuelve `[]` con la carpeta vacía, ausente o con solo marcadores (A5; ya no lanza); un error real de `ListObjectsV2` sigue lanzando |
 | `getPresignedUrlFromS3` | `filePath, imageKey` | `string` | URL de `filePath/imageKey`, 3600 s. Envuelve el error en `Error('Error getting signed URL')` |
 
 ### Lectura
@@ -178,14 +231,14 @@ Crea un único cliente `S3` (clase agregada de SDK v3) con `AWS_REGION` y, en lo
 |---|---|---|---|
 | `getFileFromS3` | `filePath` | objeto JSON | `GetObject` + `JSON.parse`. Relanza errores |
 | `getBufferFromS3` | `filePath` | `Buffer` | Para leer Excel |
-| `getTextJsonS3` | `fileName, folderName` | array JSON | **Devuelve `[]` ante cualquier error** (fichero inexistente, permisos, red…) |
+| `getTextJsonS3` | `fileName, folderName` | array JSON | Devuelve `[]` **solo** con `NoSuchKey` (por `error.name` o `error.Code`; un 404 sin más no basta, `NoSuchBucket` también lo es). Un JSON que no es un array lanza un `Error` sin `Code`; permisos, red, 5xx, `SyntaxError` y el cuerpo de 0 bytes se propagan (A6, 29/10/2026). `uploadTextToJsonS3` y `deleteTermFromS3` no llegan al `putObject` en esos casos |
 
 ### Listado
 
 | Función | Parámetros | Devuelve | Notas |
 |---|---|---|---|
-| `listFilesInS3Folder` | `folderName` (prefijo) | `[{ name, key }]` | Descarta objetos de tamaño 0 (marcadores de carpeta). Sin paginación: máximo 1000 objetos |
-| `getMergedDataInS3Folder` | `folderName` | array | Lista y descarga cada JSON **en secuencia**, concatenando |
+| `listFilesInS3Folder` | `folderName` (prefijo) | `[{ name, key }]` | El `Prefix` del listado termina siempre en `/` (se añade si falta, sin duplicarlo): `data/Santa Cruz` no ve `data/Santa Cruz de Tenerife/` y `data/active` no ve `data/activos/` (también para el listado previo de `POST /upload`, el de `removeVersion` y `getMergedDataInS3Folder`). Descarta los objetos que no son «reales» (`isRealObject`: clave acabada en `/` o tamaño 0). Recorre todas las páginas con `listAllObjects` (M10: ya no se trunca a 1000 objetos). Formato `{ name, key }` sin cambios |
+| `getMergedDataInS3Folder` | `folderName` | array | Lista y lee los JSON **en paralelo** (`Promise.all`, M7; sin límite de concurrencia) y concatena en el orden del listado, no en el de finalización. Si una lectura falla, rechaza sin datos parciales |
 
 ### Escritura
 
@@ -194,20 +247,45 @@ Crea un único cliente `S3` (clase agregada de SDK v3) con `AWS_REGION` y, en lo
 | `uploadFileToS3` | `fileName, body, folderName` | `PutObject` en `folderName/fileName`, sin `ContentType` |
 | `uploadImageToS3` | `file, filePath, fileKey` | Usa `file.buffer` y `file.mimetype` de multer |
 | `uploadTextToJsonS3` | `newText, fileName, folderName` | Lee el JSON, hace `push({ term })`, reescribe (read-modify-write) |
+| `putJsonToS3` | `key, data` | `PutObject` con `Body = JSON.stringify(data, null, 2)` y `ContentType: 'application/json'`. Ante un fallo registra `Error writing JSON: ...` con `console.error` y relanza el error original. Sin lógica de negocio: la usa `activateFrom` para escribir `data/active/{prov}.json` |
 
 ### Borrado
 
 | Función | Parámetros | Devuelve | Notas |
 |---|---|---|---|
-| `deleteImageFromS3` | `filePath, imageKey` | `{ success, error? }` | No lanza; devuelve el error |
-| `deleteTermFromS3` | `termToDelete, fileName, folderName` | `{ success, message? }` | Filtra el término y reescribe el fichero. No lanza |
-| `deleteFileFromS3` | `filePath` (`data/{prov}/{fecha}_vN.xlsx`) | `{ message }` | Borra la versión; si quedan `.xlsx` en la provincia, reconvierte el último (orden alfabético) y reescribe el activo; si no queda ninguno, borra el activo |
+| `deleteImageFromS3` | `filePath, imageKey` | nada | Borra `filePath/imageKey`. Ante un fallo registra con `console.error` y lanza el error original (B5, 29/10/2026) |
+| `deleteTermFromS3` | `termToDelete, fileName, folderName` | nada | Filtra el término y reescribe el fichero. Ante un fallo (también de lectura, A6) registra con `console.error` y lanza el error original (B5); no escribe si la lectura falla |
+| `deleteFileFromS3` | `key` (clave arbitraria) | nada | Primitivo: un único `DeleteObject` de esa clave, sin listar, leer ni escribir. Ante un fallo registra `Error deleting file: ...` con `console.error` y relanza el error original. Borra tanto una versión `data/{prov}/{fecha}_vN.xlsx` como `data/active/{prov}.json`; las rutas validan con `isValidDataKey` antes y el activo se construye con `activeKeyOf`. La regla de qué activo queda (tres casos: regenerar, borrar o no tocar) vive en `planActiveAfterDelete` y la orquestación en `removeVersion` (`routes/data.js`) |
 
 ### Versión activa
 
-| Función | Parámetros | Notas |
-|---|---|---|
-| `updateFileS3` | `filePath` (`data/{prov}/{fecha}_vN.xlsx`) | Descarga el Excel, lo convierte y sobreescribe `data/active/{prov}.json` |
+`aws/` ya no decide qué versión es la activa (M14, 29/10/2026): `updateFileS3` se eliminó y la sustituyen `activateFrom` (`routes/data.js`) con `getBufferFromS3` y `putJsonToS3`.
+
+---
+
+## `middleware/`
+
+Middlewares transversales: `errorHandler`, `notFound` y `tokenAuth`. `middleware/` puede importar `config/` y su propia capa, no `aws/`.
+
+## `middleware/tokenAuthentication.js` → `tokenAuth(req, res, next)`
+
+Movido desde `functions/tokenAuthentication.js` el 30/10/2026 (B7), sin cambios de comportamiento. Lo importan `routes/auth.js`, `routes/data.js` y `routes/content.js`.
+
+- Lee `Authorization`, toma lo que va tras el primer espacio (`Bearer <token>`).
+- Sin token → 401 `No token provided`.
+- `jwt.verify` con `JWT_SECRET`: error → 401 `Token expired` o `Invalid token`.
+- Éxito → `req.user = payload` y `next()`.
+- `jwt.verify` fija `algorithms: ['HS256']` (B8): un token firmado con otro algoritmo o con `alg: none` da 401 `Invalid token`; los emitidos antes siguen valiendo porque `jsonwebtoken` firma con HS256 por defecto.
+
+---
+
+## `middleware/notFound.js`
+
+| Elemento | Descripción |
+|---|---|
+| `notFound(req, res)` | Responde `404` con `{ success: false, error: 'Not found' }`. Texto fijo: no lee ni refleja ruta, método ni consulta, y no escribe nada en consola (`morgan` sigue registrando la petición). No pasa por `errorHandler` ni usa `next`. Se exporta con `module.exports = notFound` |
+
+Se monta con `app.use(notFound)` después de los tres routers y antes de `errorHandler`: atiende toda petición que ningún router resolvió, incluidas las de fuera de `API_PREFIX`. Un error de CORS (`Origin` no permitido) no llega aquí: lo para antes `cors` y sale por `errorHandler`.
 
 ---
 
@@ -216,5 +294,8 @@ Crea un único cliente `S3` (clase agregada de SDK v3) con `AWS_REGION` y, en lo
 | Elemento | Descripción |
 |---|---|
 | `isDev` | `NODE_ENV === 'local'` |
-| `friendlyMessage(err)` | Mapea `err.name` / `err.code` / `err.Code` a mensajes legibles (tabla en [04-api.md](04-api.md#errores-comunes)) |
-| `errorHandler(err, req, res, next)` | Status = `err.status \|\| err.statusCode \|\| 500`. En local loguea el stack; en otros entornos sólo el mensaje. Responde `{ success: false, error }` |
+| `friendlyMessage(err, status)` | Texto que ve el cliente, por este orden: `err.publicMessage`; mapeados por `err.name` / `err.code` / `err.Code` (`TokenExpiredError`, `JsonWebTokenError`, `MulterError`, `NoSuchKey`, `NoSuchBucket`, `AccessDenied`, `NetworkingError` / `ECONNREFUSED`; `NoSuchKey` se detecta con `isNoSuchKey`, por `name` o `Code`); `File exceeds the maximum allowed size` (`MulterError` con `LIMIT_FILE_SIZE`, antes de la línea genérica `File upload error: ...` del resto de `MulterError`); `Invalid JSON` (`err.type === 'entity.parse.failed'`); `Payload too large` (413); `Bad request` (resto de 4xx, con guarda `400 <= status < 500`); y `Internal server error` para todo lo demás. Ya no devuelve `err.message` (M17). Tabla en [04-api.md](04-api.md#errores-comunes) |
+| `isNoSuchKey(err)` | Helper local: `err.name === 'NoSuchKey' \|\| err.Code === 'NoSuchKey'` (solo `name` está garantizado en el SDK). Detección equivalente a la de `getTextJsonS3` en `aws/`; si cambia una, revisa la otra. No usa `$metadata` (`NoSuchBucket` también es 404 y sigue en 500) |
+| `errorHandler(err, req, res, next)` | Status = `err.status \|\| err.statusCode`, o 400 si `err.name === 'MulterError'`, o 404 si `isNoSuchKey(err)` (B9, 29/10/2026), o 500. En local loguea el stack; en otros entornos sólo el mensaje (el real, que no se envía al cliente). Responde `{ success: false, error }` |
+
+**CORS en `index.js`.** El callback de `origin` de `cors` rechaza un origen no permitido con `console.warn('CORS: origin not allowed:', JSON.stringify(origin.slice(0, 200)))` (el origen se trunca a 200 caracteres antes de registrarlo, para que un `Origin` enorme no llene el registro, y `JSON.stringify` neutraliza saltos de línea y comillas de un valor que controla el cliente) y pasa a `cors` un único `Error` constante, `originNotAllowed` (`status = 403`, `publicMessage = 'Origin not allowed'`), creado fuera del callback porque ni `cors` ni `errorHandler` lo mutan (su traza es la del arranque); `errorHandler` lo responde como `403` `Origin not allowed`, sin el origen. El origen solo está en el `warn`.

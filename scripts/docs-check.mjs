@@ -4,35 +4,22 @@
 // Las reglas y lo que NO se comprueba automáticamente están en docs/guias/mantenimiento.md.
 // Sin dependencias: solo módulos de Node.
 
-import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
-import { join, dirname, relative, resolve, basename, sep } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { readFileSync, existsSync } from 'node:fs';
+import { join, dirname, relative, resolve, basename } from 'node:path';
+import { ROOT, read, posix, unique, walk, codeFiles, routeDeclarations, routesInIndex, usedEnvVars, declaredEnvVars, printResults } from './lib/repo.mjs';
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const FRONTEND_DOC = resolve(ROOT, '..', 'sigmetum-frontend', 'docs', 'integracion', 'para-backend.md');
 
-const read = (file) => readFileSync(join(ROOT, file), 'utf8').replace(/\r\n/g, '\n');
-const posix = (file) => file.split(sep).join('/');
 const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-const unique = (list) => [...new Set(list)];
-
-const IGNORED = new Set(['node_modules', '.git', 'uploads']);
-const walk = (dir) =>
-  readdirSync(join(ROOT, dir)).flatMap((name) => {
-    if (IGNORED.has(name)) return [];
-    const path = posix(join(dir, name));
-    return statSync(join(ROOT, path)).isDirectory() ? walk(path) : [path];
-  });
 
 // ─── Código y documentos ────────────────────────────────────────────────────
 
-const CODE_DIRS = ['routes', 'config', 'functions', 'aws', 'middleware'];
-const codeFiles = ['index.js', ...CODE_DIRS.flatMap((dir) => walk(dir)).filter((file) => file.endsWith('.js'))];
-const testFiles = walk('.').filter((file) => /\.(test|spec)\.[cm]?js$/.test(file));
+// Las pruebas del plugin (plugins/) no son tests de la API: M11 y la métrica de docs/07 hablan de la API.
+const testFiles = walk('.').filter((file) => !file.startsWith('plugins/') && /\.(test|spec)\.[cm]?js$/.test(file));
 
 const docFiles = [
   'README.md',
-  ...['CLAUDE.md', 'INTEGRACION.md'].filter((file) => existsSync(join(ROOT, file))),
+  ...['CLAUDE.md'].filter((file) => existsSync(join(ROOT, file))),
   ...walk('docs').filter((file) => file.endsWith('.md')),
   ...(existsSync(join(ROOT, '.claude')) ? walk('.claude').filter((file) => file.endsWith('.md')) : []),
 ];
@@ -52,36 +39,18 @@ const stripTicks = (cell) => cell.replace(/^`+|`+$/g, '');
 
 // ─── Datos extraídos del código ─────────────────────────────────────────────
 
-// Rutas: `router.get('/x', ...)` y `protectedRouter.post('/y', ...)`. Una ruta es protegida
-// si cuelga de `protectedRouter` o si `tokenAuth` aparece en la misma línea.
+// Rutas de routes/*.js (lectura común en lib/repo.mjs), sin el comodín `(*)`.
 const cleanPath = (path) => path.replace(/\(\*\)/g, '');
-const codeRoutes = [];
-for (const file of codeFiles.filter((f) => f.startsWith('routes/'))) {
-  for (const line of read(file).split('\n')) {
-    const match = line.match(/^\s*(router|protectedRouter)\.(get|post|put|patch|delete)\(\s*(['"`])([^'"`]+)\3(.*)$/);
-    if (!match) continue;
-    const [, owner, method, , path, rest] = match;
-    codeRoutes.push({
-      method: method.toUpperCase(),
-      path: cleanPath(path),
-      protected: owner === 'protectedRouter' || /\btokenAuth\b/.test(rest),
-      file: basename(file),
-    });
-  }
+const codeRoutes = routeDeclarations().map((route) => ({ method: route.method, path: cleanPath(route.path), protected: route.protected, file: basename(route.file) }));
+// Rutas declaradas directamente en app.js (hoy, solo /healthcheck; `app.use` responde a todos los métodos, se documenta como GET).
+for (const [, path] of read('app.js').matchAll(/app\.(?:get|use)\(\s*'(\/[^']*)'/g)) {
+  codeRoutes.push({ method: 'GET', path, protected: false, file: 'app.js' });
 }
-// Rutas declaradas directamente en index.js (hoy, solo /healthcheck; `app.use` responde a todos los métodos, se documenta como GET).
-for (const [, path] of read('index.js').matchAll(/app\.(?:get|use)\(\s*'(\/[^']*)'/g)) {
-  codeRoutes.push({ method: 'GET', path, protected: false, file: 'index.js' });
-}
-const apiRoutes = codeRoutes.filter((route) => route.file !== 'index.js');
+const apiRoutes = codeRoutes.filter((route) => route.file !== 'app.js');
 
 // Variables de entorno.
-const validateSrc = read('config/validateEnv.js');
-const listFrom = (name) =>
-  [...(validateSrc.match(new RegExp(`const ${name} = \\[([\\s\\S]*?)\\];`))?.[1] ?? '').matchAll(/'([A-Z0-9_]+)'/g)].map((m) => m[1]);
-const requiredVars = listFrom('required');
-const requiredLocalVars = listFrom('requiredLocal');
-const usedVars = unique(codeFiles.flatMap((file) => [...read(file).matchAll(/process\.env\.([A-Z][A-Z0-9_]*)/g)].map((m) => m[1])));
+const { required: requiredVars, requiredLocal: requiredLocalVars } = declaredEnvVars();
+const usedVars = usedEnvVars();
 const exampleVars = [...read('.env.example').matchAll(/^([A-Z][A-Z0-9_]+)=/gm)].map((m) => m[1]);
 
 // Rutas de S3.
@@ -137,6 +106,7 @@ const check = (name, problems) => results.push({ name, problems });
 const warnings = [];
 
 // ─── 1. Enlaces internos y anclas ───────────────────────────────────────────
+// Incluye los enlaces relativos a los repositorios hermanos (../sigmetum-frontend/...): fallan si no existen.
 
 const slug = (heading) =>
   heading
@@ -185,7 +155,8 @@ const anchorsOf = (text) => {
 {
   const index = doc('README.md');
   const problems = [];
-  for (const file of docFiles.filter((f) => f.startsWith('docs/') && f !== 'docs/README.md')) {
+  // docs/specs/ son documentos de trabajo (specs y planes), no documentación de referencia: no van en el índice.
+  for (const file of docFiles.filter((f) => f.startsWith('docs/') && !f.startsWith('docs/specs/') && f !== 'docs/README.md')) {
     if (!index.includes(`](${file.replace('docs/', '')})`)) problems.push(`${file} no está en el índice de docs/README.md`);
   }
   for (const file of codeFiles) {
@@ -223,8 +194,9 @@ const anchorsOf = (text) => {
   for (const row of rows) {
     if (!codeRoutes.some((r) => r.method === row.method && r.path === row.path)) problems.push(`docs/04 documenta ${row.method} ${row.path}, que no existe en el código`);
   }
-  check('Rutas y endpoints (routes/*.js e index.js → 04-api.md)', problems);
+  check('Rutas y endpoints (routes/*.js e app.js → 04-api.md)', problems);
 }
+check('index.js no declara rutas (solo arranca el servidor)', routesInIndex(read('index.js')).map((line) => `index.js declara una ruta: ${line}`));
 
 // ─── 4. Variables de entorno ────────────────────────────────────────────────
 
@@ -346,6 +318,8 @@ const anchorsOf = (text) => {
   const security = doc('guias/seguridad.md');
   // Claves de un objeto literal de quality-check.mjs: líneas con dos espacios de sangría ('clave': o clave:).
   const keysOf = (name) => {
+    // Un objeto vacío en una sola línea ('{};') no tiene cuerpo: sin esta salida la regex seguiría hasta el '};' de otro objeto.
+    if (new RegExp(`const ${name} = \\{\\s*\\};`).test(quality)) return [];
     const block = quality.match(new RegExp(`const ${name} = \\{([\\s\\S]*?)\\n\\};`))?.[1] ?? '';
     return [...block.matchAll(/^ {2}(?:'([^']+)'|([\w-]+)):/gm)].map((m) => m[1] ?? m[2]);
   };
@@ -409,27 +383,13 @@ if (!existsSync(FRONTEND_DOC)) {
 
 // ─── 11. Integracion: archivos en docs/integracion figuran en índices ──────
 
+// Que figuren en el índice de docs/README.md ya lo exige el apartado 2 (con el enlace exacto); aquí solo CLAUDE.md.
 {
   const problems = [];
-  const readmeContent = doc('README.md');
   const claudeContent = docs['CLAUDE.md'] ?? '';
-  const integracionDir = join(ROOT, 'docs', 'integracion');
-
-  if (existsSync(integracionDir)) {
-    const integracionFiles = walk('docs/integracion').filter((file) => file.endsWith('.md'));
-    for (const file of integracionFiles) {
-      const relativePath = file.replace('docs/', '');
-      const filename = basename(file);
-
-      // Debe aparecer en docs/README.md
-      if (!readmeContent.includes(`](${relativePath})`) && !readmeContent.includes(`/${filename}`)) {
-        problems.push(`${file} no está referenciado en docs/README.md`);
-      }
-
-      // Debe estar mencionado en CLAUDE.md o en docs/README.md (ya se comprobó arriba)
-      if (!claudeContent.includes(filename) && !claudeContent.includes('integracion')) {
-        problems.push(`${file} no está mencionado en CLAUDE.md`);
-      }
+  for (const file of docFiles.filter((f) => f.startsWith('docs/integracion/'))) {
+    if (!claudeContent.includes(basename(file)) && !claudeContent.includes('integracion')) {
+      problems.push(`${file} no está mencionado en CLAUDE.md`);
     }
   }
   check('Integracion: archivos en docs/integracion figuran en índices', problems);
@@ -458,64 +418,9 @@ if (!existsSync(FRONTEND_DOC)) {
   check('Comandos en CLAUDE.md (→ package.json scripts)', problems);
 }
 
-// ─── 13. Links a repositorios hermanos (sigmetum-frontend, sigmetum-infra) ───
-
-{
-  const problems = [];
-  const warnings2 = [];
-  const siblings = {
-    'sigmetum-frontend': resolve(ROOT, '..', 'sigmetum-frontend'),
-    'sigmetum-infra': resolve(ROOT, '..', 'sigmetum-infra'),
-  };
-
-  let anyExist = false;
-  for (const [, repoPath] of Object.entries(siblings)) {
-    if (existsSync(repoPath)) anyExist = true;
-  }
-
-  for (const [file, text] of Object.entries(docs)) {
-    let inFence = false;
-    text.split('\n').forEach((line, index) => {
-      if (line.startsWith('```')) inFence = !inFence;
-      if (inFence) return;
-
-      for (const [, target] of line.matchAll(/\[[^\]]*\]\(([^)\s]+)\)/g)) {
-        // Buscar referencias a sibling repos: ../sigmetum-frontend/... o ../sigmetum-infra/...
-        for (const [repoName, repoPath] of Object.entries(siblings)) {
-          const prefix = `../${repoName}/`;
-          if (!target.includes(prefix)) continue;
-
-          if (!existsSync(repoPath)) {
-            warnings2.push(`${file}:${index + 1} enlaza a ${target}, pero ${repoName} no está disponible (omitido, normal en CI)`);
-            continue;
-          }
-
-          const pathPart = target.split('#')[0];
-          const linkedFile = resolve(repoPath, pathPart.replace(prefix, ''));
-          if (!existsSync(linkedFile)) {
-            problems.push(`${file}:${index + 1} enlaza a ${target}, pero no existe`);
-          }
-        }
-      }
-    });
-  }
-
-  if (!anyExist) {
-    warnings2.push('Links a repositorios hermanos omitidos: sigmetum-frontend y sigmetum-infra no existen (normal en CI)');
-  }
-
-  check('Links a repositorios hermanos', problems);
-  warnings.push(...warnings2);
-}
-
 // ─── Resultado ──────────────────────────────────────────────────────────────
 
-let failed = 0;
-for (const { name, problems } of results) {
-  console.log(`${problems.length === 0 ? '✓' : '✗'} ${name}`);
-  problems.forEach((problem) => console.log(`    - ${problem}`));
-  failed += problems.length;
-}
+const failed = printResults(results);
 if (warnings.length > 0) {
   console.log('\n⚠ Avisos (no hacen fallar el script)');
   warnings.forEach((warning) => console.log(`    - ${warning}`));

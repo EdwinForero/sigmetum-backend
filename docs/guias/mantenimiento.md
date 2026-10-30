@@ -7,20 +7,23 @@ Este documento dice **qué hay que revisar y actualizar en `docs/` después de c
 1. **La documentación se actualiza en el mismo commit (o la misma PR) que el cambio.** Un cambio no está terminado hasta que pasa la lista de este documento.
 2. **Se contrasta con el código, nunca de memoria.** Si no puedes comprobar algo, márcalo como **(por confirmar)**.
 3. **Cada dato vive en un solo sitio.** Los demás documentos enlazan, no copian. Las cifras (archivos, endpoints, funciones, variables, dependencias, tests, guías) viven solo en la [tabla de métricas de 07](../07-estado-y-deuda-tecnica.md#métricas).
-4. **Antes de dar el trabajo por terminado** deben pasar `npm run lint`, `npm run quality` y `npm run docs:check` y, cuando existan tests (hallazgo M11 de [07](../07-estado-y-deuda-tecnica.md)), `npm test`. Si `quality` falla por algo que **ya estaba** (por ejemplo, las vulnerabilidades de M16), no se oculta ni se acepta para que pase: se dice en la PR.
-5. **Las guías mandan.** Las normas de [buenas-practicas-backend.md](buenas-practicas-backend.md) y [seguridad.md](seguridad.md) se leen **antes** de escribir código; este documento se sigue **al terminar**. Si un cambio contradice una guía, se avisa y se pregunta.
+4. **Antes de dar el trabajo por terminado** deben pasar `npm run lint`, `npm run quality`, `npm run docs:check` y `npm run docs:gate` (con los cambios aún sin commit: compara con `HEAD`) y `npm test` (la base de tests es parcial: hallazgo M11 de [07](../07-estado-y-deuda-tecnica.md)). Si tocaste `plugins/` (el núcleo `ciclo-agentico` o las skills de dominio, que prueba `plugins/tests/`), también `npm run agentes:test`. Si `quality` falla por algo que **ya estaba** (por ejemplo, los avisos de `npm audit` de M20), no se oculta ni se acepta para que pase: se dice en la PR.
+5. **Cierre documental obligatorio.** Toda iteración actualiza [07](../07-estado-y-deuda-tecnica.md), al menos la fecha de la línea "actualizado" y lo que haya cambiado, aunque el cambio no toque código de la API. `npm run docs:gate` lo comprueba ([sección 4](#lo-que-comprueba-npm-run-docsgate)).
+6. **Las guías mandan.** Las normas de [buenas-practicas-backend.md](buenas-practicas-backend.md) y [seguridad.md](seguridad.md) se leen **antes** de escribir código; este documento se sigue **al terminar**. Si un cambio contradice una guía, se avisa y se pregunta.
 
 ## 2. Qué documento tocar según el cambio
+
+El control mecánico (`npm run docs:gate`) usa el mapa `docsPorArea` de [.claude/flujo.json](../../.claude/flujo.json); esta tabla explica el porqué y los puntos que se comprueban a mano. Una sola fuente por dato: el mapa para la máquina, la tabla para las personas.
 
 | Si cambias... | Actualiza | Comprueba |
 |---|---|---|
 | Un **endpoint** (nuevo, cambiado o eliminado) en `routes/` o `index.js` | [04](../04-api.md) (tabla resumen **y** sección del endpoint), [05](../05-modulos.md) (sección del router) y las métricas de [07](../07-estado-y-deuda-tecnica.md#métricas) | Método, ruta y si es pública (🔓) o protegida (🔒). Si afecta al frontend, [sección 6](#6-avisar-al-frontend-y-a-la-infraestructura) |
 | El **formato de las respuestas** o el manejo de errores (`{ success, data \| error }`, `middleware/errorHandler.js`) | [04](../04-api.md) (errores comunes), [05](../05-modulos.md) (`errorHandler`) | **Contrato con el frontend** (sección 6) |
 | Una **variable de entorno** (`config/validateEnv.js`, `.env.example`) | [03](../03-configuracion.md) (tabla), `.env.example`, `config/validateEnv.js` y las métricas de [07](../07-estado-y-deuda-tecnica.md#métricas) | Obligatoriedad (`required` o `requiredLocal`) y que el entorno de Beanstalk de `sigmetum-infra` la recibe. La skill `env-var-change` tiene la lista |
-| Las **rutas de S3** o el **modelo de versionado** (`config/s3Paths.js`, `getNextVersion.js`, `formatFileName.js`, `aws/awsS3connect.js`) | [06](../06-almacenamiento-s3.md), [05](../05-modulos.md) (constantes y funciones) | **Contrato con el frontend** si cambia el formato del nombre `AAAA-MM-DD_vN.xlsx`. Permisos IAM del bucket en `sigmetum-infra` si hay un prefijo nuevo. La skill `s3-operation-review` tiene la lista |
+| Las **rutas de S3** o el **modelo de versionado** (`config/s3Paths.js`, `getNextVersion.js`, `activeVersion.js`, `formatFileName.js`, `aws/awsS3connect.js`) | [06](../06-almacenamiento-s3.md), [05](../05-modulos.md) (constantes y funciones) | **Contrato con el frontend** si cambia el formato del nombre `AAAA-MM-DD_vN.xlsx`. Permisos IAM del bucket en `sigmetum-infra` si hay un prefijo nuevo. La skill `s3-operation-review` tiene la lista |
 | Un **módulo, función o método** (`functions/`, `aws/`, `middleware/`, `config/`) | [05](../05-modulos.md) y las métricas de [07](../07-estado-y-deuda-tecnica.md#métricas) | Parámetros, valor devuelto, si lanza o devuelve `{ success: false }` |
 | Las **columnas del Excel** (`fixedColumnOrder` en `convertExcelToJson.js`) | [05](../05-modulos.md) (tabla de columnas), [06](../06-almacenamiento-s3.md) (ejemplo de JSON) | **Contrato con el frontend**: es el cambio que más rompe, porque las columnas se leen por posición |
-| La **autenticación o el JWT** (`userAuthentication.js`, `tokenAuthentication.js`, `JWT_EXPIRATION`) | [04](../04-api.md), [05](../05-modulos.md), [03](../03-configuracion.md) | **Contrato con el frontend**: lee el campo `exp` del token en el navegador |
+| La **autenticación o el JWT** (`routes/auth.js` con el login, `middleware/tokenAuthentication.js`, `JWT_EXPIRATION`) | [04](../04-api.md), [05](../05-modulos.md), [03](../03-configuracion.md) | **Contrato con el frontend**: lee el campo `exp` del token en el navegador |
 | **CORS** (`ALLOWED_ORIGIN`) | [03](../03-configuracion.md), [01](../01-arquitectura.md) | Que el origen coincide con el dominio del frontend de cada entorno (sección 6) |
 | **`GET /get-data/:path`** (restringirlo, cerrarlo o cambiar lo que devuelve) | [04](../04-api.md), [07](../07-estado-y-deuda-tecnica.md) (M2 y D1) | **Contrato con el frontend**: `FileDropdown` lo usa hoy para abrir versiones |
 | Una **dependencia** o la versión de Node | [02](../02-tecnologias.md) (la versión es la de `package-lock.json`, no la del rango) y las métricas de [07](../07-estado-y-deuda-tecnica.md#métricas) | Que la versión de Node sigue siendo la de la plataforma de Beanstalk (`sigmetum-infra`) |
@@ -34,14 +37,14 @@ Este documento dice **qué hay que revisar y actualizar en `docs/` después de c
 | Una **deuda o discrepancia nueva** | [07](../07-estado-y-deuda-tecnica.md) y, si afecta al frontend o a la infraestructura, su documento de `integracion/` | Id, prioridad, archivo y qué hay que hacer |
 | Límites de tamaño o tipo en `/upload`, `/upload-image` o el limitador de login | [04](../04-api.md) (códigos de respuesta) | **Contrato con el frontend**: mensajes de error y `accept` de sus formularios |
 | Algo que **cambia lo que necesita la infraestructura** (variables, permisos, runtime, health check) | [01](../01-arquitectura.md) (despliegue) y [03](../03-configuracion.md) | Avisar a infra (sección 6) |
-| Las **skills o plugins de Claude** (`.claude/`) | `.claude/` y la estructura de [README.md](../README.md) | Que las listas de las skills siguen siendo coherentes con este documento |
+| Los **plugins y skills de Claude** (`plugins/`, incluido el núcleo `ciclo-agentico`) o la configuración del flujo (`.claude/flujo.json`, `.claude/settings.json`) | [plugins/README.md](../../plugins/README.md) (único sitio que nombra plugins y skills), la estructura y el flujo agéntico de [README.md](../README.md) si cambian, y [07](../07-estado-y-deuda-tecnica.md) | Que las listas de las skills siguen siendo coherentes con este documento; que pasan `claude plugin validate plugins --strict`, `npm run agentes:test` y `npm run docs:gate`. Si cambia lo que configura cada archivo de `.claude/`, la sección "Flujo agéntico" de [03](../03-configuracion.md#flujo-agéntico) |
 | **Documentos** nuevos, renombrados o movidos | Índice de [README.md](../README.md) y README de la raíz | `npm run docs:check` valida los enlaces y el índice |
 
 ## 3. Listas de comprobación por tipo de cambio
 
 ### Endpoint nuevo
 
-- [ ] Pasa `npm run docs:check` (y `npm test`, si hay tests).
+- [ ] Pasa `npm run docs:check` y `npm test` (con tests para la ruta nueva).
 - [ ] Está en la tabla resumen y tiene sección en [04](../04-api.md), con 🔒 si es protegido.
 - [ ] Si toca S3, funciones nuevas en [05](../05-modulos.md) y rutas nuevas en [06](../06-almacenamiento-s3.md).
 - [ ] Si necesita una variable, está en `config/validateEnv.js`, `.env.example` y [03](../03-configuracion.md).
@@ -83,7 +86,7 @@ Este documento dice **qué hay que revisar y actualizar en `docs/` después de c
 
 ### Antes de fusionar la rama
 
-- [ ] `npm run lint`, `npm run quality` y `npm run docs:check` en verde (y `npm test`, si hay tests). El `npm audit` de `quality` se ha ejecutado **con red**.
+- [ ] `npm run lint`, `npm run quality` y `npm run docs:check` en verde (y `npm test`). El `npm audit` de `quality` se ha ejecutado **con red**.
 - [ ] Si se corrigieron avisos de ESLint, el tope `--max-warnings` baja al número real.
 - [ ] `npm run docs:check -- --metrics` y la tabla de [07](../07-estado-y-deuda-tecnica.md#métricas) coinciden.
 - [ ] La fecha y el commit del encabezado de [07](../07-estado-y-deuda-tecnica.md) son los de la fusión.
@@ -97,9 +100,19 @@ Este documento dice **qué hay que revisar y actualizar en `docs/` después de c
 | Comando | Falla si... |
 |---|---|
 | `npm run lint` | ESLint 9 encuentra **errores**, o los **avisos superan el tope** de `--max-warnings` en `package.json` |
-| `npm run quality` | Hay un patrón prohibido en el código (`eval`, `new Function`, `child_process`, datos sensibles en un log, CORS abierto, TLS desactivado); una ruta que modifica estado no cuelga de `protectedRouter` y no es una excepción registrada; el código usa una variable de entorno que no está en `validateEnv.js`; hay secretos literales o un `.env` versionado; `npm audit --omit=dev` da una vulnerabilidad alta o crítica no aceptada por escrito; o ESLint falla o el tope de avisos es mayor que los avisos reales |
+| `npm run quality` | Hay un patrón prohibido en el código (`eval`, `new Function`, `child_process`, datos sensibles en un log, CORS abierto, TLS desactivado); una ruta que modifica estado no lleva `tokenAuth` como primer manejador de la ruta y no es una excepción registrada; una línea de `routes/` que empieza por `router.<método>(` (o `protectedRouter.`/`app.`, con `all`, `use` o `route`) no casa con el patrón de declaración y la detección estática no la puede interpretar (`unparsedRouteLines()`, p. ej. una declaración partida en varias líneas); la suite de `tests/` falla (ruta sin clasificar, protegida sin `tokenAuth`, pública con `tokenAuth`, `401` que falta, o un criterio vacío o con tests omitidos); el código usa una variable de entorno que no está en `validateEnv.js`; hay secretos literales o un `.env` versionado; `npm audit --omit=dev` da una vulnerabilidad alta o crítica no aceptada por escrito; o ESLint falla o el tope de avisos es mayor que los avisos reales |
 
 Las reglas y su motivo están en [buenas-practicas-backend.md](buenas-practicas-backend.md) y [seguridad.md](seguridad.md). Sin conexión, `npm audit` se omite con un aviso: se ejecuta con red antes de fusionar. Las excepciones (`ACCEPTED_ADVISORIES`, `PUBLIC_MUTATING_ROUTES`, `OPTIONAL_ENV`) viven al principio de `scripts/quality-check.mjs`, cada una con su motivo.
+
+### Tests de la API (M11, parcial)
+
+`npm test` (`node --test "tests/**/*.test.js"`) ejecuta la suite de `tests/`: `node:test` y `supertest` sobre la `app.js` real, con S3 y SMTP sustituidos por espías (`tests/helpers/simulados.js`), un entorno ficticio (`tests/helpers/entorno.js`) y sin red ni credenciales ni `.env`. Cada archivo `tests/<tema>.test.js` cubre un grupo de comprobaciones: rutas públicas, límite y validación de `POST /send-email`, `imageKey`, rutas protegidas (`401` por ruta y de toda ruta mutante de la pila real), estructura exacta de la pila de `app.js`, respuestas base (404 con envoltorio, CORS, JSON mal formado), errores controlados, fecha UTC, provincia, `POST /upload` con un Excel en memoria, claves del cliente, prefijo, paginación, objeto real, `getTextJsonS3`, lecturas en paralelo y borrado de versiones de `aws/awsS3connect.js` (`tests/s3-robustez.test.js`) y orden de versiones (`tests/version-name.test.js`), el flujo de datos de extremo a extremo y la regla de la versión activa contra un **S3 simulado con estado** (`tests/helpers/s3-con-estado.js`, probado en `tests/s3-con-estado.test.js`; `tests/caracterizacion-version-activa.test.js`, `tests/flujo-datos-s3.test.js`, `tests/version-activa.test.js` y `tests/aws-primitivas.test.js`), el **test de capas** (`tests/capas-importaciones.test.js`: `aws/` no importa `functions/`, `functions/` no importa `aws/` y `middleware/` no importa `aws/`; si añades un archivo a esas carpetas, lo recorre solo), las pruebas de los propios controles (`tests/controles-scripts.test.js`: `routesInIndex` y `runWithTimeout` de `scripts/lib/repo.mjs`), además de pruebas unitarias de `convertExcelToJson` y de los validadores.
+
+- **Cómo escribir un test:** en `tests/<tema>.test.js`, con `require('./helpers/entorno')` el primero y `appNueva()` de `simulados.js` por test (reinicia los limitadores y los espías; cada petición usa una IP propia con `nextIp`). Un bucle que genera subtests lleva antes un test que exige `longitud > 0`, para que un criterio no pase por no comprobar nada. Los caracteres Unicode invisibles se escriben como escapes (`\u{...}`), nunca como literales. Una ruta nueva se añade a la tabla `ROUTES` de `tests/estructura-rutas.test.js`, con su clasificación (pública o protegida).
+- **Qué comprueba `quality` de la suite:** ejecuta la suite entera con `--test-reporter=tap` (con `runWithTimeout`, de `scripts/lib/repo.mjs`: si se agotan los 180 s o la salida supera 64 MB, mata el árbol de procesos —`taskkill /T /F` en Windows, grupo de procesos en POSIX— y no deja `node --test` ni sus hijos huérfanos, M24 b) y falla si el código de salida no es 0, si hay fallos, omitidos (`skip`) o pendientes (`todo`), si el total baja de `MIN_TESTS` (suelo fijo en `scripts/quality-check.mjs`, que se **sube a mano** al añadir tests, al total exacto de `npm test`: las iteraciones de robustez de S3, de B5/B9 y de D8 del 29/10/2026 lo subieron), si faltan `tests/estructura-rutas.test.js` o `tests/rutas-protegidas.test.js` o si no hay línea de resumen. Se complementa con la lectura estática de `routes/` (`routeDeclarations()`, `unparsedRouteLines()`, `PUBLIC_MUTATING_ROUTES`): la estática no ve `router.route()`, `router.all`, `router.use` ni rutas en variables, la pila real sí.
+- **Huso horario:** el test de la fecha UTC fija `TZ` dentro del propio test (Pacific/Kiritimati, UTC+14); `TZ=` exportado desde la shell no surte efecto en Windows con Git Bash **(por confirmar en la CI de Linux)**.
+- **Alcance:** no es cobertura completa (M11 sigue parcial): falta el flujo upload/confirm/delete contra un S3 simulado con estado y el resto de módulos. `index.js` tiene cobertura del orden de arranque (`tests/index-arranque.test.js`, con `dotenv`, `validateEnv` y `./app` simulados). Para comprobar de verdad el arranque con el servidor real, ejecuta `index.js` con entorno ficticio y `curl`; en Git Bash en Windows antepón `MSYS_NO_PATHCONV=1` a `curl` si la ruta empieza por `/`.
+- **Cuándo se añaden o ajustan tests:** al tocar cualquier `routes/*.js`, `app.js`, `index.js`, `functions/`, `aws/awsS3connect.js` o las constantes de `imageKey` y de provincia de `config/s3Paths.js`.
 
 ### Lo que comprueba `npm run docs:check`
 
@@ -107,8 +120,9 @@ El script ([scripts/docs-check.mjs](../../scripts/docs-check.mjs), sin dependenc
 
 | Comprobación | Código | Documento |
 |---|---|---|
-| Enlaces y anclas internos | Todos los `.md` | Los propios `.md` |
+| Enlaces y anclas internos (también los relativos a un repositorio hermano, que fallan si no está) | Todos los `.md` | Los propios `.md` |
 | Índice y estructura | Archivos de `docs/` y del código | [README.md](../README.md) |
+| `index.js` no declara rutas (solo arranca el servidor; `routesInIndex`, M24 a) | `index.js` | [01](../01-arquitectura.md) y [04](../04-api.md) |
 | Rutas: método, ruta, pública o protegida y fichero | `routes/*.js` e `index.js` | [04](../04-api.md) (tabla resumen y una sección por endpoint) |
 | Variables de entorno y su obligatoriedad | `config/validateEnv.js`, `.env.example` y `process.env.*` del código | [03](../03-configuracion.md) |
 | Rutas de S3 y segmentos reservados | `config/s3Paths.js` | [05](../05-modulos.md) y [06](../06-almacenamiento-s3.md) |
@@ -121,6 +135,29 @@ El script ([scripts/docs-check.mjs](../../scripts/docs-check.mjs), sin dependenc
 | Excepciones de la puerta de calidad | `ACCEPTED_ADVISORIES` y `PUBLIC_MUTATING_ROUTES` de `scripts/quality-check.mjs` | [seguridad.md](seguridad.md) |
 
 `npm run docs:check -- --metrics` imprime los valores reales para actualizar la tabla de 07.
+
+`docs:check` no cuenta como tests los de `plugins/` (la métrica "Archivos de test" es de la API; las pruebas de `plugins/` se ejecutan con `npm run agentes:test`) y no exige que los documentos de `docs/specs/` (specs, planes y avisos para PR) figuren en el índice de [README.md](../README.md); sus enlaces sí se comprueban.
+
+### Lo que comprueba `npm run docs:gate`
+
+El cierre documental del flujo agéntico (`plugins/ciclo-agentico/scripts/docs-gate.mjs`, configurado en `.claude/flujo.json`) mira los archivos que `git status` da como cambiados respecto a `HEAD` (incluidos los nuevos sin seguimiento; lo ignorado no cuenta) y **falla con código de salida 1** si:
+
+| Comprobación | De dónde sale |
+|---|---|
+| [07](../07-estado-y-deuda-tecnica.md) (y cualquier otro documento obligatorio) no aparece modificado | `estado` y `docsObligatorios` |
+| La fecha "actualizado DD/MM/AAAA" de la cabecera de 07 no es la de hoy | `estadoFecha` |
+| Un archivo cambiado coincide con un área y no se modificó **ninguno** de sus documentos (gana el patrón más específico) | `docsPorArea` |
+| Se tocó un área de contrato y no hay aviso para PR | `areasContrato` y `avisoPR` (`docs/specs/*-aviso-pr.md`) |
+| Se tocó un área de contrato y no cambió ningún documento de `integracion/` **ni** el aviso para PR (uno que esté entre los cambios) tiene una línea que empiece literalmente por `Integración: sin impacto — ` seguida del motivo | `areasContrato`, `integracion` y `avisoPR`. Si `flujo.json` no define `integracion`, solo vale la línea |
+
+Como compara con `HEAD`, mide una iteración: se ejecuta antes del commit y con el árbol limpio de iteraciones anteriores; si se mezclan, el resultado no vale. Por eso no figura en [Antes de fusionar la rama](#antes-de-fusionar-la-rama) ni en la [plantilla de PR](#8-plantilla-para-la-pr): tras el commit el árbol está limpio y la fecha de 07 ya no es la de hoy, así que fallaría siempre. Las dos fechas no se contradicen: cada iteración deja en 07 la fecha del día en que se hizo (lo que mira `docs:gate`), y al fusionar se pone la de la fusión con su commit. `node plugins/ciclo-agentico/scripts/docs-gate.mjs --solo-validar` solo valida `.claude/flujo.json`.
+
+Lo que `docs:gate` **no** puede comprobar:
+
+| Qué | Cómo |
+|---|---|
+| Que lo escrito en los documentos tocados **es cierto** o suficiente: solo ve que el archivo cambió | La revisión manual de [lo que el script no puede comprobar](#lo-que-el-script-no-puede-comprobar) y la del rol `tester-documentador` |
+| Que el documento de `integracion/` que cambió es **el que tocaba**, o que la línea `Integración: sin impacto — motivo` es verdad: solo ve que uno cambió o que la línea está | Lo revisa el rol `tester-documentador` (y la [sección 6](#6-avisar-al-frontend-y-a-la-infraestructura) fuera del ciclo) |
 
 ### Cruce con el frontend (solo avisa)
 
@@ -165,10 +202,11 @@ Si cambias algo de la columna izquierda, revisa la sección 7 ("Si cambias algo 
 | El **envoltorio** `{ success, data \| error }` | `services/api.js` (un único sitio) |
 | Las columnas del Excel (`fixedColumnOrder`) | Traducciones (`attributes`), `DialogSpecies.js`, `Filter` y `Explore` |
 | El **formato de nombres de versión** (`AAAA-MM-DD_vN.xlsx`) | `utilities/FormatFileName.js` y `FileDropdown` |
-| La forma de `emptyFields` o `draftKey` en el 400 de `/upload` | `components/FileUpload.js` |
+| La forma de `emptyFields` o `draftKey` en el 400 de `/upload` (desde el 29/10/2026, D8, sin `processedData` ni `rowData`; el `draftKey` es opaco y tiene la forma `data/drafts/{provincia}/<uuid>.xlsx` desde A2) y el 404 `Draft not found` de `/upload/confirm` | `components/FileUpload.js` |
 | Los campos de `/list-files` (`key`, `name`) | `components/FileDropdown.js` |
 | El **JWT**: sus claves o cómo caduca (`exp`) | `components/ProtectedRoute.js` |
-| **CORS** (`ALLOWED_ORIGIN`) | Nada en el código, pero el origen tiene que coincidir con el dominio del frontend de cada entorno |
+| **CORS** (`ALLOWED_ORIGIN`) | Nada en el código, pero el origen tiene que coincidir con el dominio del frontend de cada entorno. Un origen no permitido responde `403` `Origin not allowed` (desde el 28/10/2026; el navegador no deja ver esa respuesta) |
+| El **texto o el estado de los errores** (`errorHandler`) | `services/api.js` guarda `error.serverMessage` y `error.status`; hoy ningún componente los usa (comprobado el 28/10/2026). El `404` ya no es solo de rutas inexistentes: desde el 29/10/2026 (B9) un `NoSuchKey` de S3 también lo da, con otro texto; confirmar que `FileUpload.js` y `FileDropdown` no lo interpretan |
 | **`GET /get-data`** | `FileDropdown` (discrepancia D1) |
 | Límites o validaciones de `/upload` y `/upload-image` | `accept` y mensajes de error de los formularios |
 
@@ -178,6 +216,8 @@ Si cambias algo de la columna izquierda, revisa la sección 7 ("Si cambias algo 
 - **El frontend cambia algo:** revisa la sección "Si cambias algo" y el resultado del cruce de `npm run docs:check`; actualiza [04](../04-api.md) y [07](../07-estado-y-deuda-tecnica.md).
 - **Discrepancia resuelta en el otro repositorio:** pásala a "Resueltos" en [07](../07-estado-y-deuda-tecnica.md) y verifícalo contra su código.
 - **Cambias algo que necesita la infraestructura** (variable nueva, permiso de S3, versión de Node, health check): actualiza [01](../01-arquitectura.md) o [03](../03-configuracion.md) y avisa a infra en la PR.
+
+**Revisión de esta sección con M14 (29/10/2026):** `functions/getNextVersion.js` y `routes/**` están en `areasContrato`; se revisó la tabla y el cambio **no altera nada de la columna izquierda**: mismas rutas, mismo envoltorio y mismos textos de error, mismas claves de S3 (`data/{prov}/`, `data/active/{prov}.json`), mismas operaciones de S3 (`Get`/`Put`/`Delete`/`List`) en el mismo orden y mismo formato de nombre de versión. Frontend e infraestructura: sin impacto (aviso para PR en `docs/specs/2026-10-29-m14-m11-capas-y-flujo-de-datos-aviso-pr.md`).
 
 ## 7. Estilo
 
@@ -191,20 +231,12 @@ Si cambias algo de la columna izquierda, revisa la sección 7 ("Si cambias algo 
 
 ## 8. Plantilla para la PR
 
-```markdown
-## Calidad, seguridad y documentación
-- [ ] `npm run lint`, `npm run quality` y `npm run docs:check` en verde (y `npm test`, si hay tests)
-- [ ] Guías leídas: buenas-practicas-backend.md (siempre) y seguridad.md (si toca autenticación, rutas, S3, archivos, CORS, correo, dependencias, secretos o logs)
-- [ ] Nueva excepción en `ACCEPTED_ADVISORIES`, `PUBLIC_MUTATING_ROUTES` u `OPTIONAL_ENV`: sí / no. Si sí, el motivo
-- [ ] Documentos actualizados: (lista)
-- [ ] Afecta al frontend: sí / no. Si sí, qué debe cambiar y dónde (sección 7 de su para-backend.md)
-- [ ] Afecta a la infraestructura: sí / no. Si sí, qué necesita
-- [ ] Hallazgos resueltos o nuevos en docs/07: (ids)
-```
+La plantilla es [.github/pull_request_template.md](../../.github/pull_request_template.md): GitHub la carga al abrir la PR. No se copia aquí para que no haya dos versiones.
 
 ## 9. Mantener este documento
 
 - Se actualiza cuando aparece un tipo de cambio que no está en la tabla de la sección 2.
 - Si una comprobación manual de la sección 4 se puede automatizar, se añade a `scripts/docs-check.mjs` y se mueve a la primera tabla.
 - El script y este documento se revisan juntos: que un documento figure en la tabla 2 y no tenga comprobación automática es aceptable, pero debe ser una decisión consciente.
-- Las skills de `.claude/skills/` remiten a este documento; si se cambia una lista aquí, revisa que la skill no se contradiga.
+- Las skills del proyecto ([plugins/README.md](../../plugins/README.md)) remiten a este documento; si se cambia una lista aquí, revisa que la skill no se contradiga.
+- La definición de terminado se repite a propósito (es pedagógica): al cambiar la lista de comprobaciones, revisa [CLAUDE.md](../../CLAUDE.md), [.github/pull_request_template.md](../../.github/pull_request_template.md), la sección 1 de [buenas-practicas-backend.md](buenas-practicas-backend.md) y `verificacion` de `.claude/flujo.json`.

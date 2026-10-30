@@ -1,0 +1,8 @@
+{
+  "name": "dominio-aws-s3",
+  "version": "0.1.0",
+  "description": "Skills específicas del dominio AWS S3: revisión de operaciones sobre el bucket, versionado y URL prefirmadas.",
+  "author": {
+    "name": "EdwinForero"
+  }
+}

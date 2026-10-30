@@ -9,7 +9,7 @@ const nodePlugin = require('eslint-plugin-n');
 // Las reglas y su motivo están en docs/guias/buenas-practicas-backend.md y docs/guias/seguridad.md.
 
 module.exports = [
-  { ignores: ['node_modules/**', 'uploads/**'] },
+  { ignores: ['node_modules/**'] },
   js.configs.recommended,
   security.configs.recommended,
   {
@@ -37,12 +37,23 @@ module.exports = [
   },
   {
     // Scripts de mantenimiento (ESM): pueden escribir en consola
-    files: ['scripts/**/*.mjs'],
+    files: ['scripts/**/*.mjs', 'plugins/**/*.mjs'],
     languageOptions: { ecmaVersion: 'latest', sourceType: 'module', globals: { ...globals.node } },
     rules: {
       'no-console': 'off',
       'n/no-missing-import': 'off',
       // Herramientas de desarrollo: no atienden peticiones y leen rutas y expresiones que construyen ellas mismas.
+      'security/detect-non-literal-fs-filename': 'off',
+      'security/detect-non-literal-regexp': 'off',
+      'security/detect-object-injection': 'off',
+    },
+  },
+  {
+    // Tests (node:test, CommonJS): no atienden peticiones y construyen rutas, claves y expresiones a partir de listas fijas
+    // de casos (misma justificación que el bloque de scripts). `no-unused-vars` y `eqeqeq` siguen activas.
+    files: ['tests/**/*.js'],
+    rules: {
+      'no-console': 'off',
       'security/detect-non-literal-fs-filename': 'off',
       'security/detect-non-literal-regexp': 'off',
       'security/detect-object-injection': 'off',
