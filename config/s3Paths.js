@@ -30,8 +30,9 @@ exports.IMAGE_UPLOAD_TYPES = {
 };
 
 // Provincia (POST /upload, carpeta data/{provincia}/): se valida tras recortar y normalizar a NFC.
-// Se parte por espacio o guion y cada palabra debe cumplir PROVINCIA_WORD_PATTERN (letras Unicode con marcas
-// combinantes); una parte vacía (separador en los extremos o doble) se rechaza. Rechaza "/", "\", ".", dígitos.
+// Se parte por espacio o guion y cada palabra debe cumplir PROVINCIA_WORD_PATTERN (letras latinas con diacríticos
+// combinantes U+0300-U+036F, salvo U+034F y U+0345; cirílico, griego y otros alfabetos se rechazan, M23); una parte
+// vacía (separador en los extremos o doble) se rechaza. Rechaza "/", "\", ".", dígitos.
 // Longitud máxima antes de ejecutar la expresión.
 // PROVINCIA_RESERVED: nombres que no pueden ser carpeta de provincia (RESERVED_SEGMENTS, que incluye drafts). Además
 // se rechaza todo nombre que en minúsculas empiece por "active" o "terms" y los nombres de propiedades de objeto.
@@ -39,7 +40,7 @@ exports.IMAGE_UPLOAD_TYPES = {
 // Fuente única del nombre de versión (la usan isValidDataKey y functions/versionName.js); grupos: 1 = fecha, 2 = N.
 // Sin bandera "g": test() y match() no deben guardar estado entre llamadas.
 exports.PROVINCIA_MAX_LENGTH = 50;
-exports.PROVINCIA_WORD_PATTERN = /^\p{L}[\p{L}\p{M}]*$/u;
+exports.PROVINCIA_WORD_PATTERN = /^(?=\p{L})\p{Script=Latin}(?:(?=\p{L})\p{Script=Latin}|[\u0300-\u0344\u0346-\u034E\u0350-\u036F])*$/u;
 exports.DATA_FILE_NAME_PATTERN = /^(\d{4}-\d{2}-\d{2})_v(\d+)\.xlsx$/;
 
 // Folder segments reserved inside DATA_PATH — excluded from /list-files grouping

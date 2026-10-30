@@ -4,9 +4,12 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { getProvinciaNameError: nombre, validateProvincia: filas } = require('../functions/validateProvincia');
 
-const validas = ['Activos', 'Málaga', 'Santa Cruz de Tenerife', 'A Coruña', 'Illes Balears', 'Castellón-Castelló'];
+const validas = ['Activos', 'Málaga', 'Santa Cruz de Tenerife', 'A Coruña', 'Illes Balears', 'Castellón-Castelló',
+    'Ñ', 'ç', 'Vitoria-Gasteiz', 'Ü'];
 const rechazadas = ['a/b', 'a\\b', '..', 'a1', '__proto__', 'constructor', 'prototype', 'toString', 'hasOwnProperty', 'active', 'terms', 'drafts',
-    'Active', 'Terms', 'Activeness', 'Termsx', 'Terms2', 'a  b', ' a', 'a ', '-a', 'a-', 'a- b', 'Alicante/Alacant', 'a.b', 'a'.repeat(51), 5, ['a'], {}];
+    'Active', 'Terms', 'Activeness', 'Termsx', 'Terms2', 'a  b', ' a', 'a ', '-a', 'a-', 'a- b', 'Alicante/Alacant', 'a.b', 'a'.repeat(51), 5, ['a'], {},
+    // M23: homoglifos y alfabetos no latinos, siempre con escapes \u (nunca el carácter crudo).
+    'Mál\u0430ga', 'Gr\u03B1nada', '\u0430', 'a\u0483', '\u65E5\u672C\u8A9E', '\u2160', 'a\u034F', 'Mála\u034Fga', 'a\u0345', 'L\'Hospitalet'];
 const casos = [
     ['ausente', [{}], 'Province is required'], ['vacía', [{ Provincia: '' }], 'Province is required'], ['solo espacios', [{ Provincia: '  ' }], 'Province is required'],
     ['sin filas', [], 'Province is required'], ['primera fila sin provincia', [{}, { Provincia: 'Málaga' }], 'Province is required'],
@@ -15,6 +18,7 @@ const casos = [
     ['dos provincias', [{ Provincia: 'Málaga' }, { Provincia: 'Sevilla' }], 'Excel contains more than one province'],
     ['otra fila con array', [{ Provincia: 'Málaga' }, { Provincia: ['Málaga', 'Sevilla'] }], 'Excel contains more than one province'],
     ['otra fila con número', [{ Provincia: 'Málaga' }, { Provincia: 5 }], 'Excel contains more than one province'],
+    ['cirílico', [{ Provincia: 'Mál\u0430ga' }], 'Province is not valid'],
 ];
 
 test('las listas de casos de provincia no están vacías', () => {

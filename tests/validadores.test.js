@@ -13,7 +13,9 @@ const dataInvalidas = [
     ['otra raíz', 'drafts/Malaga/2026-10-28_v1.xlsx'], ['provincia reservada active', 'data/active/2026-10-28_v1.xlsx'],
     ['provincia __proto__', 'data/__proto__/2026-10-28_v1.xlsx'], ['recorrido ..', 'data/../2026-10-28_v1.xlsx'],
     ['nombre de archivo sin versión', 'data/Malaga/2026-10-28.xlsx'], ['extensión distinta', 'data/Malaga/2026-10-28_v1.json'],
-    ['provincia en NFD', 'data/Ma\u{301}laga/2026-10-28_v1.xlsx'], ['más de 120 caracteres', `data/${'a'.repeat(50)}/${'2026-10-28_v1.xlsx'.padStart(80, '0')}`],
+    ['provincia en NFD', 'data/Ma\u{301}laga/2026-10-28_v1.xlsx'],
+    ['provincia con a cirílica', 'data/Mál\u0430ga/2026-10-28_v1.xlsx'], ['provincia con alfa griega', 'data/Gr\u03B1nada/2026-10-28_v1.xlsx'],
+    ['provincia con número romano', 'data/\u2160/2026-10-28_v1.xlsx'], ['provincia con CGJ invisible', 'data/a\u034F/2026-10-28_v1.xlsx'],['más de 120 caracteres', `data/${'a'.repeat(50)}/${'2026-10-28_v1.xlsx'.padStart(80, '0')}`],
 ];
 
 test('las listas de casos de validadores no están vacías', () => {
@@ -40,7 +42,9 @@ const borradorInvalidas = [
     ['segundo segmento distinto', `data/otro/Málaga/${UUID}.xlsx`], ['provincia en NFD', `data/drafts/${'Málaga'.normalize('NFD')}/${UUID}.xlsx`],
     ['uuid en mayúsculas', `data/drafts/Málaga/${UUID.toUpperCase()}.xlsx`], ['sin extensión', `data/drafts/Málaga/${UUID}`],
     ['extensión distinta', `data/drafts/Málaga/${UUID}.json`], ['nombre no uuid', 'data/drafts/Málaga/2026-10-28_v1.xlsx'],
-    ['provincia __proto__', `data/drafts/__proto__/${UUID}.xlsx`], ['más de 120 caracteres', `data/drafts/${'a'.repeat(50)}/${'0'.repeat(80)}${UUID}.xlsx`],
+    ['provincia con a cirílica', `data/drafts/Mál\u0430ga/${UUID}.xlsx`], ['provincia con alfa griega', `data/drafts/Gr\u03B1nada/${UUID}.xlsx`],
+    ['provincia con número romano', `data/drafts/\u2160/${UUID}.xlsx`], ['provincia con CGJ invisible', `data/drafts/a\u034F/${UUID}.xlsx`],
+    ['provincia __proto__', `data/drafts/__proto__/${UUID}.xlsx`],['más de 120 caracteres', `data/drafts/${'a'.repeat(50)}/${'0'.repeat(80)}${UUID}.xlsx`],
 ];
 
 test('las listas de casos de claves de borrador no están vacías', () => {

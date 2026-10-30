@@ -26,10 +26,14 @@ const invalidasDeBorrador = [
     ['provincia reservada active', `data/drafts/active/${UUID}.xlsx`], ['otra raíz', `x/drafts/Málaga/${UUID}.xlsx`],
     ['recorrido ..', `data/drafts/../${UUID}.xlsx`], ['un segmento de más', `data/drafts/Málaga/x/${UUID}.xlsx`],
     ['uuid en mayúsculas', `data/drafts/Málaga/${UUID.toUpperCase()}.xlsx`], ['provincia en NFD', `data/drafts/${'Málaga'.normalize('NFD')}/${UUID}.xlsx`],
+    ['provincia con a cirílica', `data/drafts/Mál\u0430ga/${UUID}.xlsx`], ['provincia con número romano', `data/drafts/\u2160/${UUID}.xlsx`],
+    ['provincia con CGJ invisible', `data/drafts/a\u034F/${UUID}.xlsx`],
 ];
 const invalidasDeVersion = [
     ['clave de borrador válida', borrador], ['clave de borrador de otra provincia', `data/drafts/Sevilla/${UUID}.xlsx`],
     ['borrador con segmento de más', `data/drafts/Málaga/x/${UUID}.xlsx`],
+    ['provincia con a cirílica', 'data/Mál\u0430ga/2026-10-28_v1.xlsx'], ['provincia con número romano', 'data/\u2160/2026-10-28_v1.xlsx'],
+    ['provincia con CGJ invisible', 'data/a\u034F/2026-10-28_v1.xlsx'],
 ];
 const invalidas = [
     ['data/active/2026-10-28_v1.xlsx', 'data/active/2026-10-28_v1.xlsx'], ['data/terms/x.xlsx', 'data/terms/x.xlsx'],

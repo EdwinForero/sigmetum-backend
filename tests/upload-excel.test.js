@@ -27,6 +27,8 @@ const malos = [
     ['con barra', [fullRow('a/b')], 'Province is not valid'], ['con barra invertida', [fullRow('a\\b')], 'Province is not valid'],
     ['con ..', [fullRow('..')], 'Province is not valid'], ['numérica', [fullRow(5)], 'Province is not valid'],
     ['con coma (array)', [fullRow('a,b')], 'Province is not valid'], ['51 letras', [fullRow('a'.repeat(51))], 'Province is not valid'],
+    ['a cirílica', [fullRow('Mál\u0430ga')], 'Province is not valid'], ['alfa griega', [fullRow('Gr\u03B1nada')], 'Province is not valid'],
+    ['número romano', [fullRow('\u2160')], 'Province is not valid'], ['CGJ invisible', [fullRow('a\u034F')], 'Province is not valid'],
     ['dos provincias', [fullRow('Málaga'), fullRow('Sevilla')], 'Excel contains more than one province'],
     ['otra fila con coma', [fullRow('Málaga'), fullRow('Málaga,Sevilla')], 'Excel contains more than one province'],
 ];
