@@ -1,15 +1,18 @@
 const express = require('express');
 const multer = require('multer');
 const path = require('path');
+const { randomUUID } = require('crypto');
 const router = express.Router();
 
 const { tokenAuth } = require('../functions/tokenAuthentication');
 const { convertExcelToJson } = require('../functions/convertExcelToJson');
 const { formatFileName } = require('../functions/formatFileName');
 const { getNextVersion } = require('../functions/getNextVersion');
-const { provinciaFolderOf, activeKeyOf, provinciaOfKey, planActiveAfterDelete } = require('../functions/activeVersion');
+const {
+    provinciaFolderOf, activeKeyOf, provinciaOfKey, draftFolderOf, newDraftKeyOf, provinciaOfDraftKey, planActiveAfterDelete,
+} = require('../functions/activeVersion');
 const { validateProvincia } = require('../functions/validateProvincia');
-const { isValidDataKey } = require('../functions/validateDataKey');
+const { isValidDataKey, isValidDraftKey } = require('../functions/validateDataKey');
 const {
     uploadFileToS3,
     getFileFromS3,
@@ -42,6 +45,15 @@ const removeVersion = async (key) => {
     const plan = planActiveAfterDelete(remaining);
     if (plan.action === 'regenerate') await activateFrom(plan.key, provincia);
     else if (plan.action === 'delete') await deleteFileFromS3(activeKeyOf(provincia));
+};
+
+// Deletes the drafts of a province (data/drafts/<provincia>/) except exceptKey. Only keys that pass isValidDraftKey are
+// deleted (allow-list): anything else placed under the prefix by hand is left alone.
+const discardDrafts = async (provincia, exceptKey) => {
+    const drafts = await listFilesInS3Folder(draftFolderOf(provincia));
+    for (const { key } of drafts) {
+        if (key !== exceptKey && isValidDraftKey(key)) await deleteFileFromS3(key);
+    }
 };
 
 // ─── Public routes ───────────────────────────────────────────────────────────
@@ -110,17 +122,12 @@ router.post('/upload', tokenAuth, upload.single('file'), async (req, res, next) 
             return res.status(400).json({ success: false, error: provinciaError });
         }
 
-        const now = new Date();
-        const filesInFolder = await listFilesInS3Folder(provinciaFolderOf(provincia));
-        const { version, provinciaFolder } = getNextVersion(provincia, filesInFolder, now);
-        const xlsxFileName = formatFileName(version, now);
-        const draftKey = `${provinciaFolder}/${xlsxFileName}`;
-
-        // Always store the original Excel
-        await uploadFileToS3(xlsxFileName, req.file.buffer, provinciaFolder);
-
         if (emptyFields.length > 0) {
-            // Excel saved as draft — front decides whether to confirm or cancel
+            // Excel saved as a draft outside the versions (data/drafts/<provincia>/<uuid>.xlsx) — front decides whether to
+            // confirm or cancel. The new draft replaces any previous draft of the province.
+            const draftKey = newDraftKeyOf(provincia, randomUUID());
+            await uploadFileToS3(path.basename(draftKey), req.file.buffer, draftFolderOf(provincia));
+            await discardDrafts(provincia, draftKey);
             return res.status(400).json({
                 success: false,
                 error: 'Some rows have empty fields.',
@@ -132,11 +139,26 @@ router.post('/upload', tokenAuth, upload.single('file'), async (req, res, next) 
             });
         }
 
-        // No empty fields — activate immediately
+        // No empty fields — store the Excel as the next version and activate immediately
+        const now = new Date();
+        const filesInFolder = await listFilesInS3Folder(provinciaFolderOf(provincia));
+        const { version, provinciaFolder } = getNextVersion(provincia, filesInFolder, now);
+        const xlsxFileName = formatFileName(version, now);
+        const versionKey = `${provinciaFolder}/${xlsxFileName}`;
+        await uploadFileToS3(xlsxFileName, req.file.buffer, provinciaFolder);
+
         const jsonBuffer = Buffer.from(JSON.stringify(processedData, null, 2), 'utf8');
         await uploadFileToS3(`${provincia}.json`, jsonBuffer, ACTIVE_PATH);
 
-        res.json({ success: true, data: { message: 'Files uploaded successfully', key: draftKey } });
+        // A complete upload makes any earlier draft obsolete: confirming it later would overwrite the active with older data.
+        // Best effort: the upload is already done and active, so a failure here is logged and the client still gets a 200.
+        try {
+            await discardDrafts(provincia);
+        } catch (discardError) {
+            console.error('Error discarding previous drafts:', discardError);
+        }
+
+        res.json({ success: true, data: { message: 'Files uploaded successfully', key: versionKey } });
     } catch (error) {
         next(error);
     }
@@ -150,18 +172,37 @@ router.post('/upload/confirm', tokenAuth, async (req, res, next) => {
             return res.status(400).json({ success: false, error: 'draftKey is required' });
         }
 
-        if (!isValidDataKey(draftKey)) {
+        if (!isValidDraftKey(draftKey)) {
             return res.status(400).json({ success: false, error: 'Invalid draftKey' });
         }
 
+        // The province comes from the validated draftKey. Safe while only the server writes drafts (POST /upload derives
+        // the province from the Excel with validateProvincia); it is not compared against the Excel content.
+        const provincia = provinciaOfDraftKey(draftKey);
+
+        // DeleteObject is idempotent, so existence is checked first: a draft already confirmed, cancelled or replaced is a 404.
+        const drafts = await listFilesInS3Folder(draftFolderOf(provincia));
+        if (!drafts.some(({ key }) => key === draftKey)) {
+            return next(Object.assign(new Error('Draft not found'), { status: 404, publicMessage: 'Draft not found' }));
+        }
+
         if (!confirmed) {
-            // Cancel: delete the draft Excel from S3
-            await removeVersion(draftKey);
+            // Cancel: only the draft goes away; versions and the active one are not touched
+            await deleteFileFromS3(draftKey);
             return res.json({ success: true, data: 'Upload cancelled. Draft removed.' });
         }
 
-        // Confirm: activate the draft (read xlsx → convert → write active json)
-        await activateFrom(draftKey, provinciaOfKey(draftKey));
+        // Confirm: convert first (a bad Excel leaves no orphan version), then write the next version, the active json
+        // from the already converted data, and finally delete the draft. If it is interrupted before the delete, the draft
+        // stays and repeating the confirmation creates the next version with the same content.
+        const buffer = await getBufferFromS3(draftKey);
+        const { processedData } = await convertExcelToJson(buffer);
+        const filesInFolder = await listFilesInS3Folder(provinciaFolderOf(provincia));
+        const now = new Date();
+        const { version, provinciaFolder } = getNextVersion(provincia, filesInFolder, now);
+        await uploadFileToS3(formatFileName(version, now), buffer, provinciaFolder);
+        await putJsonToS3(activeKeyOf(provincia), processedData);
+        await deleteFileFromS3(draftKey);
 
         res.json({ success: true, data: 'Files uploaded successfully after confirmation.' });
     } catch (error) {

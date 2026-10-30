@@ -11,6 +11,9 @@
     ├── active/                     ← lo que ve el público
     │   ├── Malaga.json
     │   └── Granada.json
+    ├── drafts/                     ← borradores de POST /upload con celdas vacías (no son versiones)
+    │   └── Malaga/
+    │       └── 0b5f3c1e-9a7d-4e2b-8c1a-6d4f2e9a1b30.xlsx
     ├── terms/
     │   └── noLatinTerms.json       ← glosario [{ "term": "..." }]
     ├── Malaga/                     ← historial de versiones (Excel originales)
@@ -21,7 +24,7 @@
         └── ...
 ```
 
-Los prefijos están en `config/s3Paths.js`. `active` y `terms` están en `RESERVED_SEGMENTS` para que `/list-files` no los trate como provincias. Todo listado por prefijo (`listFilesInS3Folder`) añade una `/` final al `Prefix` si falta, así que listar `data/Santa Cruz` no recoge `data/Santa Cruz de Tenerife/...` ni `data/active` recoge `data/activos/...`.
+Los prefijos están en `config/s3Paths.js`. `active`, `terms` y `drafts` están en `RESERVED_SEGMENTS` para que `/list-files` no los trate como provincias. Todo listado por prefijo (`listFilesInS3Folder`) añade una `/` final al `Prefix` si falta, así que listar `data/Santa Cruz` no recoge `data/Santa Cruz de Tenerife/...` ni `data/active` recoge `data/activos/...`.
 
 **Listados y objetos reales (A5, M10; 29/10/2026).** Los listados recorren **todas** las páginas de `ListObjectsV2` (`IsTruncated` con `NextContinuationToken`), sin tope de páginas; si S3 dice que hay más páginas y no da token, o repite uno ya usado, la función lanza en vez de iterar sin fin. Una página sin `Contents` cuenta como vacía y continúa. Un «objeto real» es el que tiene la clave sin `/` final y `Size > 0`; el marcador de carpeta (`gallery/`) y los objetos de tamaño 0 se excluyen igual de `listFilesInS3Folder` y de las URL prefirmadas, y la galería vacía o con solo el marcador da `[]` en `GET /list-images`. La paginación usa la misma acción `s3:ListBucket` que antes.
 
@@ -31,7 +34,7 @@ Los prefijos están en `config/s3Paths.js`. `active` y `terms` están en `RESERV
 
 ## Modelo de versionado
 
-- Cada subida de Excel crea un objeto nuevo en `data/{Provincia}/` con nombre `YYYY-MM-DD_vN.xlsx`. La fecha es el día **UTC** (la misma fuente en `getNextVersion` y `formatFileName`; entre las 00:00 UTC y las 01:00-02:00 de España el nombre lleva el día anterior al local). `N` empieza en 1 cada día y se incrementa si ya hay subidas ese día. El nombre se interpreta en un solo sitio (`parseVersionName`, que usa `DATA_FILE_NAME_PATTERN`): `N` es un entero y el orden de versiones es por fecha y luego por `N` (`_v10` es posterior a `_v9`; con `_v7` y `_v007` gana el nombre mayor por unidades de código).
+- Cada subida de Excel **sin celdas vacías**, y cada borrador confirmado, crea un objeto nuevo en `data/{Provincia}/` con nombre `YYYY-MM-DD_vN.xlsx`. La fecha es el día **UTC** (la misma fuente en `getNextVersion` y `formatFileName`; entre las 00:00 UTC y las 01:00-02:00 de España el nombre lleva el día anterior al local). `N` empieza en 1 cada día y se incrementa si ya hay subidas ese día. El nombre se interpreta en un solo sitio (`parseVersionName`, que usa `DATA_FILE_NAME_PATTERN`): `N` es un entero y el orden de versiones es por fecha y luego por `N` (`_v10` es posterior a `_v9`; con `_v7` y `_v007` gana el nombre mayor por unidades de código).
 - Los Excel **nunca se modifican**; son el historial.
 - `data/active/{Provincia}.json` es una **proyección** de una de esas versiones: se regenera convirtiendo el Excel elegido. Hay exactamente un activo por provincia.
 - `/get-merged-data` concatena todos los activos: es la fuente de datos pública.
@@ -41,24 +44,30 @@ Los prefijos están en `config/s3Paths.js`. `active` y `terms` están en `RESERV
 ```
             POST /upload
                  │
-     Excel guardado en data/{prov}/fecha_vN.xlsx
-                 │
-       ¿celdas vacías? ──no──► escribe data/active/{prov}.json   (200)
+       ¿celdas vacías? ──no──► Excel en data/{prov}/fecha_vN.xlsx + activo data/active/{prov}.json   (200)
+                 │                  y se descartan los borradores previos de la provincia (mejor esfuerzo)
                  │sí
                  ▼
+   Excel en data/drafts/{prov}/<uuid>.xlsx (no es versión; se borran los borradores previos)
+                 │
           respuesta 400 con draftKey
                  │
-       POST /upload/confirm
-          ├─ confirmed: true  ─► activateFrom(draftKey) → activo = borrador
-          └─ confirmed: false ─► removeVersion(draftKey) → activo = última versión restante (tres casos, ver abajo)
+       POST /upload/confirm   (404 Draft not found si el borrador ya no existe)
+          ├─ confirmed: true  ─► convierte el borrador → versión nueva data/{prov}/fecha_vN.xlsx
+          │                      → activo = esa versión → borra el borrador
+          └─ confirmed: false ─► borra solo el borrador (versiones y activo intactos)
 ```
+
+**Borradores (A2, A9; 29/10/2026).** Un borrador es el Excel de una subida con celdas vacías, guardado en `data/drafts/{provincia}/<uuid>.xlsx` (UUID de `crypto.randomUUID()`). No cuenta como versión: `GET /list-files` no lo muestra (`drafts` está en `RESERVED_SEGMENTS`), `getNextVersion` no lo ve y `/update-file` y `/delete-file` lo rechazan con 400. Por eso cancelar o borrar una versión ya no puede regenerar el activo desde un borrador sin confirmar (A9). Ciclo: (1) se crea en el 400 por celdas vacías; (2) lo sustituye cualquier subida posterior de la provincia, con o sin vacíos (se borran los borradores previos; en la subida completa el descarte es de mejor esfuerzo y, si falla, queda un borrador viejo hasta la siguiente subida de esa provincia); (3) se confirma o (4) se cancela. Al confirmar, el `N` de la versión se calcula sobre las versiones reales de la carpeta de la provincia. Orden de escritura al confirmar: leer el borrador, convertirlo (si falla no queda nada escrito), listar versiones, escribir la versión, escribir el activo con el resultado ya convertido y borrar el borrador. Si se interrumpe antes del borrado, el borrador sigue y repetir la confirmación crea la versión siguiente con el mismo contenido (duplicado asumido).
+
+**Límites aceptados** (M1 queda fuera de alcance): dos subidas con vacíos simultáneas de la misma provincia pueden borrarse mutuamente los borradores (ambos `draftKey` darían 404); una confirmación en curso mientras entra una subida completa de la provincia puede sobrescribir el activo nuevo con datos más antiguos (entre la comprobación de existencia y la escritura); un borrador de 0 bytes no se lista y daría 404; confirmar usa la provincia del `draftKey` sin compararla con el Excel (seguro mientras solo el servidor escribe borradores). Los borradores guardados **antes** del despliegue siguen como versiones en `data/{provincia}/` hasta que el administrador los revise y borre.
 
 El ciclo de vida no cambia con M14 (29/10/2026); solo cambia dónde vive cada regla: `aws/` hace I/O (`deleteFileFromS3` como borrado de clave, `putJsonToS3`), `functions/activeVersion.js` decide (`planActiveAfterDelete`) y `routes/data.js` orquesta (`activateFrom`, `removeVersion`), con las mismas operaciones de S3 en el mismo orden. Ver [05](05-modulos.md).
 
 Operaciones de mantenimiento:
 
 - **Cambiar versión activa**: `POST /update-file` con la clave de cualquier Excel del historial.
-- **Borrar una versión**: `POST /delete-file`. Tras borrar, se miran los `.xlsx` que quedan en la carpeta de la provincia (el mismo borrado ocurre con `/upload/confirm` y `confirmed: false`): (a) si hay alguno con nombre estándar, el activo se regenera desde el más reciente por fecha y `N` entero (los de nombre no estándar se ignoran); (b) si solo quedan `.xlsx` de nombre no estándar (subidos a mano), el activo **no se toca**, para que cancelar un borrador no borre un activo válido; (c) si no queda ningún `.xlsx`, se borra el activo.
+- **Borrar una versión**: `POST /delete-file`. Tras borrar, se miran los `.xlsx` que quedan en la carpeta de la provincia (con `/upload/confirm` y `confirmed: false` ya no ocurre: cancelar solo borra el borrador): (a) si hay alguno con nombre estándar, el activo se regenera desde el más reciente por fecha y `N` entero (los de nombre no estándar se ignoran); (b) si solo quedan `.xlsx` de nombre no estándar (subidos a mano), el activo **no se toca**, para que cancelar un borrador no borre un activo válido; (c) si no queda ningún `.xlsx`, se borra el activo.
 
 ### Regla de provincia
 
@@ -74,6 +83,10 @@ Operaciones de mantenimiento:
 ### Regla de clave de versión
 
 `POST /upload/confirm` (`draftKey`), `POST /update-file` y `POST /delete-file` (`fileName`) validan la clave con `isValidDataKey` (`functions/validateDataKey.js`) antes de usarla. Es válida si es una cadena de hasta 120 caracteres con exactamente tres segmentos separados por `/`: `data`, una provincia que pasa la regla anterior **y** ya está en NFC, y un nombre `AAAA-MM-DD_vN.xlsx` (`DATA_FILE_NAME_PATTERN`; `v\d+` admite `_v0` y `_v007`). La clave del cliente nunca se normaliza ni se reescribe: una provincia en NFD se rechaza. No comprueba que el objeto exista.
+
+### Regla de clave de borrador
+
+`POST /upload/confirm` (`draftKey`) valida la clave con `isValidDraftKey` (`functions/validateDataKey.js`) antes de usarla. Es válida si es una cadena de hasta 120 caracteres con exactamente cuatro segmentos separados por `/`: `data`, `drafts`, una provincia que pasa la regla de provincia **y** ya está en NFC, y un nombre `<uuid en minúsculas>.xlsx` (`DRAFT_FILE_NAME_PATTERN`). Una clave de versión no es un borrador válido (400 `Invalid draftKey`) y una de borrador no es una versión válida (400 `Invalid fileName` en `/update-file` y `/delete-file`). No comprueba que el objeto exista: eso lo hace la ruta listando `data/drafts/{provincia}/` (404 `Draft not found`). Fuera de alcance (M2): `GET /get-data/:path(*)` puede leer cualquier clave, borradores incluidos.
 
 ## Formato del JSON activo
 

@@ -61,7 +61,7 @@ Qué validar y dónde, con el estado real de cada ruta:
 |---|---|---|---|
 | `POST /log` | `username`, `password` | Que ambos sean cadenas (400); después usuario y contraseña (401) | Nada pendiente de tipo (A7 resuelto) |
 | `POST /upload` | `file` (multipart) | Que exista (400); extensión `.xlsx` (400); `MulterError` a 400; la provincia de la primera fila con `validateProvincia` (400 `Province is required`, `Province is not valid`, `Province is reserved` o `Excel contains more than one province`, antes de cualquier escritura; A4 resuelto el 28/10/2026) | Tamaño máximo (M6). En esta ruta el MIME no se comprueba porque lo manda el cliente y no es fiable |
-| `POST /upload/confirm` | `draftKey`, `confirmed` | `draftKey` cadena no vacía (400) y `isValidDataKey` (400 `Invalid draftKey`, sin normalizar la clave, antes de tocar S3) | Que `confirmed` sea booleano |
+| `POST /upload/confirm` | `draftKey`, `confirmed` | `draftKey` cadena no vacía (400) y `isValidDraftKey` (400 `Invalid draftKey`, sin normalizar la clave, antes de tocar S3; una clave de versión también da 400); después, borrador inexistente: 404 `Draft not found` | Que `confirmed` sea booleano |
 | `POST /update-file`, `POST /delete-file` | `fileName` | Cadena no vacía (400) y `isValidDataKey` (400 `Invalid fileName`, antes de tocar S3) | Que el objeto exista (no se exige) |
 | `GET /get-data/:path(*)` | `path` | Nada | Restringir a `data/active/` (M2) |
 | `GET /get-image` | `imageKey` | Cadena no vacía (400; cubre `?imageKey=a&imageKey=b`) y lista de permitidos `isValidImageKey` (400 `imageKey is not valid`, antes de llamar a S3) | Que la clave exista en el listado (no se exige: riesgo residual aceptado) |

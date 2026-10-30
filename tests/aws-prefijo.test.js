@@ -86,7 +86,7 @@ test('POST /upload de Santa Cruz lista con barra final y no cuenta Santa Cruz de
     t.mock.timers.enable({ apis: ['Date'], now: instante });
     const r = await subir(app, [fullRow('Santa Cruz')], tokenDelInstante);
     assert.equal(r.status, 200, JSON.stringify(r.json));
-    assert.deepEqual(prefijos, ['data/Santa Cruz/']);
+    assert.deepEqual(prefijos, ['data/Santa Cruz/', 'data/drafts/Santa Cruz/']); // versiones y, al final, borradores previos
     // Si el prefijo perdiera la barra, contaría data/Santa Cruz de Tenerife/2026-10-05_v3.xlsx y daría otra versión.
     assert.equal(r.json.data.key, 'data/Santa Cruz/2026-10-05_v1.xlsx');
 });

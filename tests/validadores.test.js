@@ -1,7 +1,8 @@
 // Pruebas de caracterización de los validadores puros: validateDataKey, validateImageKey y validateContactMessage.
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { isValidDataKey } = require('../functions/validateDataKey');
+const { isValidDataKey, isValidDraftKey } = require('../functions/validateDataKey');
+const { DRAFTS_PATH, RESERVED_SEGMENTS, PROVINCIA_RESERVED } = require('../config/s3Paths');
 const { isValidImageKey } = require('../functions/validateImageKey');
 const { validateContactMessage } = require('../functions/validateContactMessage');
 
@@ -27,7 +28,39 @@ for (const [nombre, key] of dataInvalidas) {
     test(`validateDataKey rechaza ${nombre}`, () => assert.equal(isValidDataKey(key), false));
 }
 
-const imagenValidas = ['foto.jpg', 'sub/foto-1_2.PNG', 'a.webp', 'b.gif', 'c.jpeg', 'foto(1).jpg', `${'a'.repeat(196)}.jpg`];
+// Clave de borrador (A2): data/drafts/<provincia>/<uuid en minúsculas>.xlsx. Solo la reconoce isValidDraftKey.
+const UUID = '123e4567-e89b-42d3-a456-426614174000';
+const borradorValidas = [`data/drafts/Málaga/${UUID}.xlsx`, `data/drafts/Santa Cruz de Tenerife/${UUID}.xlsx`];
+const borradorInvalidas = [
+    ['no es cadena', 5], ['undefined', undefined], ['array', [`data/drafts/Málaga/${UUID}.xlsx`]], ['vacía', ''],
+    ['clave de versión', 'data/Málaga/2026-10-28_v1.xlsx'], ['provincia reservada active', `data/drafts/active/${UUID}.xlsx`],
+    ['provincia reservada drafts', `data/drafts/drafts/${UUID}.xlsx`], ['recorrido ..', `data/drafts/../${UUID}.xlsx`],
+    ['provincia ..', `data/drafts/../x/${UUID}.xlsx`], ['un segmento de más', `data/drafts/Málaga/x/${UUID}.xlsx`],
+    ['un segmento de menos', `data/drafts/${UUID}.xlsx`], ['otra raíz', `x/drafts/Málaga/${UUID}.xlsx`],
+    ['segundo segmento distinto', `data/otro/Málaga/${UUID}.xlsx`], ['provincia en NFD', `data/drafts/${'Málaga'.normalize('NFD')}/${UUID}.xlsx`],
+    ['uuid en mayúsculas', `data/drafts/Málaga/${UUID.toUpperCase()}.xlsx`], ['sin extensión', `data/drafts/Málaga/${UUID}`],
+    ['extensión distinta', `data/drafts/Málaga/${UUID}.json`], ['nombre no uuid', 'data/drafts/Málaga/2026-10-28_v1.xlsx'],
+    ['provincia __proto__', `data/drafts/__proto__/${UUID}.xlsx`], ['más de 120 caracteres', `data/drafts/${'a'.repeat(50)}/${'0'.repeat(80)}${UUID}.xlsx`],
+];
+
+test('las listas de casos de claves de borrador no están vacías', () => {
+    assert.ok(borradorValidas.length > 0);
+    assert.ok(borradorInvalidas.length > 0);
+});
+for (const key of borradorValidas) {
+    test(`isValidDraftKey acepta ${key}`, () => assert.equal(isValidDraftKey(key), true));
+    test(`isValidDataKey rechaza la clave de borrador ${key}`, () => assert.equal(isValidDataKey(key), false));
+}
+for (const [nombre, key] of borradorInvalidas) {
+    test(`isValidDraftKey rechaza ${nombre}`, () => assert.equal(isValidDraftKey(key), false));
+}
+test('PROVINCIA_RESERVED y RESERVED_SEGMENTS incluyen drafts', () => {
+    assert.ok(RESERVED_SEGMENTS.includes('drafts'));
+    assert.ok(PROVINCIA_RESERVED.includes('drafts'));
+});
+test('DRAFTS_PATH es data/drafts', () => assert.equal(DRAFTS_PATH, 'data/drafts'));
+
+const imagenValidas =['foto.jpg', 'sub/foto-1_2.PNG', 'a.webp', 'b.gif', 'c.jpeg', 'foto(1).jpg', `${'a'.repeat(196)}.jpg`];
 const imagenInvalidas = [
     ['no es cadena', 123], ['vacía', ''], ['recorrido ../', '../x.jpg'], ['a../b.jpg (defensa en profundidad)', 'a../b.jpg'],
     ['barra inicial', '/a.jpg'], ['doble barra', 'a//b.jpg'], ['espacio', 'a b.jpg'], ['control', 'a\u0001b.jpg'],

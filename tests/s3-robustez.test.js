@@ -400,12 +400,17 @@ describe('B5 delete-image y delete-term', () => {
 describe('B9 NoSuchKey a 404', () => {
     const auth = (req) => req.set('Authorization', `Bearer ${token}`);
     const CLAVE = 'data/Sevilla/2026-10-05_v1.xlsx';
+    const BORRADOR = 'data/drafts/Sevilla/123e4567-e89b-42d3-a456-426614174000.xlsx';
+    const conBorrador = () => { estado.list = () => ({ Contents: [{ Key: BORRADOR, Size: 10 }] }); };
     const MENSAJE = 'The requested file does not exist in storage';
     const faltaObjeto = (error) => () => { throw error; };
     const rutas = [
         ['GET /get-data/<clave>', () => request(app).get('/api/v1/get-data/data/active/Sevilla.json')],
         ['POST /update-file', () => auth(request(app).post('/api/v1/update-file')).send({ fileName: CLAVE })],
-        ['POST /upload/confirm (confirmar)', () => auth(request(app).post('/api/v1/upload/confirm')).send({ confirmed: true, draftKey: CLAVE })],
+        ['POST /upload/confirm (confirmar)', () => {
+            conBorrador();
+            return auth(request(app).post('/api/v1/upload/confirm')).send({ confirmed: true, draftKey: BORRADOR });
+        }],
     ];
     const variantes = [
         ['name y Code', () => awsError('NoSuchKey', 'NoSuchKey', 404)],
@@ -441,12 +446,18 @@ describe('B9 NoSuchKey a 404', () => {
             assert.deepEqual(res.body, { success: false, error: MENSAJE });
             assert.ok(estado.llamadas.some((c) => c instanceof DeleteObjectCommand && c.input.Key === CLAVE));
         });
-        test('POST /upload/confirm al cancelar: 404', async () => {
-            estado.list = () => ({ Contents: [{ Key: 'data/Sevilla/2026-10-04_v1.xlsx', Size: 10 }] });
-            estado.get = faltaObjeto(awsError('NoSuchKey', 'NoSuchKey', 404));
-            const res = await auth(request(app).post('/api/v1/upload/confirm')).send({ confirmed: false, draftKey: CLAVE });
+        test('POST /upload/confirm al cancelar un borrador que ya no existe: 404 Draft not found, sin Delete ni Put', async () => {
+            estado.list = () => ({ Contents: [{ Key: 'data/drafts/Sevilla/223e4567-e89b-42d3-a456-426614174001.xlsx', Size: 10 }] });
+            const res = await auth(request(app).post('/api/v1/upload/confirm')).send({ confirmed: false, draftKey: BORRADOR });
             assert.equal(res.status, 404);
-            assert.deepEqual(res.body, { success: false, error: MENSAJE });
+            assert.deepEqual(res.body, { success: false, error: 'Draft not found' });
+            assert.equal(estado.llamadas.filter((c) => c instanceof DeleteObjectCommand || c instanceof PutObjectCommand).length, 0);
+        });
+        test('POST /upload/confirm al confirmar un borrador que ya no existe: 404 Draft not found, sin Get, Delete ni Put', async () => {
+            const res = await auth(request(app).post('/api/v1/upload/confirm')).send({ confirmed: true, draftKey: BORRADOR });
+            assert.equal(res.status, 404);
+            assert.deepEqual(res.body, { success: false, error: 'Draft not found' });
+            assert.equal(estado.llamadas.filter((c) => !(c instanceof ListObjectsV2Command)).length, 0);
         });
     });
 

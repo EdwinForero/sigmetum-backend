@@ -2,13 +2,15 @@
 // provincia válida e inválida, y borradores con draftKey. S3 simulado. Los nombres de los casos son los del script.
 const { test, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
-const { appNueva, argsLog, isEnvelopeError, reiniciar } = require('./helpers/simulados');
+const { appNueva, argsLog, isEnvelopeError, reiniciar, seed } = require('./helpers/simulados');
 const { fullRow, subir } = require('./helpers/excel');
 
 const app = appNueva();
 beforeEach(reiniciar);
 
 const FILE_RE = /^\d{4}-\d{2}-\d{2}_v\d+\.xlsx$/;
+const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
+const DRAFT_RE = new RegExp(`^data/drafts/Málaga/${UUID}\\.xlsx$`, 'u');
 const nfd = 'Málaga'.normalize('NFD');
 
 const ok = [
@@ -28,7 +30,7 @@ const malos = [
     ['dos provincias', [fullRow('Málaga'), fullRow('Sevilla')], 'Excel contains more than one province'],
     ['otra fila con coma', [fullRow('Málaga'), fullRow('Málaga,Sevilla')], 'Excel contains more than one province'],
 ];
-// Filas con celdas vacías: el flujo de borrador no cambia y conserva data.draftKey.
+// Filas con celdas vacías: el borrador va a data/drafts/<provincia>/<uuid>.xlsx (A2) y se conserva data.draftKey.
 const borradores = [
     ['fila posterior sin provincia', [fullRow('Málaga'), fullRow(null)]],
     ['primera fila con otras celdas vacías', [['Málaga', null, null, null, null, null, null, null, null, null, null]]],
@@ -68,8 +70,10 @@ for (const [n, rows] of borradores) {
         const r = await subir(app, rows);
         assert.equal(r.status, 400);
         assert.equal(r.json?.error, 'Some rows have empty fields.');
-        assert.match(r.json?.data?.draftKey ?? '', /^data\/Málaga\/\d{4}-\d{2}-\d{2}_v\d+\.xlsx$/);
+        assert.match(r.json?.data?.draftKey ?? '', DRAFT_RE);
         assert.equal(argsLog.upload.length, 1);
+        assert.equal(argsLog.upload[0][2], 'data/drafts/Málaga');
+        assert.equal(`data/drafts/Málaga/${argsLog.upload[0][0]}`, r.json.data.draftKey);
     });
 }
 
@@ -83,7 +87,7 @@ test('borrador: cuerpo completo del 400 sin processedData ni rowData', async () 
     assert.equal('processedData' in r.json.data, false);
     assert.ok(r.json.data.emptyFields.every((f) => !('rowData' in f)));
     const { draftKey, ...resto } = r.json.data;
-    assert.match(draftKey, /^data\/Málaga\/\d{4}-\d{2}-\d{2}_v\d+\.xlsx$/);
+    assert.match(draftKey, DRAFT_RE);
     assert.deepEqual(r.json, {
         success: false,
         error: 'Some rows have empty fields.',
@@ -95,4 +99,27 @@ test('borrador: cuerpo completo del 400 sin processedData ni rowData', async () 
     });
     assert.deepEqual(Object.keys(resto).sort(), ['actionRequired', 'emptyFields']);
     assert.equal(argsLog.upload.length, 1);
+});
+
+// A2/A9: el doble de S3 devuelve seed.list para cualquier prefijo; aquí seed.list es el contenido de data/drafts/Málaga/.
+const sinSufijo = (clave) => clave.replace(/^data\/drafts\/Málaga\//u, '');
+const BORRADOR_PREVIO = 'data/drafts/Málaga/123e4567-e89b-42d3-a456-426614174000.xlsx';
+const lista = (...claves) => claves.map((key) => ({ name: sinSufijo(key), key }));
+
+test('borrador con un borrador previo: borra solo el previo válido, no el nuevo ni lo que no es un borrador', async () => {
+    const intruso = 'data/drafts/Málaga/notas.txt';
+    const subcarpeta = 'data/drafts/Málaga/sub/123e4567-e89b-42d3-a456-426614174111.xlsx';
+    seed.list = lista(BORRADOR_PREVIO, intruso, subcarpeta);
+    const r = await subir(app, [fullRow('Málaga'), fullRow(null)]);
+    assert.equal(r.status, 400);
+    assert.deepEqual(argsLog.list.map((a) => a[0]), ['data/drafts/Málaga']);
+    assert.deepEqual(argsLog.del.map((a) => a[0]), [BORRADOR_PREVIO]);
+});
+
+test('subida completa con un borrador previo: lo borra tras activar la versión', async () => {
+    seed.list = lista(BORRADOR_PREVIO);
+    const r = await subir(app, [fullRow('Málaga')]);
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    assert.deepEqual(argsLog.list.map((a) => a[0]), ['data/Málaga', 'data/drafts/Málaga']);
+    assert.deepEqual(argsLog.del.map((a) => a[0]), [BORRADOR_PREVIO]);
 });

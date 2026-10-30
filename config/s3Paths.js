@@ -2,6 +2,8 @@ exports.GALLERY_PATH = 'gallery';
 exports.DATA_PATH = 'data';
 exports.ACTIVE_PATH = 'data/active';
 exports.TERMS_PATH = 'data/terms';
+// Borradores de POST /upload con celdas vacías: data/drafts/<provincia>/<uuid>.xlsx (no son versiones: A2 y A9).
+exports.DRAFTS_PATH = 'data/drafts';
 exports.TERMS_FILE = 'noLatinTerms.json';
 
 // imageKey (GET /get-image, DELETE /delete-image): ruta relativa a GALLERY_PATH, sin texto libre.
@@ -31,7 +33,7 @@ exports.IMAGE_UPLOAD_TYPES = {
 // Se parte por espacio o guion y cada palabra debe cumplir PROVINCIA_WORD_PATTERN (letras Unicode con marcas
 // combinantes); una parte vacía (separador en los extremos o doble) se rechaza. Rechaza "/", "\", ".", dígitos.
 // Longitud máxima antes de ejecutar la expresión.
-// PROVINCIA_RESERVED: nombres que no pueden ser carpeta de provincia (RESERVED_SEGMENTS y el borrador). Además
+// PROVINCIA_RESERVED: nombres que no pueden ser carpeta de provincia (RESERVED_SEGMENTS, que incluye drafts). Además
 // se rechaza todo nombre que en minúsculas empiece por "active" o "terms" y los nombres de propiedades de objeto.
 // DATA_FILE_NAME_PATTERN: nombre de archivo de una versión (AAAA-MM-DD_vN.xlsx), contrato con el frontend (D2).
 // Fuente única del nombre de versión (la usan isValidDataKey y functions/versionName.js); grupos: 1 = fecha, 2 = N.
@@ -41,5 +43,9 @@ exports.PROVINCIA_WORD_PATTERN = /^\p{L}[\p{L}\p{M}]*$/u;
 exports.DATA_FILE_NAME_PATTERN = /^(\d{4}-\d{2}-\d{2})_v(\d+)\.xlsx$/;
 
 // Folder segments reserved inside DATA_PATH — excluded from /list-files grouping
-exports.RESERVED_SEGMENTS = ['active', 'terms'];
-exports.PROVINCIA_RESERVED = [...exports.RESERVED_SEGMENTS, 'drafts'];
+exports.RESERVED_SEGMENTS = ['active', 'terms', 'drafts'];
+exports.PROVINCIA_RESERVED = [...exports.RESERVED_SEGMENTS];
+
+// Nombre de archivo de un borrador: <uuid en minúsculas>.xlsx (lo genera el servidor con crypto.randomUUID()).
+// Sin bandera "g": test() no debe guardar estado entre llamadas.
+exports.DRAFT_FILE_NAME_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.xlsx$/;

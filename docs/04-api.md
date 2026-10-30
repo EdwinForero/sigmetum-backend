@@ -96,34 +96,35 @@ Validación antes de procesar:
    - `Province is not valid`: no es una cadena (número, array por una coma), mide más de 50 caracteres tras recortar, tiene algo distinto de letras (con acentos) separadas por un solo espacio o guion (`/`, `\`, `.`, dígitos, separadores en los extremos o dobles) o es un nombre de propiedad de objeto (`__proto__`, `constructor`, `toString`, `prototype`...).
    - `Province is reserved`: es `active`, `terms` o `drafts` exactos, o en minúsculas empieza por `active` o `terms` (`Activeness`, `Termsx`). `Activos` **se acepta**: la colisión con `data/active/` la evita el prefijo con barra de los listados.
    - `Excel contains more than one province`: otra fila que trae `Provincia` difiere de la primera (tras recortar y NFC, comparación exacta). Las filas sin la clave `Provincia` se ignoran y siguen el flujo de celdas vacías, bajo la provincia de la primera fila.
-3. Calcula la versión del día (UTC) y guarda el Excel original en `data/{provincia}/{YYYY-MM-DD}_v{n}.xlsx`; la versión y el nombre usan el mismo instante de la petición.
-4. Si **no** hay celdas vacías → escribe `data/active/{provincia}.json` y responde `200`:
+3. Si **no** hay celdas vacías: calcula la versión del día (UTC) y guarda el Excel original en `data/{provincia}/{YYYY-MM-DD}_v{n}.xlsx` (la versión y el nombre usan el mismo instante de la petición).
+4. Si **no** hay celdas vacías → escribe `data/active/{provincia}.json`, descarta los borradores previos de la provincia (mejor esfuerzo: si el descarte falla se registra y la respuesta sigue siendo `200`, y puede quedar un borrador viejo hasta la siguiente subida de esa provincia) y responde `200`:
    ```json
    { "success": true, "data": { "message": "Files uploaded successfully", "key": "data/Malaga/2026-01-15_v1.xlsx" } }
    ```
-5. Si **hay** celdas vacías → el Excel queda guardado como borrador, **no** se activa, y responde `400`:
+5. Si **hay** celdas vacías → el Excel queda guardado como borrador en `data/drafts/{provincia}/<uuid>.xlsx` (A2, A9: **no** es una versión, no crea ninguna ni aparece en `/list-files`), **no** se activa, sustituye al borrador previo de la provincia (lo borra) y responde `400`:
    ```json
    { "success": false, "error": "Some rows have empty fields.", "data": {
      "emptyFields": [ { "rowIndex": 7 } ],
-     "draftKey": "data/Malaga/2026-01-15_v2.xlsx",
+     "draftKey": "data/drafts/Malaga/0b5f3c1e-9a7d-4e2b-8c1a-6d4f2e9a1b30.xlsx",
      "actionRequired": "Confirm whether to continue or cancel the upload."
    } }
    ```
-   Desde el 29/10/2026 (D8) el `400` ya no devuelve `processedData` ni `rowData`: `emptyFields` solo lleva el número de fila (`rowIndex`). `draftKey` y `actionRequired` van dentro de `data`, sin cambios. El frontend debe llamar después a `/upload/confirm`.
+   Desde el 29/10/2026 (D8) el `400` ya no devuelve `processedData` ni `rowData`: `emptyFields` solo lleva el número de fila (`rowIndex`). `draftKey` y `actionRequired` van dentro de `data`; el `draftKey` es opaco (el frontend no debe interpretarlo) y cambia de forma desde A2. El frontend debe llamar después a `/upload/confirm`.
 
 ### `POST /upload/confirm` 🔒
-Body: `{ "draftKey": "data/Malaga/2026-01-15_v2.xlsx", "confirmed": true }`
+Body: `{ "draftKey": "data/drafts/Malaga/0b5f3c1e-9a7d-4e2b-8c1a-6d4f2e9a1b30.xlsx", "confirmed": true }`
 
-- `confirmed: true` → activa el borrador (regenera `data/active/{provincia}.json` desde ese Excel).
-- `confirmed: false` → borra el borrador (y recalcula el activo con la última versión restante).
+- `confirmed: true` → crea la versión definitiva (`data/{provincia}/AAAA-MM-DD_vN.xlsx`, con `N` calculada sobre las versiones reales), regenera `data/active/{provincia}.json` desde ese Excel y borra el borrador. La respuesta (`Files uploaded successfully after confirmation.`) no devuelve la clave definitiva. Si la operación se interrumpe antes del borrado, el borrador sigue existiendo y repetir la confirmación crea la versión siguiente con el mismo contenido.
+- `confirmed: false` → borra solo el borrador; no toca versiones ni el JSON activo.
 - `400` `draftKey is required` si falta `draftKey` o no es una cadena (antes, un objeto daba 500).
-- `400` `Invalid draftKey` si la clave no cumple `data/{provincia}/AAAA-MM-DD_vN.xlsx` (regla de provincia, tres segmentos, máximo 120 caracteres, [06](06-almacenamiento-s3.md#regla-de-clave-de-versión)); se comprueba antes de la bifurcación `confirmed` y sin tocar S3. La clave nunca se normaliza: una provincia en NFD da 400 (M4 cerrado para esta ruta).
+- `400` `Invalid draftKey` si la clave no cumple `data/drafts/{provincia}/<uuid>.xlsx` (regla de provincia, cuatro segmentos, máximo 120 caracteres, [06](06-almacenamiento-s3.md#regla-de-clave-de-borrador)); una clave de versión (`data/{provincia}/AAAA-MM-DD_vN.xlsx`) también da 400. Se comprueba antes de la bifurcación `confirmed` y sin tocar S3. La clave nunca se normaliza: una provincia en NFD da 400 (M4 cerrado para esta ruta).
+- `404` `Draft not found` si la clave es válida pero el borrador ya no existe (confirmado, cancelado o sustituido por una subida posterior de la provincia); se comprueba listando `data/drafts/{provincia}/` antes de confirmar o cancelar, sin tocar versiones ni activo. Necesita `s3:ListBucket`.
 
 ### `POST /update-file` 🔒
-Body: `{ "fileName": "data/Malaga/2026-01-10_v1.xlsx" }` — marca esa versión como la activa de su provincia (rollback/roll-forward). `400` `fileName is required` si falta o no es una cadena (antes 500); `400` `Invalid fileName` si no cumple `data/{provincia}/AAAA-MM-DD_vN.xlsx` ([regla](06-almacenamiento-s3.md#regla-de-clave-de-versión); sin normalizar, provincia no NFC = 400; no toca S3). Que el objeto exista no se comprueba.
+Body: `{ "fileName": "data/Malaga/2026-01-10_v1.xlsx" }` — marca esa versión como la activa de su provincia (rollback/roll-forward). `400` `fileName is required` si falta o no es una cadena (antes 500); `400` `Invalid fileName` si no cumple `data/{provincia}/AAAA-MM-DD_vN.xlsx` ([regla](06-almacenamiento-s3.md#regla-de-clave-de-versión); sin normalizar, provincia no NFC = 400; una clave de borrador también da 400; no toca S3). Que el objeto exista no se comprueba.
 
 ### `POST /delete-file` 🔒
-Body: `{ "fileName": "data/Malaga/2026-01-10_v1.xlsx" }` — borra esa versión. Si quedan otras, activa la más reciente por nombre; si no queda ninguna, borra también el JSON activo de la provincia. `400` `fileName is required` si falta o no es una cadena (antes 500); `400` `Invalid fileName` si no cumple la forma de versión (misma regla que `/update-file`, no toca S3).
+Body: `{ "fileName": "data/Malaga/2026-01-10_v1.xlsx" }` — borra esa versión. Si quedan otras, activa la más reciente por nombre; si no queda ninguna, borra también el JSON activo de la provincia. `400` `fileName is required` si falta o no es una cadena (antes 500); `400` `Invalid fileName` si no cumple la forma de versión (misma regla que `/update-file`, borradores incluidos; no toca S3).
 
 ---
 

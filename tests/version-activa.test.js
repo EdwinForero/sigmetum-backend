@@ -2,7 +2,9 @@
 // Sin S3, sin red y sin simulados: lo que se prueba es que la regla no necesita aws/.
 const { test, describe } = require('node:test');
 const assert = require('node:assert/strict');
-const { provinciaFolderOf, activeKeyOf, provinciaOfKey, planActiveAfterDelete } = require('../functions/activeVersion');
+const {
+    provinciaFolderOf, activeKeyOf, provinciaOfKey, draftFolderOf, newDraftKeyOf, provinciaOfDraftKey, planActiveAfterDelete,
+} = require('../functions/activeVersion');
 const { getNextVersion } = require('../functions/getNextVersion');
 
 const f = (name) => ({ name, key: `data/Sevilla/${name}` });
@@ -25,6 +27,12 @@ describe('provinciaFolderOf, activeKeyOf y provinciaOfKey', () => {
     test('provinciaOfKey y provinciaFolderOf son inversas sobre una clave de versión', () => {
         const clave = 'data/Santa Cruz/2026-10-05_v3.xlsx';
         assert.ok(clave.startsWith(`${provinciaFolderOf(provinciaOfKey(clave))}/`));
+    });
+    test('draftFolderOf, newDraftKeyOf y provinciaOfDraftKey: carpeta, clave con el id inyectado y provincia', () => {
+        const id = '123e4567-e89b-42d3-a456-426614174000';
+        assert.equal(draftFolderOf('Málaga'), 'data/drafts/Málaga');
+        assert.equal(newDraftKeyOf('Málaga', id), `data/drafts/Málaga/${id}.xlsx`);
+        assert.equal(provinciaOfDraftKey(newDraftKeyOf('Santa Cruz', id)), 'Santa Cruz');
     });
 });
 

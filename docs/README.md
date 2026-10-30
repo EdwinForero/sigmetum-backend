@@ -58,7 +58,7 @@ sigmetum-backend/
 │   ├── validateImageKey.js      # Lista de permitidos del imageKey (GET /get-image, DELETE /delete-image)
 │   ├── validateImageUpload.js   # Tipo, firma y título de la imagen (POST /upload-image)
 │   ├── validateProvincia.js     # Validación de la provincia del Excel (POST /upload)
-│   ├── validateDataKey.js       # Lista de permitidos de draftKey y fileName (upload/confirm, update-file, delete-file)
+│   ├── validateDataKey.js       # Listas de permitidos: isValidDataKey (fileName; update-file, delete-file) e isValidDraftKey (draftKey; upload/confirm)
 │   └── validateContactMessage.js # Validación del cuerpo de POST /send-email
 ├── aws/
 │   └── awsS3connect.js          # Todas las operaciones contra S3

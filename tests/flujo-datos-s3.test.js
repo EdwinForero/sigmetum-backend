@@ -17,7 +17,9 @@ const s3 = crearS3Simulado({ pageSize: 2 });
 let app;
 
 const BASE = 'data/Sevilla';
+const BORRADORES = 'data/drafts/Sevilla';
 const ACTIVA = 'data/active/Sevilla.json';
+const CLAVE_BORRADOR = /^data\/drafts\/Sevilla\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.xlsx$/;
 const CENTINELA = '[{"Municipio":"centinela"}]';
 const token = jwt.sign({ userId: 1 }, TEST_SECRET, { expiresIn: '1h' });
 const post = (ruta, cuerpo) => request(app).post(`/api/v1/${ruta}`).set('Authorization', `Bearer ${token}`).send(cuerpo);
@@ -74,17 +76,37 @@ describe('upload', () => {
         assert.deepEqual(fusion.body.data.map((x) => x.Municipio), ['c1', 'h1', 's1']);
         assert.equal(s3.llamadas.filter((c) => c.op === 'List').length, 2);
     });
-    test('con celdas vacías: 400 con draftKey, el borrador queda guardado y el activo centinela no cambia', async (t) => {
+    test('con celdas vacías: 400 con draftKey en data/drafts, el borrador queda guardado fuera de las versiones y el activo centinela no cambia', async (t) => {
         congelar(t);
         s3.sembrar(ACTIVA, CENTINELA);
         const r = await subir(app, [fila('Incompleta', true)], tokenDelInstante);
         assert.equal(r.status, 400);
         assert.equal(r.json.success, false);
-        assert.equal(r.json.data.draftKey, `${BASE}/${DIA}_v1.xlsx`);
+        assert.match(r.json.data.draftKey, CLAVE_BORRADOR);
         assert.ok(s3.existe(r.json.data.draftKey));
+        assert.deepEqual(s3.claves(`${BASE}/`), [], 'el borrador no es una versión');
         assert.equal(s3.leer(ACTIVA).toString(), CENTINELA);
         const datos = await getDatos('get-data/data/active/Sevilla.json');
         assert.deepEqual(datos.body.data, [{ Municipio: 'centinela' }]);
+    });
+    test('segunda subida con celdas vacías: un único borrador y el draftKey anterior ya no existe', async (t) => {
+        congelar(t);
+        const primera = await subir(app, [fila('Uno', true)], tokenDelInstante);
+        const segunda = await subir(app, [fila('Dos', true)], tokenDelInstante);
+        assert.equal(primera.status, 400);
+        assert.equal(segunda.status, 400);
+        assert.notEqual(primera.json.data.draftKey, segunda.json.data.draftKey);
+        assert.deepEqual(s3.claves(`${BORRADORES}/`), [segunda.json.data.draftKey]);
+    });
+    test('subida completa con un borrador previo: el prefijo de borradores queda vacío', async (t) => {
+        congelar(t);
+        const incompleta = await subir(app, [fila('Uno', true)], tokenDelInstante);
+        assert.equal(incompleta.status, 400);
+        assert.equal(s3.claves(`${BORRADORES}/`).length, 1);
+        const completa = await subir(app, [fila('Completa')], tokenDelInstante);
+        assert.equal(completa.status, 200, JSON.stringify(completa.json));
+        assert.deepEqual(s3.claves(`${BORRADORES}/`), []);
+        assert.deepEqual(municipiosDelActivo(), ['Completa']);
     });
     test('segunda subida con varias versiones (_v9 y _v10 del mismo día, más otros días): da _v11 (el orden por texto fallaría)', async (t) => {
         congelar(t);
@@ -101,18 +123,31 @@ describe('upload', () => {
 });
 
 describe('confirm, cancel y update-file', () => {
-    test('confirm: el activo se regenera desde el borrador', async (t) => {
+    test('confirm: se crea la versión _v1, el activo se regenera desde ella y el borrador desaparece', async (t) => {
         congelar(t);
         s3.sembrar(ACTIVA, CENTINELA);
         const subida = await subir(app, [fila('Borrador', true)], tokenDelInstante);
         assert.equal(subida.status, 400);
         const confirmado = await post('upload/confirm', { confirmed: true, draftKey: subida.json.data.draftKey });
         assert.equal(confirmado.status, 200);
+        assert.ok(s3.existe(`${BASE}/${DIA}_v1.xlsx`));
+        assert.equal(s3.existe(subida.json.data.draftKey), false);
         assert.deepEqual(municipiosDelActivo(), ['Borrador']);
         const datos = await getDatos('get-data/data/active/Sevilla.json');
         assert.deepEqual(datos.body.data.map((x) => x.Municipio), ['Borrador']);
     });
-    test('cancel: el borrador se borra y el activo se regenera desde la última versión restante (punto 8)', async (t) => {
+    test('confirm con versiones previas del día: la versión nueva es la siguiente (_v3 tras _v1 y _v2)', async (t) => {
+        congelar(t);
+        await sembrarVersion(`${DIA}_v1.xlsx`, 'uno');
+        await sembrarVersion(`${DIA}_v2.xlsx`, 'dos');
+        const subida = await subir(app, [fila('Borrador', true)], tokenDelInstante);
+        assert.equal(subida.status, 400);
+        const confirmado = await post('upload/confirm', { confirmed: true, draftKey: subida.json.data.draftKey });
+        assert.equal(confirmado.status, 200);
+        assert.deepEqual(s3.claves(`${BASE}/`), [`${BASE}/${DIA}_v1.xlsx`, `${BASE}/${DIA}_v2.xlsx`, `${BASE}/${DIA}_v3.xlsx`]);
+        assert.deepEqual(municipiosDelActivo(), ['Borrador']);
+    });
+    test('cancel: el borrador se borra y el activo y las versiones no se tocan (A9)', async (t) => {
         congelar(t);
         await sembrarVersion('2026-10-01_v1.xlsx', 'anterior');
         s3.sembrar(ACTIVA, CENTINELA);
@@ -122,16 +157,18 @@ describe('confirm, cancel y update-file', () => {
         const cancelado = await post('upload/confirm', { confirmed: false, draftKey: subida.json.data.draftKey });
         assert.equal(cancelado.status, 200);
         assert.equal(s3.existe(subida.json.data.draftKey), false);
-        assert.deepEqual(municipiosDelActivo(), ['anterior']);
+        assert.equal(s3.leer(ACTIVA).toString(), CENTINELA);
+        assert.deepEqual(s3.claves(`${BASE}/`), [`${BASE}/2026-10-01_v1.xlsx`]);
     });
-    test('cancel del único borrador: no queda ningún xlsx y se borra el activo', async (t) => {
+    test('cancel del único borrador: no hay versiones y no se borra el activo', async (t) => {
         congelar(t);
         s3.sembrar(ACTIVA, CENTINELA);
         const subida = await subir(app, [fila('Borrador', true)], tokenDelInstante);
         const cancelado = await post('upload/confirm', { confirmed: false, draftKey: subida.json.data.draftKey });
         assert.equal(cancelado.status, 200);
         assert.deepEqual(s3.claves(`${BASE}/`), []);
-        assert.equal(s3.existe(ACTIVA), false);
+        assert.deepEqual(s3.claves(`${BORRADORES}/`), []);
+        assert.equal(s3.leer(ACTIVA).toString(), CENTINELA);
     });
     test('update-file: el activo pasa a la versión elegida', async () => {
         await sembrarVersion('2026-10-01_v1.xlsx', 'primera');

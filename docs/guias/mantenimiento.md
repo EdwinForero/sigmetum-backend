@@ -201,7 +201,7 @@ Si cambias algo de la columna izquierda, revisa la sección 7 ("Si cambias algo 
 | El **envoltorio** `{ success, data \| error }` | `services/api.js` (un único sitio) |
 | Las columnas del Excel (`fixedColumnOrder`) | Traducciones (`attributes`), `DialogSpecies.js`, `Filter` y `Explore` |
 | El **formato de nombres de versión** (`AAAA-MM-DD_vN.xlsx`) | `utilities/FormatFileName.js` y `FileDropdown` |
-| La forma de `emptyFields` o `draftKey` en el 400 de `/upload` (desde el 29/10/2026, D8, sin `processedData` ni `rowData`) | `components/FileUpload.js` |
+| La forma de `emptyFields` o `draftKey` en el 400 de `/upload` (desde el 29/10/2026, D8, sin `processedData` ni `rowData`; el `draftKey` es opaco y tiene la forma `data/drafts/{provincia}/<uuid>.xlsx` desde A2) y el 404 `Draft not found` de `/upload/confirm` | `components/FileUpload.js` |
 | Los campos de `/list-files` (`key`, `name`) | `components/FileDropdown.js` |
 | El **JWT**: sus claves o cómo caduca (`exp`) | `components/ProtectedRoute.js` |
 | **CORS** (`ALLOWED_ORIGIN`) | Nada en el código, pero el origen tiene que coincidir con el dominio del frontend de cada entorno. Un origen no permitido responde `403` `Origin not allowed` (desde el 28/10/2026; el navegador no deja ver esa respuesta) |

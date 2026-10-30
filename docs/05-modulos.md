@@ -50,10 +50,12 @@ Exporta: `validateEnv` (función por defecto).
 | `ACTIVE_PATH` | `data/active` | JSON activos, uno por provincia |
 | `TERMS_PATH` | `data/terms` | Carpeta del glosario |
 | `TERMS_FILE` | `noLatinTerms.json` | Fichero del glosario |
-| `RESERVED_SEGMENTS` | `['active', 'terms']` | Subcarpetas de `data/` que no son provincias |
+| `DRAFTS_PATH` | `data/drafts` | Borradores de `POST /upload` con celdas vacías: `data/drafts/{provincia}/<uuid>.xlsx`. No son versiones (A2, A9) |
+| `RESERVED_SEGMENTS` | `['active', 'terms', 'drafts']` | Subcarpetas de `data/` que no son provincias; `GET /list-files` las descarta, así que ya no muestra los borradores |
 | `PROVINCIA_MAX_LENGTH` | `50` | Longitud máxima de la provincia, medida tras recortar y normalizar a NFC y comprobada antes de ejecutar la expresión |
 | `PROVINCIA_WORD_PATTERN` | `/^\p{L}[\p{L}\p{M}]*$/u` (sin `g`) | Una palabra de provincia: letras Unicode con marcas combinantes. No es un patrón de la provincia entera: `getProvinciaNameError` parte por espacio o guion y valida cada palabra (una parte vacía = separador en los extremos o doble = rechazo) |
-| `PROVINCIA_RESERVED` | `[...RESERVED_SEGMENTS, 'drafts']` | Nombres exactos que no pueden ser carpeta de provincia. `RESERVED_SEGMENTS` no cambia, para no alterar `GET /list-files` |
+| `PROVINCIA_RESERVED` | `[...RESERVED_SEGMENTS]` | Nombres exactos que no pueden ser carpeta de provincia (desde A2, `drafts` ya está en `RESERVED_SEGMENTS`) |
+| `DRAFT_FILE_NAME_PATTERN` | `/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}.xlsx$/` (sin `g`) | Nombre de un borrador: UUID en minúsculas y `.xlsx`. Lo usan `isValidDraftKey` y el descarte de borradores de `routes/data.js` |
 | `DATA_FILE_NAME_PATTERN` | `/^(\d{4}-\d{2}-\d{2})_v(\d+)\.xlsx$/` (sin `g`, dos grupos de captura: fecha y `N`) | Nombre de una versión (D2). Fuente única: `parseVersionName` (`functions/versionName.js`) lo usa para interpretar el nombre, y con él `getNextVersion` y `deleteFileFromS3`; `isValidDataKey` solo lo usa con `.test()` |
 | `IMAGE_KEY_MAX_LENGTH` | `200` | Longitud máxima de un `imageKey` |
 | `IMAGE_KEY_PATTERN` | expresión regular (banderas `u` e `i`, sin `g`) | Forma permitida de un `imageKey`; se aplica con `isValidImageKey` (regla en [06](06-almacenamiento-s3.md#regla-de-imagekey)). Va en forma plana, con dos lookaheads (`(?!.*\/\/)` y `(?!.*\/[.\p{M}])`, que impide que un segmento tras `/` empiece por `.` o por una marca combinante), para no disparar `security/detect-unsafe-regex` |
@@ -81,8 +83,8 @@ Todos los routers declaran sus rutas en un único `router`. `tokenAuth` es el **
 | `GET /list-files` | `listFilesInS3Folder('data/')`, agrupa por el segundo segmento de la clave descartando `RESERVED_SEGMENTS` |
 | `GET /get-data/:path(*)` | `getFileFromS3(path)` |
 | `GET /get-merged-data` | `getMergedDataInS3Folder(ACTIVE_PATH)` |
-| `POST /upload` | Sin `req.file` → 400; extensión distinta de `.xlsx` → 400 (el MIME no se comprueba en esta ruta: lo manda el cliente). Después `convertExcelToJson` → `validateProvincia(processedData)` (400 con su mensaje, antes de cualquier escritura) → un único `now = new Date()` → `listFilesInS3Folder(provinciaFolderOf(provincia))` → `getNextVersion(provincia, filesInFolder, now)` y `formatFileName(version, now)` → `uploadFileToS3` (Excel) → si no hay vacíos, `uploadFileToS3` (JSON activo); si hay vacíos, 400 con `draftKey` y `emptyFields` solo con `rowIndex` (sin `processedData` ni `rowData`, D8) |
-| `POST /upload/confirm` | 400 si `draftKey` falta o no es cadena; 400 `Invalid draftKey` si `isValidDataKey` la rechaza. `confirmed` falso → `removeVersion(draftKey)`; verdadero → `activateFrom(draftKey, provinciaOfKey(draftKey))` |
+| `POST /upload` | Sin `req.file` → 400; extensión distinta de `.xlsx` → 400 (el MIME no se comprueba en esta ruta: lo manda el cliente). Después `convertExcelToJson` → `validateProvincia(processedData)` (400 con su mensaje, antes de cualquier escritura). **Con vacíos (A2, A9)**: `draftKey = newDraftKeyOf(provincia, randomUUID())` → `uploadFileToS3` del Excel en `draftFolderOf(provincia)` → `discardDrafts(provincia, draftKey)` (lista la carpeta de borradores y borra los previos que pasen `isValidDraftKey`; si falla, el error se propaga) → 400 con `draftKey` y `emptyFields` solo con `rowIndex` (sin `processedData` ni `rowData`, D8). No lista versiones ni llama a `getNextVersion`: no se crea ninguna versión. **Sin vacíos**: un único `now = new Date()` → `listFilesInS3Folder(provinciaFolderOf(provincia))` → `getNextVersion(provincia, filesInFolder, now)` y `formatFileName(version, now)` → `uploadFileToS3` (Excel) → `uploadFileToS3` (JSON activo) → `discardDrafts(provincia)` como mejor esfuerzo (`try/catch`: si falla se registra y la respuesta sigue siendo 200) |
+| `POST /upload/confirm` | 400 si `draftKey` falta o no es cadena; 400 `Invalid draftKey` si `isValidDraftKey` la rechaza (una clave de versión también). `provincia = provinciaOfDraftKey(draftKey)`; `listFilesInS3Folder(draftFolderOf(provincia))` y, si no hay una entrada con esa clave, 404 `Draft not found` (error con `status: 404` y `publicMessage`, por `next(error)`). `confirmed` falso → solo `deleteFileFromS3(draftKey)` (no toca versiones ni activo). Verdadero → `getBufferFromS3(draftKey)` → `convertExcelToJson` (antes de escribir nada) → `listFilesInS3Folder(provinciaFolderOf(provincia))` → `getNextVersion` y `formatFileName` con un único `now` → `uploadFileToS3` (versión nueva) → `putJsonToS3(activeKeyOf(provincia), processedData)` (sin releer la versión recién escrita) → `deleteFileFromS3(draftKey)` |
 | `POST /update-file` | 400 si `fileName` falta o no es cadena; 400 `Invalid fileName` si `isValidDataKey` la rechaza; `activateFrom(fileName, provinciaOfKey(fileName))` |
 | `POST /delete-file` | 400 si `fileName` falta o no es cadena; 400 `Invalid fileName` si `isValidDataKey` la rechaza; `removeVersion(fileName)` |
 | `activateFrom(sourceKey, provincia)` (privada) | Deja `sourceKey` (un `.xlsx` de versión) como activa: `getBufferFromS3(sourceKey)` → `convertExcelToJson` → `putJsonToS3(activeKeyOf(provincia), processedData)`. Aquí vive la orquestación (M14, 29/10/2026): `aws/` solo hace I/O y `functions/` solo reglas puras |
@@ -149,9 +151,11 @@ Sin dependencias. La búsqueda del tipo usa `Object.entries(IMAGE_UPLOAD_TYPES)`
 
 Funciones puras (no leen el entorno ni llaman a S3). `getProvinciaNameError(name)` recibe un nombre ya recortado y en NFC y devuelve `null` o un texto fijo, en este orden: `Province is required` (ausente, `null` o `''`); `Province is not valid` (no cadena, más de `PROVINCIA_MAX_LENGTH`, alguna palabra que no cumple `PROVINCIA_WORD_PATTERN` tras partir por espacio o guion, o un nombre de `Object.getOwnPropertyNames(Object.prototype)` y `prototype`, como `constructor` o `toString`); `Province is reserved` (en `PROVINCIA_RESERVED` o, en minúsculas, empieza por `active` o `terms`). `validateProvincia(rows)` aplica trim y NFC solo al valor de la celda `Provincia` de la primera fila, devuelve `{ provincia }` o `{ error }` y, si otra fila trae la clave `Provincia` con un valor distinto (tras trim y NFC, `!==`), devuelve `Excel contains more than one province`. Las filas sin la clave se ignoran. La usa `POST /upload`. Regla: [06](06-almacenamiento-s3.md#regla-de-provincia).
 
-### `validateDataKey.js` → `isValidDataKey(key)`
+### `validateDataKey.js` → `isValidDataKey(key)` e `isValidDraftKey(key)`
 
-Función pura que decide si una clave del cliente (`draftKey`, `fileName`) puede usarse tal cual. `true` solo si es una cadena de hasta 120 caracteres, al partir por `/` da exactamente tres segmentos, el primero es `data`, el segundo pasa `getProvinciaNameError` y además `=== normalize('NFC')` (la clave no se reescribe), y el tercero cumple `DATA_FILE_NAME_PATTERN`. La usan `POST /upload/confirm`, `POST /update-file` y `POST /delete-file`. Regla: [06](06-almacenamiento-s3.md#regla-de-clave-de-versión).
+`isValidDataKey`: función pura que decide si una clave del cliente (`draftKey`, `fileName`) puede usarse tal cual. `true` solo si es una cadena de hasta 120 caracteres, al partir por `/` da exactamente tres segmentos, el primero es `data`, el segundo pasa `getProvinciaNameError` y además `=== normalize('NFC')` (la clave no se reescribe), y el tercero cumple `DATA_FILE_NAME_PATTERN`. La usan `POST /upload/confirm`, `POST /update-file` y `POST /delete-file`. Rechaza las claves de borrador (`drafts` está reservado). Regla: [06](06-almacenamiento-s3.md#regla-de-clave-de-versión).
+
+`isValidDraftKey`: lista de permitidos de la clave de un borrador. `true` solo si es una cadena de hasta 120 caracteres, al partir por `/` da exactamente cuatro segmentos, los dos primeros son `data/drafts` (`DRAFTS_PATH`), el tercero pasa `getProvinciaNameError` y es NFC, y el cuarto cumple `DRAFT_FILE_NAME_PATTERN`. Solo la usa `POST /upload/confirm` (y el descarte de borradores de `POST /upload`). Regla: [06](06-almacenamiento-s3.md#regla-de-clave-de-borrador).
 
 ### `validateContactMessage.js` → `validateContactMessage(body)`
 
@@ -200,13 +204,16 @@ Función síncrona y pura (no importa `aws/`; M14, 29/10/2026). Recibe el listad
 - `provinciaFolder = provinciaFolderOf(provincia)` (`data/{provincia}`).
 - Para los ficheros del listado con patrón `YYYY-MM-DD_vN.xlsx` (interpretado con `parseVersionName`) cuya fecha es **hoy (UTC, el día de `now`)**, toma el mayor `N` (entero: `_v9` y `_v10` dan `_v11`) y devuelve `N + 1`. Si no hay ninguno de hoy, `1`.
 
-### `activeVersion.js` → `provinciaFolderOf`, `activeKeyOf`, `provinciaOfKey` y `planActiveAfterDelete`
+### `activeVersion.js` → `provinciaFolderOf`, `activeKeyOf`, `provinciaOfKey`, `draftFolderOf`, `newDraftKeyOf`, `provinciaOfDraftKey` y `planActiveAfterDelete`
 
-Reglas de la versión activa (M14, 29/10/2026). Funciones puras: importan solo `config/s3Paths` y `./versionName`; no leen S3, ni el reloj, ni el entorno. Las claves que reciben ya están validadas por las rutas (`isValidDataKey`).
+Reglas de la versión activa (M14, 29/10/2026). Funciones puras: importan solo `config/s3Paths` y `./versionName`; no leen S3, ni el reloj, ni el entorno. Las claves que reciben ya están validadas por las rutas (`isValidDataKey`, `isValidDraftKey`). `newDraftKeyOf` no genera el UUID: lo recibe inyectado (la ruta pasa `crypto.randomUUID()`), así que la función sigue siendo pura.
 
 - `provinciaFolderOf(provincia)`: `data/{provincia}`. Fuente única del literal (la usa también `getNextVersion`).
 - `activeKeyOf(provincia)`: `data/active/{provincia}.json`.
 - `provinciaOfKey(filePath)`: el segundo segmento de `data/{prov}/{fecha}_vN.xlsx`.
+- `draftFolderOf(provincia)`: `data/drafts/{provincia}`.
+- `newDraftKeyOf(provincia, id)`: `data/drafts/{provincia}/{id}.xlsx`, con el `id` (UUID) inyectado.
+- `provinciaOfDraftKey(draftKey)`: el tercer segmento de `data/drafts/{prov}/{uuid}.xlsx`.
 - `planActiveAfterDelete(remaining)`: recibe lo que queda en la carpeta (`[{ name, key }]`) y devuelve una acción para el activo, apoyada en `latestVersionFile`: `{ action: 'regenerate', key }` si queda alguna versión estándar (la más reciente); `{ action: 'delete' }` si no queda ningún `.xlsx` (la comprobación es sensible a mayúsculas); `{ action: 'keep' }` si quedan `.xlsx` pero ninguno con nombre estándar (el activo no se toca).
 
 **Dirección de dependencias:** `routes/` → `aws/` y `functions/`; `functions/` → `config/`; `aws/` → `config/`. `aws/` no importa `functions/` ni `functions/` importa `aws/` (lo comprueba `tests/capas-importaciones.test.js`).
