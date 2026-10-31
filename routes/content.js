@@ -94,7 +94,8 @@ router.get('/get-image', async (req, res, next) => {
 
 router.get('/list-terms', async (req, res, next) => {
     try {
-        const terms = await getTextJsonS3(TERMS_FILE, TERMS_PATH);
+        // Lectura pública: AccessDenied equivale a glosario vacío (S15). Las rutas que escriben no pasan esta opción.
+        const terms = await getTextJsonS3(TERMS_FILE, TERMS_PATH, { vacioSiAccessDenied: true });
         res.json({ success: true, data: terms });
     } catch (error) {
         next(error);

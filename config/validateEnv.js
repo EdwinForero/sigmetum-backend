@@ -1,4 +1,5 @@
 const jwt = require('jsonwebtoken');
+const { resolveTrustProxyHops, LENIENT_ENVS } = require('./trustProxy');
 
 const required = [
     'JWT_SECRET',
@@ -43,6 +44,8 @@ function invalidValues() {
     if (JWT_EXPIRATION && !isValidExpiration(JWT_EXPIRATION)) {
         problems.push('JWT_EXPIRATION: debe ser una duración con unidad y mayor que cero (por ejemplo 8h)');
     }
+    const { problem } = resolveTrustProxyHops();
+    if (problem) problems.push(problem);
     return problems;
 }
 
@@ -63,7 +66,7 @@ function validateEnv() {
     if (problems.length === 0) return;
 
     // Falla cerrado: solo 'local' y 'test' se conforman con un aviso.
-    if (['local', 'test'].includes(process.env.NODE_ENV)) {
+    if (LENIENT_ENVS.includes(process.env.NODE_ENV)) {
         problems.forEach(problem => console.warn(`[validateEnv] ${problem}`));
         return;
     }

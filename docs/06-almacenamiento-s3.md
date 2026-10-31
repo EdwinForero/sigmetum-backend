@@ -28,9 +28,13 @@ Los prefijos están en `config/s3Paths.js`. `active`, `terms` y `drafts` están 
 
 **Listados y objetos reales (A5, M10; 29/10/2026).** Los listados recorren **todas** las páginas de `ListObjectsV2` (`IsTruncated` con `NextContinuationToken`), sin tope de páginas; si S3 dice que hay más páginas y no da token, o repite uno ya usado, la función lanza en vez de iterar sin fin. Una página sin `Contents` cuenta como vacía y continúa. Un «objeto real» es el que tiene la clave sin `/` final y `Size > 0`; el marcador de carpeta (`gallery/`) y los objetos de tamaño 0 se excluyen igual de `listFilesInS3Folder` y de las URL prefirmadas, y la galería vacía o con solo el marcador da `[]` en `GET /list-images`. La paginación usa la misma acción `s3:ListBucket` que antes.
 
-**Errores (B5, 29/10/2026).** Todas las funciones de `aws/` lanzan el error original ante un fallo (ya no hay `{ success: false }`); las rutas lo pasan con `next(error)` y `errorHandler` lo traduce. Un `NoSuchKey` que llegue hasta `errorHandler` responde `404` (B9); `getTextJsonS3` lo convierte antes en `[]` solo para el glosario (A6).
+**Errores (B5, 29/10/2026).** Todas las funciones de `aws/` lanzan el error original ante un fallo (ya no hay `{ success: false }`); las rutas lo pasan con `next(error)` y `errorHandler` lo traduce. Un `NoSuchKey` que llegue hasta `errorHandler` responde `404` (B9); `getTextJsonS3` lo convierte antes en `[]` solo para el glosario (A6). `AccessDenied` sigue en `500` salvo en las dos lecturas de solo lectura descritas abajo.
 
-**Lecturas de JSON (A6).** El glosario (`data/terms/noLatinTerms.json`) solo se trata como «vacío» si S3 responde `NoSuchKey`; cualquier otro fallo, un objeto de 0 bytes, un JSON corrupto o un JSON que no es un array se propaga y las tres rutas de glosario responden `500` sin escribir. **Un glosario ilegible ya no se autocura**: hay que repararlo a mano en S3 (por ejemplo, subir un `[]` válido) para desbloquear `list-terms`, `upload-term` y `delete-term`. `/get-merged-data` lee los activos en paralelo y concatena en el orden del listado.
+**Qué lecturas toleran `AccessDenied` (S15 y M25, 30/10/2026).** Con `s3:ListBucket` acotado por `Prefix`, S3 puede responder `AccessDenied` (403) en vez de `NoSuchKey` ante una clave que no existe **(por confirmar en dev: qué código devuelve S3 con la política nueva)**. Solo dos lecturas públicas lo tratan como «no existe»: `GET /list-terms` (`getTextJsonS3` con `{ vacioSiAccessDenied: true }`: `200` con `[]`) y `GET /get-data` con una clave permitida (`404`). Todas las demás lecturas y **todas las escrituras** lo propagan: `POST /upload-term` y `DELETE /delete-term` leen el glosario sin la opción, responden `500` y no llaman a `putObject`, porque un permiso roto sobrescribiría el glosario entero con `[]` (A6). Consecuencia: **hasta que exista `data/terms/noLatinTerms.json`** (subir un `[]`, ver [para-infra](integracion/para-infra.md)), el primer alta de término falla con `500` si S3 responde `AccessDenied`. Riesgo residual: un permiso roto se ve como glosario vacío en `list-terms` y como «no existe» en `get-data`.
+
+**Permisos necesarios del rol del backend:** `s3:GetObject`, `s3:PutObject`, `s3:DeleteObject` y `s3:ListBucket` con condición `s3:prefix` en `gallery/` y `data/` (que todos los listados lleven `Prefix` dentro de ese ámbito está **por confirmar**).
+
+**Lecturas de JSON (A6).** El glosario (`data/terms/noLatinTerms.json`) solo se trata como «vacío» si S3 responde `NoSuchKey` (y `AccessDenied` solo en `GET /list-terms`, ver arriba); cualquier otro fallo, un objeto de 0 bytes, un JSON corrupto o un JSON que no es un array se propaga y las tres rutas de glosario responden `500` sin escribir. **Un glosario ilegible ya no se autocura**: hay que repararlo a mano en S3 (por ejemplo, subir un `[]` válido) para desbloquear `list-terms`, `upload-term` y `delete-term`. `/get-merged-data` lee los activos en paralelo y concatena en el orden del listado.
 
 ## Modelo de versionado
 
@@ -83,6 +87,10 @@ Operaciones de mantenimiento:
 ### Regla de clave de versión
 
 `POST /upload/confirm` (`draftKey`), `POST /update-file` y `POST /delete-file` (`fileName`) validan la clave con `isValidDataKey` (`functions/validateDataKey.js`) antes de usarla. Es válida si es una cadena de hasta 120 caracteres con exactamente tres segmentos separados por `/`: `data`, una provincia que pasa la regla anterior **y** ya está en NFC, y un nombre `AAAA-MM-DD_vN.xlsx` (`DATA_FILE_NAME_PATTERN`; `v\d+` admite `_v0` y `_v007`). La clave del cliente nunca se normaliza ni se reescribe: una provincia en NFD se rechaza. No comprueba que el objeto exista.
+
+### Regla de clave de `GET /get-data` (M25, 30/10/2026)
+
+`GET /get-data/:path(*)` es público y valida la clave con `isValidGetDataKey` (`functions/validateDataKey.js`) antes de llamar a S3: acepta una clave de versión (la regla anterior) o un activo `data/active/{provincia}.json` con la provincia validada por la regla de provincia y en NFC. Todo lo demás (otras raíces, `data/terms`, `data/drafts`, traversal, claves de más de 120 caracteres, la vacía) da `400` `Invalid path` sin tocar S3. Una versión `.xlsx` pasa la regla pero sigue dando `500` por `JSON.parse` (D1, M2 abierto).
 
 ### Regla de clave de borrador
 

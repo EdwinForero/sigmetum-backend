@@ -25,7 +25,7 @@ Construye y exporta la app (`module.exports = app`) sin abrir puerto, sin `doten
    - `notFound` (tras los tres routers)
    - `errorHandler` (último)
 
-`trust proxy` vale 1 (ALB → nginx → Express). El 403 de CORS (`originNotAllowed`) vive aquí.
+`trust proxy` toma su valor de `TRUST_PROXY_HOPS` (1 si no se define) mediante `resolveTrustProxyHops()` de `config/trustProxy.js`; la cadena real de proxies la confirma infra **(por confirmar)**, ver [para-infra](integracion/para-infra.md). `app.js` no carga `validateEnv`. El 403 de CORS (`originNotAllowed`) vive aquí.
 
 ---
 
@@ -38,8 +38,18 @@ Construye y exporta la app (`module.exports = app`) sin abrir puerto, sin `doten
 | `required` | Array con las variables siempre obligatorias |
 | `requiredLocal` | `['AWS_PROFILE']`, obligatorias sólo si `NODE_ENV === 'local'` |
 | `validateEnv()` | Recorre ambas listas y lanza `Error("Variables de entorno requeridas no definidas: ...")` con todas las que falten. Después valida el valor de las presentes (M15): `ADMIN_PASSWORD` hash bcrypt completo, `JWT_SECRET` de al menos 32 caracteres y `JWT_EXPIRATION` con unidad y mayor que cero (`isValidExpiration`: rechaza solo números y duraciones <= 0, y delega el formato en `jsonwebtoken`). Si `NODE_ENV` no es exactamente `local` ni `test` lanza `Error("Variables de entorno con valor no válido: ...")`; en `local` y `test` solo emite `console.warn` con prefijo `[validateEnv]`. Los mensajes nombran variable y regla, nunca el valor. Detalle en [03](03-configuracion.md#variables-de-entorno) |
+| `TRUST_PROXY_HOPS` | Dentro de la validación de valores, añade el `problem` de `resolveTrustProxyHops()` (M12); la política local/test usa `LENIENT_ENVS` de `trustProxy.js` |
 
 Exporta: `validateEnv` (función por defecto).
+
+### `trustProxy.js` → `resolveTrustProxyHops()` y `LENIENT_ENVS`
+
+| Elemento | Descripción |
+|---|---|
+| `resolveTrustProxyHops()` | Sin parámetros: lee `process.env.TRUST_PROXY_HOPS` y `process.env.NODE_ENV` y devuelve `{ value: number, problem: string \| null }`. Sin definir: `{ value: 1, problem: null }`. Válido (`/^[0-5]$/`): ese número; el `0` solo con `NODE_ENV` exactamente `local` o `test`. Cualquier otro caso: `value` 1 y `problem` con el nombre de la variable y la regla, nunca el valor. Lo usan `app.js` (aplica `value`) y `validateEnv` (falla o avisa según `problem`) |
+| `LENIENT_ENVS` | `['local', 'test']`: entornos donde la validación solo avisa; `validateEnv` la reutiliza (una sola fuente) |
+
+Exporta: `resolveTrustProxyHops`, `LENIENT_ENVS`.
 
 ### `s3Paths.js`
 
@@ -82,7 +92,7 @@ Todos los routers declaran sus rutas en un único `router`. `tokenAuth` es el **
 |---|---|
 | `upload` | Instancia `multer({ storage: memoryStorage(), limits: { fileSize: MAX_UPLOAD_BYTES + 1 } })` con `MAX_UPLOAD_BYTES` = 10 MB. Se suma 1 porque multer rechaza el tamaño igual a `fileSize`: así 10 MB exactos se aceptan y 10 MB + 1 byte da `LIMIT_FILE_SIZE` (400) |
 | `GET /list-files` | `listFilesInS3Folder('data/')`, agrupa por el segundo segmento de la clave descartando `RESERVED_SEGMENTS` |
-| `GET /get-data/:path(*)` | `getFileFromS3(path)` |
+| `GET /get-data/:path(*)` | 400 `Invalid path` si `isValidGetDataKey` rechaza la clave (sin llamar a S3); `getFileFromS3(path)`; en el `catch`, `isAccessDenied(error)` (constante local) pasa a `next` un error con `status` 404, `publicMessage` `The requested file does not exist in storage` y la causa en `cause` |
 | `GET /get-merged-data` | `getMergedDataInS3Folder(ACTIVE_PATH)` |
 | `POST /upload` | Sin `req.file` → 400; extensión distinta de `.xlsx` → 400 (el MIME no se comprueba en esta ruta: lo manda el cliente). Después `convertExcelToJson` → `validateProvincia(processedData)` (400 con su mensaje, antes de cualquier escritura). **Con vacíos (A2, A9)**: `draftKey = newDraftKeyOf(provincia, randomUUID())` → `uploadFileToS3` del Excel en `draftFolderOf(provincia)` → `discardDrafts(provincia, draftKey)` (lista la carpeta de borradores y borra los previos que pasen `isValidDraftKey`; si falla, el error se propaga) → 400 con `draftKey` y `emptyFields` solo con `rowIndex` (sin `processedData` ni `rowData`, D8). No lista versiones ni llama a `getNextVersion`: no se crea ninguna versión. **Sin vacíos**: un único `now = new Date()` → `listFilesInS3Folder(provinciaFolderOf(provincia))` → `getNextVersion(provincia, filesInFolder, now)` y `formatFileName(version, now)` → `uploadFileToS3` (Excel) → `uploadFileToS3` (JSON activo) → `discardDrafts(provincia)` como mejor esfuerzo (`try/catch`: si falla se registra y la respuesta sigue siendo 200) |
 | `POST /upload/confirm` | 400 si `draftKey` falta o no es cadena; 400 `Invalid draftKey` si `isValidDraftKey` la rechaza (una clave de versión también). `provincia = provinciaOfDraftKey(draftKey)`; `listFilesInS3Folder(draftFolderOf(provincia))` y, si no hay una entrada con esa clave, 404 `Draft not found` (error con `status: 404` y `publicMessage`, por `next(error)`). `confirmed` falso → solo `deleteFileFromS3(draftKey)` (no toca versiones ni activo). Verdadero → `getBufferFromS3(draftKey)` → `convertExcelToJson` (antes de escribir nada) → `listFilesInS3Folder(provinciaFolderOf(provincia))` → `getNextVersion` y `formatFileName` con un único `now` → `uploadFileToS3` (versión nueva) → `putJsonToS3(activeKeyOf(provincia), processedData)` (sin releer la versión recién escrita) → `deleteFileFromS3(draftKey)` |
@@ -101,7 +111,7 @@ Todos los routers declaran sus rutas en un único `router`. `tokenAuth` es el **
 | `POST /send-email` | `sendEmailLimiter` → `validateContactMessage(req.body)`; si devuelve `error`, 400; si no, construye `mailOptions` con los valores recortados (from/to = `EMAIL`, `replyTo` = email del usuario) y `transporter.sendMail`. Todo el cuerpo va dentro de `try/catch` con `next(error)`. Ruta pública (sin `tokenAuth`). El limitador es el primer manejador, cuenta antes de validar y cuenta también el tráfico anónimo |
 | `GET /list-images` | `getPresignedUrlsFromS3Folder(GALLERY_PATH)` |
 | `GET /get-image` | 400 si `imageKey` falta, está vacío o no es cadena; 400 `imageKey is not valid` si `isValidImageKey` lo rechaza; si no, `getPresignedUrlFromS3(GALLERY_PATH, imageKey)` |
-| `GET /list-terms` | `getTextJsonS3(TERMS_FILE, TERMS_PATH)` |
+| `GET /list-terms` | `getTextJsonS3(TERMS_FILE, TERMS_PATH, { vacioSiAccessDenied: true })` (la única llamada con la opción; `upload-term` y `delete-term` no la pasan) |
 | `POST /upload-image` | 400 `File and title are required` si falta el fichero o `title` no es cadena o está vacío; `validateImageUpload` da los otros tres 400 (tipo, título, contenido) o la clave y el MIME canónico; `uploadImageToS3` guarda con ese MIME, no con el del cliente |
 | `DELETE /delete-image` | 400 si `imageKey` falta o no es cadena; 400 `imageKey is not valid` si `isValidImageKey` lo rechaza; `await deleteImageFromS3` y responde 200 `Image deleted successfully`; si lanza, `next(error)` con el error original (B5, 29/10/2026), así que `errorHandler` da el texto mapeado con 500 |
 | `POST /upload-term` | 400 si `term` no es cadena o está vacío tras `trim()`; `uploadTextToJsonS3(term, ...)` |
@@ -129,11 +139,13 @@ Sin dependencias. La búsqueda del tipo usa `Object.entries(IMAGE_UPLOAD_TYPES)`
 
 Funciones puras (no leen el entorno ni llaman a S3). `getProvinciaNameError(name)` recibe un nombre ya recortado y en NFC y devuelve `null` o un texto fijo, en este orden: `Province is required` (ausente, `null` o `''`); `Province is not valid` (no cadena, más de `PROVINCIA_MAX_LENGTH`, alguna palabra que no cumple `PROVINCIA_WORD_PATTERN` tras partir por espacio o guion, o un nombre de `Object.getOwnPropertyNames(Object.prototype)` y `prototype`, como `constructor` o `toString`); `Province is reserved` (en `PROVINCIA_RESERVED` o, en minúsculas, empieza por `active` o `terms`). `validateProvincia(rows)` aplica trim y NFC solo al valor de la celda `Provincia` de la primera fila, devuelve `{ provincia }` o `{ error }` y, si otra fila trae la clave `Provincia` con un valor distinto (tras trim y NFC, `!==`), devuelve `Excel contains more than one province`. Las filas sin la clave se ignoran. La usa `POST /upload`. Regla: [06](06-almacenamiento-s3.md#regla-de-provincia).
 
-### `validateDataKey.js` → `isValidDataKey(key)` e `isValidDraftKey(key)`
+### `validateDataKey.js` → `isValidDataKey(key)`, `isValidDraftKey(key)` e `isValidGetDataKey(key)`
 
 `isValidDataKey`: función pura que decide si una clave del cliente (`draftKey`, `fileName`) puede usarse tal cual. `true` solo si es una cadena de hasta 120 caracteres, al partir por `/` da exactamente tres segmentos, el primero es `data`, el segundo pasa `getProvinciaNameError` y además `=== normalize('NFC')` (la clave no se reescribe), y el tercero cumple `DATA_FILE_NAME_PATTERN`. La usan `POST /upload/confirm`, `POST /update-file` y `POST /delete-file`. Rechaza las claves de borrador (`drafts` está reservado). Regla: [06](06-almacenamiento-s3.md#regla-de-clave-de-versión).
 
 `isValidDraftKey`: lista de permitidos de la clave de un borrador. `true` solo si es una cadena de hasta 120 caracteres, al partir por `/` da exactamente cuatro segmentos, los dos primeros son `data/drafts` (`DRAFTS_PATH`), el tercero pasa `getProvinciaNameError` y es NFC, y el cuarto cumple `DRAFT_FILE_NAME_PATTERN`. Solo la usa `POST /upload/confirm` (y el descarte de borradores de `POST /upload`). Regla: [06](06-almacenamiento-s3.md#regla-de-clave-de-borrador).
+
+`isValidGetDataKey` (M25, 30/10/2026): lista de permitidos de `GET /get-data`, `isValidDataKey(key) || isValidActiveKey(key)`. `isValidActiveKey` (privada, no se exporta) pide una cadena de hasta 120 caracteres, tres segmentos, `data/active` (`ACTIVE_PATH`) como prefijo, último segmento acabado en `.json` y una provincia (el nombre sin `.json`) que pase `getProvinciaNameError` y sea NFC; la regla de provincia rechaza `.`, así que `x.json.json` y `..` quedan fuera, y también rechaza `active*` y `terms*`. Rechaza `data/terms`, `data/drafts`, otras raíces y cualquier clave que no se reescriba tal cual. Solo la usa `GET /get-data`; las rutas de escritura siguen con `isValidDataKey`.
 
 ### `validateContactMessage.js` → `validateContactMessage(body)`
 
@@ -231,7 +243,7 @@ Crea un único cliente `S3` (clase agregada de SDK v3) con `AWS_REGION` y, en lo
 |---|---|---|---|
 | `getFileFromS3` | `filePath` | objeto JSON | `GetObject` + `JSON.parse`. Relanza errores |
 | `getBufferFromS3` | `filePath` | `Buffer` | Para leer Excel |
-| `getTextJsonS3` | `fileName, folderName` | array JSON | Devuelve `[]` **solo** con `NoSuchKey` (por `error.name` o `error.Code`; un 404 sin más no basta, `NoSuchBucket` también lo es). Un JSON que no es un array lanza un `Error` sin `Code`; permisos, red, 5xx, `SyntaxError` y el cuerpo de 0 bytes se propagan (A6, 29/10/2026). `uploadTextToJsonS3` y `deleteTermFromS3` no llegan al `putObject` en esos casos |
+| `getTextJsonS3` | `fileName, folderName, { vacioSiAccessDenied = false } = {}` | array JSON | Devuelve `[]` con `NoSuchKey` (por `error.name` o `error.Code`; un 404 sin más no basta, `NoSuchBucket` también lo es) y, **solo si se pasa `vacioSiAccessDenied: true`**, también con `AccessDenied` (S15, 30/10/2026; mismo criterio `name` o `Code`). El valor por defecto es estricto: `AccessDenied` se propaga. La opción es solo para lecturas: únicamente `GET /list-terms` la activa; `uploadTextToJsonS3` y `deleteTermFromS3` llaman sin ella para que un permiso roto no sobrescriba el glosario (A6). Un JSON que no es un array lanza un `Error` sin `Code`; permisos, red, 5xx, `SyntaxError` y el cuerpo de 0 bytes se propagan (A6, 29/10/2026). `uploadTextToJsonS3` y `deleteTermFromS3` no llegan al `putObject` en esos casos |
 
 ### Listado
 
@@ -295,7 +307,7 @@ Se monta con `app.use(notFound)` después de los tres routers y antes de `errorH
 |---|---|
 | `isDev` | `NODE_ENV === 'local'` |
 | `friendlyMessage(err, status)` | Texto que ve el cliente, por este orden: `err.publicMessage`; mapeados por `err.name` / `err.code` / `err.Code` (`TokenExpiredError`, `JsonWebTokenError`, `MulterError`, `NoSuchKey`, `NoSuchBucket`, `AccessDenied`, `NetworkingError` / `ECONNREFUSED`; `NoSuchKey` se detecta con `isNoSuchKey`, por `name` o `Code`); `File exceeds the maximum allowed size` (`MulterError` con `LIMIT_FILE_SIZE`, antes de la línea genérica `File upload error: ...` del resto de `MulterError`); `Invalid JSON` (`err.type === 'entity.parse.failed'`); `Payload too large` (413); `Bad request` (resto de 4xx, con guarda `400 <= status < 500`); y `Internal server error` para todo lo demás. Ya no devuelve `err.message` (M17). Tabla en [04-api.md](04-api.md#errores-comunes) |
-| `isNoSuchKey(err)` | Helper local: `err.name === 'NoSuchKey' \|\| err.Code === 'NoSuchKey'` (solo `name` está garantizado en el SDK). Detección equivalente a la de `getTextJsonS3` en `aws/`; si cambia una, revisa la otra. No usa `$metadata` (`NoSuchBucket` también es 404 y sigue en 500) |
+| `isNoSuchKey(err)` | Helper local: `err.name === 'NoSuchKey' \|\| err.Code === 'NoSuchKey'` (solo `name` está garantizado en el SDK). Detección equivalente a la de `getTextJsonS3` en `aws/`; si cambia una, revisa la otra. La detección de `AccessDenied` (`name` o `Code`) está duplicada en tres sitios: `getTextJsonS3` (`aws/`), `isAccessDenied` en `routes/data.js` y el mapeo de `friendlyMessage` (que solo mira `Code`); deuda menor, ver [07](07-estado-y-deuda-tecnica.md). No usa `$metadata` (`NoSuchBucket` también es 404 y sigue en 500) |
 | `errorHandler(err, req, res, next)` | Status = `err.status \|\| err.statusCode`, o 400 si `err.name === 'MulterError'`, o 404 si `isNoSuchKey(err)` (B9, 29/10/2026), o 500. En local loguea el stack; en otros entornos sólo el mensaje (el real, que no se envía al cliente). Responde `{ success: false, error }` |
 
 **CORS en `index.js`.** El callback de `origin` de `cors` rechaza un origen no permitido con `console.warn('CORS: origin not allowed:', JSON.stringify(origin.slice(0, 200)))` (el origen se trunca a 200 caracteres antes de registrarlo, para que un `Origin` enorme no llene el registro, y `JSON.stringify` neutraliza saltos de línea y comillas de un valor que controla el cliente) y pasa a `cors` un único `Error` constante, `originNotAllowed` (`status = 403`, `publicMessage = 'Origin not allowed'`), creado fuera del callback porque ni `cors` ni `errorHandler` lo mutan (su traza es la del arranque); `errorHandler` lo responde como `403` `Origin not allowed`, sin el origen. El origen solo está en el `warn`.

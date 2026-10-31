@@ -4,6 +4,7 @@ const compression = require('compression');
 const morgan = require('morgan');
 const errorHandler = require('./middleware/errorHandler');
 const notFound = require('./middleware/notFound');
+const { resolveTrustProxyHops } = require('./config/trustProxy');
 
 const authRoutes = require('./routes/auth');
 const dataRoutes = require('./routes/data');
@@ -11,8 +12,8 @@ const contentRoutes = require('./routes/content');
 
 const app = express();
 
-// 1 hop: ALB → nginx (loopback) → Express; tells express-rate-limit to read the real client IP from X-Forwarded-For
-app.set('trust proxy', 1);
+// Saltos de proxy de confianza: TRUST_PROXY_HOPS (1 si no se define); express-rate-limit lee de ahí la IP del cliente
+app.set('trust proxy', resolveTrustProxyHops().value);
 
 app.use('/healthcheck', (req, res) => {
     res.status(200).send('ok');

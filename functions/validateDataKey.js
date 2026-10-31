@@ -1,4 +1,4 @@
-const { DATA_PATH, DRAFTS_PATH, DATA_FILE_NAME_PATTERN, DRAFT_FILE_NAME_PATTERN } = require('../config/s3Paths');
+const { DATA_PATH, ACTIVE_PATH, DRAFTS_PATH, DATA_FILE_NAME_PATTERN, DRAFT_FILE_NAME_PATTERN } = require('../config/s3Paths');
 const { getProvinciaNameError } = require('./validateProvincia');
 
 const DATA_KEY_MAX_LENGTH = 120;
@@ -25,4 +25,18 @@ const isValidDraftKey = (key) => {
     return DRAFT_FILE_NAME_PATTERN.test(fileName);
 };
 
-module.exports = { isValidDataKey, isValidDraftKey };
+// JSON activo: data/active/{provincia}.json, con la misma regla de provincia (sin normalizar). Solo lo usa GET /get-data.
+const isValidActiveKey = (key) => {
+    if (typeof key !== 'string' || key.length > DATA_KEY_MAX_LENGTH) return false;
+    const segments = key.split('/');
+    if (segments.length !== 3 || `${segments[0]}/${segments[1]}` !== ACTIVE_PATH) return false;
+    const fileName = segments[2];
+    if (!fileName.endsWith('.json')) return false;
+    const provincia = fileName.slice(0, -'.json'.length);
+    return getProvinciaNameError(provincia) === null && provincia === provincia.normalize('NFC');
+};
+
+// Lista de permitidos de GET /get-data: una versión .xlsx o un JSON activo. Nada más (ni data/terms ni data/drafts).
+const isValidGetDataKey = (key) => isValidDataKey(key) || isValidActiveKey(key);
+
+module.exports = { isValidDataKey, isValidDraftKey, isValidGetDataKey };

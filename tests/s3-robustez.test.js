@@ -194,13 +194,16 @@ describe('getTextJsonS3 y glosario', () => {
                 await assert.rejects(() => realAws.deleteTermFromS3('x', 't.json', 'data/terms'));
                 assert.equal(puts().length, 0);
             });
-            test('GET /list-terms: 500 con envoltorio y sin texto interno', async () => {
-                const res = await request(app).get('/api/v1/list-terms');
-                assert.equal(res.status, 500);
-                assert.equal(res.body.success, false);
-                assert.equal(typeof res.body.error, 'string');
-                assert.ok(!res.body.error.includes('interno de prueba'));
-            });
+            // AccessDenied en la lectura de list-terms es 200 [] (S15): se prueba en «list-terms con AccessDenied».
+            if (nombre !== 'AccessDenied') {
+                test('GET /list-terms: 500 con envoltorio y sin texto interno', async () => {
+                    const res = await request(app).get('/api/v1/list-terms');
+                    assert.equal(res.status, 500);
+                    assert.equal(res.body.success, false);
+                    assert.equal(typeof res.body.error, 'string');
+                    assert.ok(!res.body.error.includes('interno de prueba'));
+                });
+            }
             test('POST /upload-term: 500 sin PutObject', async () => {
                 const res = await request(app).post('/api/v1/upload-term').set('Authorization', `Bearer ${token}`).send({ term: 'x' });
                 assert.equal(res.status, 500);
@@ -219,6 +222,87 @@ describe('getTextJsonS3 y glosario', () => {
             });
         });
     }
+
+    // S15: infra acota ListBucket por Prefix y S3 puede responder AccessDenied (no NoSuchKey) ante un glosario inexistente.
+    // Solo la lectura de GET /list-terms lo trata como vacío; las escrituras siguen estrictas (A6: un permiso roto no sobrescribe el glosario).
+    describe('list-terms con AccessDenied (S15)', () => {
+        const variantes = [
+            ['name y Code', () => awsError('AccessDenied', 'AccessDenied', 403)],
+            ['solo name', () => awsError('AccessDenied', undefined, 403)],
+            ['solo Code', () => awsError('Error', 'AccessDenied', 403)],
+        ];
+        const aviso = (res) => res.body.success === false && !JSON.stringify(res.body).includes('interno de prueba');
+        for (const [variante, crear] of variantes) {
+            describe(variante, () => {
+                beforeEach(() => { estado.get = () => { throw crear(); }; });
+
+                test('GET /list-terms: 200 con data []', async () => {
+                    const res = await request(app).get('/api/v1/list-terms');
+                    assert.equal(res.status, 200);
+                    assert.deepEqual(res.body, { success: true, data: [] });
+                });
+                test('getTextJsonS3 con vacioSiAccessDenied devuelve []', async () => {
+                    assert.deepEqual(await realAws.getTextJsonS3('t.json', 'data/terms', { vacioSiAccessDenied: true }), []);
+                });
+                test('getTextJsonS3 con la opción por defecto rechaza', async () => {
+                    await assert.rejects(() => realAws.getTextJsonS3('t.json', 'data/terms'));
+                    await assert.rejects(() => realAws.getTextJsonS3('t.json', 'data/terms', {}));
+                    await assert.rejects(() => realAws.getTextJsonS3('t.json', 'data/terms', { vacioSiAccessDenied: false }));
+                });
+                test('POST /upload-term: 500 sin PutObject', async () => {
+                    const res = await request(app).post('/api/v1/upload-term').set('Authorization', `Bearer ${token}`).send({ term: 'x' });
+                    assert.equal(res.status, 500);
+                    assert.ok(aviso(res));
+                    assert.equal(puts().length, 0);
+                });
+                test('DELETE /delete-term: 500 sin PutObject', async () => {
+                    const res = await request(app).delete('/api/v1/delete-term').set('Authorization', `Bearer ${token}`).send({ term: 'x' });
+                    assert.equal(res.status, 500);
+                    assert.ok(aviso(res));
+                    assert.equal(puts().length, 0);
+                });
+            });
+        }
+        test('con la opción activada, NoSuchBucket, red, 5xx y cuerpos no válidos siguen siendo 500 en list-terms', async () => {
+            const otros = [
+                () => { throw awsError('NoSuchBucket', 'NoSuchBucket', 404); },
+                () => { throw errorRed('ECONNRESET'); },
+                () => { throw awsError('InternalError', 'InternalError', 500); },
+                () => cuerpo('esto no es json'), () => cuerpo(''), () => cuerpo('{}'), () => cuerpo('null'),
+            ];
+            for (const fallo of otros) {
+                estado.get = fallo;
+                const res = await request(app).get('/api/v1/list-terms');
+                assert.equal(res.status, 500);
+                await assert.rejects(() => realAws.getTextJsonS3('t.json', 'data/terms', { vacioSiAccessDenied: true }));
+            }
+        });
+        // A6: las escrituras con AccessDenied en la lectura dan 500 y no escriben. errorHandler solo mira Code para el texto.
+        for (const [ruta, pedir] of [
+            ['POST /upload-term', () => request(app).post('/api/v1/upload-term').set('Authorization', `Bearer ${token}`).send({ term: 'x' })],
+            ['DELETE /delete-term', () => request(app).delete('/api/v1/delete-term').set('Authorization', `Bearer ${token}`).send({ term: 'x' })],
+        ]) {
+            for (const [variante, crear, texto] of [
+                ['name y Code', () => awsError('AccessDenied', 'AccessDenied', 403), 'Access denied to storage'],
+                ['solo Code', () => awsError('Error', 'AccessDenied', 403), 'Access denied to storage'],
+                ['solo name', () => awsError('AccessDenied', undefined, 403), 'Internal server error'],
+            ]) {
+                test(`${ruta} con AccessDenied en la lectura (${variante}): 500 ${texto} y sin PutObject`, async () => {
+                    estado.get = () => { throw crear(); };
+                    const res = await pedir();
+                    assert.equal(res.status, 500);
+                    assert.deepEqual(res.body, { success: false, error: texto });
+                    assert.equal(puts().length, 0);
+                });
+            }
+        }
+        test('con AccessDenied en la escritura (lectura correcta) upload-term sigue dando 500', async () => {
+            estado.get = () => cuerpo('[{"term":"a"}]');
+            estado.put = () => { throw awsError('AccessDenied', 'AccessDenied', 403); };
+            const res = await request(app).post('/api/v1/upload-term').set('Authorization', `Bearer ${token}`).send({ term: 'x' });
+            assert.equal(res.status, 500);
+        });
+    });
 
     describe('con NoSuchKey (glosario aún no creado)', () => {
         beforeEach(() => { estado.get = () => { throw awsError('NoSuchKey', 'NoSuchKey', 404); }; });
@@ -498,7 +582,6 @@ describe('B9 NoSuchKey a 404', () => {
         });
         for (const [nombre, crear, texto] of [
             ['NoSuchBucket', () => awsError('NoSuchBucket', 'NoSuchBucket', 404), 'Storage bucket is not configured correctly'],
-            ['AccessDenied', () => awsError('AccessDenied', 'AccessDenied', 403), 'Access denied to storage'],
             ['red', () => errorRed('ECONNREFUSED'), 'Storage connection error'],
             ['name Foo con solo $metadata 404', () => awsError('Foo', undefined, 404), 'Internal server error'],
         ]) {
@@ -509,5 +592,54 @@ describe('B9 NoSuchKey a 404', () => {
                 assert.deepEqual(res.body, { success: false, error: texto });
             });
         }
+    });
+
+    // M25: en una ruta de solo lectura, AccessDenied sobre una clave permitida se responde como inexistente (404 con texto fijo).
+    describe('get-data con AccessDenied (M25): 404', () => {
+        for (const [variante, crear] of [
+            ['name y Code', () => awsError('AccessDenied', 'AccessDenied', 403)],
+            ['solo name', () => awsError('AccessDenied', undefined, 403)],
+            ['solo Code', () => awsError('Error', 'AccessDenied', 403)],
+        ]) {
+            test(`GET /get-data con AccessDenied (${variante}): 404 con cuerpo exacto`, async () => {
+                estado.get = faltaObjeto(crear());
+                const res = await request(app).get('/api/v1/get-data/data/active/Sevilla.json');
+                assert.equal(res.status, 404);
+                assert.deepEqual(res.body, { success: false, error: MENSAJE });
+            });
+        }
+        test('el motivo real (AccessDenied) queda en el log del servidor aunque el cliente vea 404', async () => {
+            estado.get = faltaObjeto(awsError('AccessDenied', 'AccessDenied', 403));
+            await request(app).get('/api/v1/get-data/data/active/Sevilla.json');
+            const textos = console.error.mock.calls.map((c) => c.arguments.map(String).join(' ')).join(' | ');
+            assert.match(textos, /AccessDenied interno de prueba/);
+        });
+        test('con un array válido: 200', async () => {
+            estado.get = () => cuerpo('[{"a":1}]');
+            const res = await request(app).get('/api/v1/get-data/data/active/Sevilla.json');
+            assert.equal(res.status, 200);
+            assert.deepEqual(res.body, { success: true, data: [{ a: 1 }] });
+        });
+        test('con NoSuchKey: 404 (regresión)', async () => {
+            estado.get = faltaObjeto(awsError('NoSuchKey', 'NoSuchKey', 404));
+            const res = await request(app).get('/api/v1/get-data/data/active/Sevilla.json');
+            assert.equal(res.status, 404);
+            assert.deepEqual(res.body, { success: false, error: MENSAJE });
+        });
+        test('clave fuera de la lista: 400 sin llamar a S3, aunque S3 respondería AccessDenied', async () => {
+            estado.get = faltaObjeto(awsError('AccessDenied', 'AccessDenied', 403));
+            const res = await request(app).get('/api/v1/get-data/data/terms/noLatinTerms.json');
+            assert.equal(res.status, 400);
+            assert.deepEqual(res.body, { success: false, error: 'Invalid path' });
+            assert.equal(estado.llamadas.length, 0);
+        });
+        // Límite documentado (caracterización, frontend:D1 y M2): una versión .xlsx real no es JSON y sigue dando 500.
+        test('límite: una versión .xlsx real sigue dando 500 por JSON.parse', async () => {
+            const xlsx = await makeXlsx([fullRow('Sevilla')]);
+            estado.get = () => ({ Body: Readable.from([xlsx]) });
+            const res = await request(app).get('/api/v1/get-data/data/Sevilla/2026-10-05_v1.xlsx');
+            assert.equal(res.status, 500);
+            assert.deepEqual(res.body, { success: false, error: 'Internal server error' });
+        });
     });
 });

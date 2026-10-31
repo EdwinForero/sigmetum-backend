@@ -30,6 +30,7 @@ const OPTIONAL_ENV = {
   NODE_ENV: 'Selecciona el modo local (credenciales SSO, trazas de pila); sin valor se comporta como producción.',
   PORT: 'Tiene valor por defecto (8000); Beanstalk la inyecta.',
   API_PREFIX: 'Tiene valor por defecto (/api/v1).',
+  TRUST_PROXY_HOPS: 'Tiene valor por defecto (1); se valida en config/trustProxy.js (entero de 1 a 5, 0 solo en local y test).',
 };
 
 // Vulnerabilidades altas o críticas aceptadas de forma explícita, con su justificación.
@@ -205,7 +206,7 @@ const ACCEPTED_ADVISORIES = {};
 // omitidos ni pendientes, al menos MIN_TESTS tests y presentes las suites de la pila (estructura-rutas) y de las
 // rutas protegidas (rutas-protegidas). Si añades tests, sube MIN_TESTS; si quitas alguno, hay que justificarlo.
 
-const MIN_TESTS = 1094;
+const MIN_TESTS = 1498;
 // Un test de cada suite imprescindible: el reporter TAP no nombra los archivos, así que se comprueba por existencia
 // del archivo y por este test centinela (su nombre exacto debe aparecer como superado).
 const REQUIRED_SUITES = {
