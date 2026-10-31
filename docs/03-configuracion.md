@@ -57,7 +57,7 @@ Política: es **estricta** (el arranque falla con un error que nombra variable y
 | `ADMIN_PASSWORD` | Sí | `$2b$10$...` | **Hash bcrypt** completo de la contraseña, no la contraseña en claro |
 | `EMAIL` | Sí | — | Cuenta Gmail que envía y recibe el formulario de contacto |
 | `EMAIL_PASSWORD` | Sí | — | Contraseña de aplicación de Gmail |
-| `ALLOWED_ORIGIN` | Sí | `http://localhost:3000` | Origen del frontend permitido por CORS; otro origen recibe `403` `Origin not allowed` (el valor de la variable no cambia) |
+| `ALLOWED_ORIGIN` | Sí | `http://localhost:3000` | Orígenes del frontend permitidos por CORS: **una lista separada por comas** (`app.js` divide por `,`, recorta espacios y compara cada origen de forma exacta, sin barra final; p. ej. `https://a.com,https://b.com`); una petición sin `Origin` también se permite; otro origen recibe `403` `Origin not allowed` (el valor de la variable no cambia) |
 
 ### Generar el hash de `ADMIN_PASSWORD`
 

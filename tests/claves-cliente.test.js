@@ -80,3 +80,51 @@ for (const [n, ruta, cuerpo, campo, log, valida, tipo] of rutas) {
         });
     }
 }
+
+// ─── M25: GET /get-data/:path(*) valida la clave contra una lista de permitidos (versión .xlsx o activo .json) ───────────────────
+const { isValidGetDataKey } = require('../functions/validateDataKey');
+
+const activaBuena = 'data/active/Málaga.json';
+const getDataValidas = [
+    ['versión .xlsx', buena], ['activo .json', activaBuena], ['activo de provincia con espacio', 'data/active/Santa Cruz.json'],
+];
+const getDataInvalidas = [
+    ['recorrido ..', 'data/../x'], ['recorrido codificado', '..%2f..%2fsecret'], ['data/terms', 'data/terms/noLatinTerms.json'],
+    ['borrador', borrador], ['otra raíz', 'x/active/Málaga.json'], ['más de 120 caracteres', `data/active/${'x'.repeat(120)}.json`],
+    ['provincia con a cirílica', 'data/active/Mál\u0430ga.json'], ['provincia con CGJ invisible', 'data/active/a\u034F.json'],
+    ['provincia en NFD', `data/active/${'Málaga'.normalize('NFD')}.json`], ['provincia active', 'data/active/active.json'],
+    ['doble extensión .json.json', 'data/active/x.json.json'], ['carpeta de provincia con .json', 'data/Málaga/x.json'],
+    ['activo sin provincia', 'data/active/.json'], ['activo con segmento de más', 'data/active/Málaga/x.json'],
+    ['activo con extensión .xlsx', 'data/active/Málaga.xlsx'], ['sin extensión', 'data/active/Málaga'],
+];
+
+test('isValidGetDataKey acepta versión .xlsx y activo .json', () => {
+    for (const [, clave] of getDataValidas) assert.equal(isValidGetDataKey(clave), true, clave);
+});
+test('isValidGetDataKey rechaza lo que no es cadena y las claves inválidas', () => {
+    for (const valor of [undefined, null, 123, {}, ['data/active/Málaga.json'], '']) assert.equal(isValidGetDataKey(valor), false);
+    for (const [descr, clave] of getDataInvalidas) assert.equal(isValidGetDataKey(clave), false, descr);
+});
+
+for (const [descr, clave] of getDataValidas) {
+    test(`GET /get-data con ${descr}: llega a S3 y responde 200`, async () => {
+        const r = await llamar(app, 'GET', `${PREFIX}/get-data/${clave}`);
+        assert.equal(r.status, 200, `${r.status} ${r.json?.error}`);
+        assert.equal(r.json.success, true);
+        assert.equal(spyTotal(), 1);
+    });
+}
+for (const [descr, clave] of getDataInvalidas) {
+    test(`GET /get-data: 400 Invalid path con ${descr}`, async () => {
+        const r = await llamar(app, 'GET', `${PREFIX}/get-data/${clave}`);
+        assert.equal(r.status, 400, `${r.status} ${r.json?.error}`);
+        assert.deepEqual(r.json, { success: false, error: 'Invalid path' });
+        assert.equal(spyTotal(), 0, `llamadas a S3/SMTP=${spyTotal()}`);
+    });
+}
+test('GET /get-data/ con clave vacía: 400 Invalid path sin llamar a S3', async () => {
+    const r = await llamar(app, 'GET', `${PREFIX}/get-data/`);
+    assert.equal(r.status, 400, `${r.status} ${r.json?.error}`);
+    assert.deepEqual(r.json, { success: false, error: 'Invalid path' });
+    assert.equal(spyTotal(), 0);
+});

@@ -12,7 +12,7 @@ const {
     provinciaFolderOf, activeKeyOf, provinciaOfKey, draftFolderOf, newDraftKeyOf, provinciaOfDraftKey, planActiveAfterDelete,
 } = require('../functions/activeVersion');
 const { validateProvincia } = require('../functions/validateProvincia');
-const { isValidDataKey, isValidDraftKey } = require('../functions/validateDataKey');
+const { isValidDataKey, isValidDraftKey, isValidGetDataKey } = require('../functions/validateDataKey');
 const {
     uploadFileToS3,
     getFileFromS3,
@@ -79,11 +79,25 @@ router.get('/list-files', async (req, res, next) => {
     }
 });
 
+// Misma detección que errorHandler y getTextJsonS3 (aws/): si cambia una, revisa las otras.
+const isAccessDenied = (error) => error.name === 'AccessDenied' || error.Code === 'AccessDenied';
+
+// La clave se valida contra una lista de permitidos (versión .xlsx o activo .json) antes de llamar a S3. Es una ruta de solo lectura:
+// con una clave permitida, AccessDenied (S3 lo devuelve en vez de NoSuchKey si falta ListBucket) se responde como inexistente; la causa
+// queda en `cause` y getFileFromS3 ya la registra en el log.
 router.get('/get-data/:path(*)', async (req, res, next) => {
     try {
+        if (!isValidGetDataKey(req.params.path)) {
+            return res.status(400).json({ success: false, error: 'Invalid path' });
+        }
         const jsonData = await getFileFromS3(req.params.path);
         res.json({ success: true, data: jsonData });
     } catch (error) {
+        if (isAccessDenied(error)) {
+            return next(Object.assign(new Error('Object not accessible', { cause: error }), {
+                status: 404, publicMessage: 'The requested file does not exist in storage',
+            }));
+        }
         next(error);
     }
 });

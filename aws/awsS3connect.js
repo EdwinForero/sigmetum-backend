@@ -123,7 +123,10 @@ exports.getBufferFromS3 = async (filePath) => {
     }
 };
 
-exports.getTextJsonS3 = async (fileName, folderName) => {
+// vacioSiAccessDenied (por defecto false) es SOLO para lecturas: trata AccessDenied como "no existe" (S3 lo devuelve en vez de
+// NoSuchKey si falta ListBucket). Nunca se pasa en una ruta que escribe (upload-term, delete-term): un permiso roto
+// sobrescribiría el glosario entero con []. Detección equivalente a la de errorHandler: si cambia una, revisa la otra.
+exports.getTextJsonS3 = async (fileName, folderName, { vacioSiAccessDenied = false } = {}) => {
     try {
         const data = await s3.getObject({
             Bucket: process.env.AWS_BUCKET_NAME,
@@ -135,6 +138,7 @@ exports.getTextJsonS3 = async (fileName, folderName) => {
     } catch (error) {
         // Solo "no existe" equivale a lista vacía; cualquier otro fallo se propaga (no se sobrescribe el glosario).
         if (error.name === 'NoSuchKey' || error.Code === 'NoSuchKey') return [];
+        if (vacioSiAccessDenied && (error.name === 'AccessDenied' || error.Code === 'AccessDenied')) return [];
         throw error;
     }
 };

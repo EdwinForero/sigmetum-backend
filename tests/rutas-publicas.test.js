@@ -8,7 +8,7 @@ beforeEach(reiniciar);
 
 const publicas = [
     ['POST', '/send-email', 400, {}], ['GET', '/get-image?imageKey=foto.jpg', 200], ['GET', '/list-images', 200],
-    ['GET', '/list-terms', 200], ['GET', '/list-files', 200], ['GET', '/get-data/data/malaga/x.json', 200],
+    ['GET', '/list-terms', 200], ['GET', '/list-files', 200], ['GET', '/get-data/data/active/Malaga.json', 200],
     ['GET', '/get-merged-data', 200], ['POST', '/log', 400, {}],
 ];
 
