@@ -25,7 +25,7 @@ Construye y exporta la app (`module.exports = app`) sin abrir puerto, sin `doten
    - `notFound` (tras los tres routers)
    - `errorHandler` (último)
 
-`trust proxy` vale 1 (ALB → nginx → Express). El 403 de CORS (`originNotAllowed`) vive aquí.
+`trust proxy` toma su valor de `TRUST_PROXY_HOPS` (1 si no se define) mediante `resolveTrustProxyHops()` de `config/trustProxy.js`; la cadena real de proxies la confirma infra **(por confirmar)**, ver [para-infra](integracion/para-infra.md). `app.js` no carga `validateEnv`. El 403 de CORS (`originNotAllowed`) vive aquí.
 
 ---
 
@@ -38,8 +38,18 @@ Construye y exporta la app (`module.exports = app`) sin abrir puerto, sin `doten
 | `required` | Array con las variables siempre obligatorias |
 | `requiredLocal` | `['AWS_PROFILE']`, obligatorias sólo si `NODE_ENV === 'local'` |
 | `validateEnv()` | Recorre ambas listas y lanza `Error("Variables de entorno requeridas no definidas: ...")` con todas las que falten. Después valida el valor de las presentes (M15): `ADMIN_PASSWORD` hash bcrypt completo, `JWT_SECRET` de al menos 32 caracteres y `JWT_EXPIRATION` con unidad y mayor que cero (`isValidExpiration`: rechaza solo números y duraciones <= 0, y delega el formato en `jsonwebtoken`). Si `NODE_ENV` no es exactamente `local` ni `test` lanza `Error("Variables de entorno con valor no válido: ...")`; en `local` y `test` solo emite `console.warn` con prefijo `[validateEnv]`. Los mensajes nombran variable y regla, nunca el valor. Detalle en [03](03-configuracion.md#variables-de-entorno) |
+| `TRUST_PROXY_HOPS` | Dentro de la validación de valores, añade el `problem` de `resolveTrustProxyHops()` (M12); la política local/test usa `LENIENT_ENVS` de `trustProxy.js` |
 
 Exporta: `validateEnv` (función por defecto).
+
+### `trustProxy.js` → `resolveTrustProxyHops()` y `LENIENT_ENVS`
+
+| Elemento | Descripción |
+|---|---|
+| `resolveTrustProxyHops()` | Sin parámetros: lee `process.env.TRUST_PROXY_HOPS` y `process.env.NODE_ENV` y devuelve `{ value: number, problem: string \| null }`. Sin definir: `{ value: 1, problem: null }`. Válido (`/^[0-5]$/`): ese número; el `0` solo con `NODE_ENV` exactamente `local` o `test`. Cualquier otro caso: `value` 1 y `problem` con el nombre de la variable y la regla, nunca el valor. Lo usan `app.js` (aplica `value`) y `validateEnv` (falla o avisa según `problem`) |
+| `LENIENT_ENVS` | `['local', 'test']`: entornos donde la validación solo avisa; `validateEnv` la reutiliza (una sola fuente) |
+
+Exporta: `resolveTrustProxyHops`, `LENIENT_ENVS`.
 
 ### `s3Paths.js`
 

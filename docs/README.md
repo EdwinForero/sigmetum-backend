@@ -42,6 +42,7 @@ sigmetum-backend/
 ├── tests/                       # Suite de la API (node:test + supertest): *.test.js y helpers/
 ├── config/
 │   ├── validateEnv.js           # Validación de variables de entorno al arrancar
+│   ├── trustProxy.js            # Saltos de proxy de confianza (TRUST_PROXY_HOPS) y entornos permisivos
 │   └── s3Paths.js               # Constantes de rutas (prefijos) dentro del bucket
 ├── routes/
 │   ├── auth.js                  # Login (bcrypt + JWT) y verificación de token

@@ -113,3 +113,63 @@ describe('M15: los valores no se filtran', () => {
         }
     });
 });
+
+describe('M12: TRUST_PROXY_HOPS', () => {
+    const INVALIDOS = ['0', '', 'true', 'false', '-1', '1.5', '6', 'abc', '1,2', '10.0.0.1', '10.0.0.0/8', ' 1 ', CENTINELA];
+    // undefined = sin NODE_ENV; 'Production', 'LOCAL', ' local' y 'test ' son estrictos (comparación exacta).
+    const ESTRICTOS = ['production', 'staging', undefined, 'Production', 'LOCAL', ' local', 'test '];
+    beforeEach(() => { process.env.AWS_PROFILE = 'perfil-de-prueba'; });
+    const fijarEntorno = (env) => { if (env === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = env; };
+
+    for (const env of ESTRICTOS) {
+        for (const valor of INVALIDOS) {
+            test(`NODE_ENV=${env}: ${JSON.stringify(valor)} lanza nombrando la variable y sin el valor`, (t) => {
+                conWarn(t);
+                fijarEntorno(env);
+                process.env.TRUST_PROXY_HOPS = valor;
+                assert.throws(() => validateEnv(), (error) => {
+                    assert.match(error.message, /TRUST_PROXY_HOPS/);
+                    if (valor.trim().length > 2) assert.ok(!error.message.includes(valor));
+                    assert.ok(!error.message.includes(CENTINELA));
+                    return true;
+                });
+            });
+        }
+    }
+    for (const env of ['production', 'test']) {
+        for (const valor of [undefined, '1', '2', '3', '4', '5']) {
+            test(`NODE_ENV=${env}: ${valor === undefined ? 'sin definir' : `'${valor}'`} no lanza ni avisa`, (t) => {
+                const w = conWarn(t);
+                process.env.NODE_ENV = env;
+                if (valor === undefined) delete process.env.TRUST_PROXY_HOPS; else process.env.TRUST_PROXY_HOPS = valor;
+                assert.doesNotThrow(() => validateEnv());
+                assert.equal(w.mock.callCount(), 0);
+            });
+        }
+    }
+    for (const env of ['local', 'test']) {
+        for (const valor of INVALIDOS.filter((v) => v !== '0')) {
+            test(`NODE_ENV=${env}: ${JSON.stringify(valor)} no lanza y avisa con la variable y la regla, sin el valor`, (t) => {
+                const w = conWarn(t);
+                process.env.NODE_ENV = env;
+                process.env.TRUST_PROXY_HOPS = valor;
+                assert.doesNotThrow(() => validateEnv());
+                assert.match(textoWarn(w), /TRUST_PROXY_HOPS: debe ser un entero de 0 a 5/);
+                assert.ok(!textoWarn(w).includes(CENTINELA));
+            });
+        }
+        test(`NODE_ENV=${env}: '0' no lanza y no avisa`, (t) => {
+            const w = conWarn(t);
+            process.env.NODE_ENV = env;
+            process.env.TRUST_PROXY_HOPS = '0';
+            assert.doesNotThrow(() => validateEnv());
+            assert.equal(w.mock.callCount(), 0);
+        });
+    }
+    test('M15 y M12 a la vez en production: el error menciona ambas variables', () => {
+        process.env.NODE_ENV = 'production';
+        process.env.JWT_SECRET = 'corto';
+        process.env.TRUST_PROXY_HOPS = '6';
+        assert.throws(() => validateEnv(), /JWT_SECRET.*TRUST_PROXY_HOPS/);
+    });
+});

@@ -34,19 +34,20 @@ El desarrollo con agentes de Claude Code sigue el plugin `ciclo-agentico` (`plug
 
 ## Variables de entorno
 
-`config/validateEnv.js` aborta el arranque si falta alguna obligatoria y, además, valida el **valor** de tres de ellas (M15):
+`config/validateEnv.js` aborta el arranque si falta alguna obligatoria y, además, valida el **valor** de tres de ellas (M15) y de la opcional `TRUST_PROXY_HOPS` (M12):
 
 - `ADMIN_PASSWORD`: hash bcrypt completo (`$2a$`, `$2b$` o `$2y$`, 60 caracteres); un valor truncado o en claro hace que todos los logins den 401.
 - `JWT_SECRET`: al menos 32 caracteres.
 - `JWT_EXPIRATION`: duración con unidad y mayor que cero (`8h`, `10m`, `1d`). Se rechazan los números sin unidad (`3600`, que `jsonwebtoken` leería como milisegundos), los valores `<= 0` (`0`, `-5m`, `0h`) y los que `jsonwebtoken` no entiende.
 
-Política: es **estricta** (el arranque falla con un error que nombra variable y regla, nunca el valor) salvo que `NODE_ENV` valga exactamente `local` o `test`, donde solo se emite un `console.warn` con prefijo `[validateEnv]`. Sin `NODE_ENV`, con `production` o con cualquier otro valor, es estricta.
+Política: es **estricta** (el arranque falla con un error que nombra variable y regla, nunca el valor) salvo que `NODE_ENV` valga exactamente `local` o `test`, donde solo se emite un `console.warn` con prefijo `[validateEnv]`. Sin `NODE_ENV`, con `production` o con cualquier otro valor, es estricta; `NODE_ENV` se compara exacto (`Production`, `LOCAL`, ` local` o `test ` son estrictos). Hueco heredado de M15: con `NODE_ENV=test` en un despliegue, `TRUST_PROXY_HOPS` admitiría `0` y valores inválidos con solo un aviso (se usaría 1 si es inválido y 0 si es `0`).
 
 | Variable | Obligatoria | Ejemplo | Descripción |
 |---|---|---|---|
 | `NODE_ENV` | No | `local` | Con `local`: credenciales SSO, stack traces en logs y `AWS_PROFILE` pasa a ser obligatoria. Con `local` o `test` la validación de valores solo avisa; con cualquier otro valor o sin definir, es estricta |
 | `PORT` | No | `8000` | Puerto HTTP |
 | `API_PREFIX` | No | `/api/v1` | Prefijo de todas las rutas (salvo `/healthcheck`) |
+| `TRUST_PROXY_HOPS` | No | `1` | Saltos de proxy de confianza (`trust proxy` de Express, en `app.js`): cuántos proxies entre el cliente y Express añaden su dirección a `X-Forwarded-For`; de ahí salen `req.ip` y el cupo de los limitadores de login y `/send-email`. Entero de 1 a 5 en todo entorno; `0` solo con `NODE_ENV` exactamente `local` o `test`. Sin definir vale 1 (como antes). Son inválidos: vacía, `true`, `false`, listas, rangos, IP, negativos, decimales, mayores de 5, espacios y ceros a la izquierda (`01`). Estricto: error al arrancar; `local` y `test`: `console.warn` con el nombre y la regla (nunca el valor) y se usa 1. Los saltos reales los fija infra por entorno **(por confirmar con infra)**; ver [para-infra](integracion/para-infra.md). Un valor mayor que los saltos reales, o más saltos que entradas en la cabecera, hace que `req.ip` sea lo que escribe el cliente (con 5 saltos y una sola entrada, `req.ip` es esa entrada) y se esquiva el límite; uno menor hace que todos compartan el cupo |
 | `AWS_REGION` | Sí | `eu-west-3` | Región del bucket |
 | `AWS_BUCKET_NAME` | Sí | `sigmetum-app-assets-dev` | Bucket de la aplicación |
 | `AWS_PROFILE` | Sólo si `NODE_ENV=local` | `my-sso-profile` | Perfil SSO de AWS CLI |

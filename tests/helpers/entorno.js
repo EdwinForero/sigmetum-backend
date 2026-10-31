@@ -13,5 +13,6 @@ process.env.AWS_REGION = 'us-east-1';
 process.env.AWS_BUCKET_NAME = 'bucket-de-prueba';
 process.env.ALLOWED_ORIGIN = 'http://localhost';
 delete process.env.API_PREFIX;
+delete process.env.TRUST_PROXY_HOPS;
 
 module.exports = { TEST_SECRET };
