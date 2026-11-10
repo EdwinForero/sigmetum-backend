@@ -84,6 +84,8 @@ sigmetum-backend/
 
 Toda feature o fix puede pasar por `/ciclo <tarea>`, del plugin [ciclo-agentico](../plugins/ciclo-agentico/README.md): requisitos, arquitectura, desarrollo y verificación con documentación, con una puerta humana entre fases y sin commits del agente. La configuración de este repositorio está en `.claude/flujo.json` y `.claude/settings.json` (qué hace cada uno: [03-configuracion.md](03-configuracion.md#flujo-agéntico)). Los traspasos entre roles (specs, planes y avisos para PR) se guardan en `docs/specs/`.
 
+Cada rol del ciclo tiene su modelo y esfuerzo fijados en el frontmatter; `CLAUDE_CODE_SUBAGENT_MODEL` y `CLAUDE_CODE_EFFORT_LEVEL` los anulan y `/ciclo` lo avisa en el paso 0. Tras cambiar el plugin hace falta `/reload-plugins` o una sesión nueva, y la comprobación manual la hace el usuario: ver [Modelos y esfuerzo por rol](../plugins/ciclo-agentico/README.md#modelos-y-esfuerzo-por-rol).
+
 ### Equipo nuevo
 
 El plugin no puede instalarse a sí mismo, así que en un equipo que no lo tiene el orden es este:
