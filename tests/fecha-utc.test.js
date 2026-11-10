@@ -3,9 +3,7 @@
 // la fecha local y la UTC difieren. Los nombres de los casos son los mismos que los del script.
 const { describe, test, before, after, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
-const jwt = require('jsonwebtoken');
-const { TEST_SECRET } = require('./helpers/entorno');
-const { appNueva, argsLog, reiniciar, seed } = require('./helpers/simulados');
+const { appNueva, argsLog, reiniciar, seed, validToken } = require('./helpers/simulados');
 const { fullRow, subir } = require('./helpers/excel');
 const { formatFileName } = require('../functions/formatFileName');
 const { getNextVersion } = require('../functions/getNextVersion');
@@ -15,8 +13,6 @@ beforeEach(reiniciar);
 
 const antesDeNoche = new Date('2026-10-28T23:30:00Z');
 const despuesDeNoche = new Date('2026-10-29T00:30:00Z');
-// Token firmado FUERA del mock de Date, con el instante simulado como iat: así sigue vigente bajo el mock.
-const tokenDelInstanteSimulado = jwt.sign({ userId: 1, iat: Math.floor(antesDeNoche.getTime() / 1000) }, TEST_SECRET, { expiresIn: '1h' });
 
 for (const huso of ['por defecto', 'Pacific/Kiritimati']) {
     describe(`huso ${huso}`, () => {
@@ -60,14 +56,14 @@ for (const huso of ['por defecto', 'Pacific/Kiritimati']) {
         test('POST /upload usa el mismo día UTC en la versión y en el nombre', async (t) => {
             t.mock.timers.enable({ apis: ['Date'], now: antesDeNoche });
             seed.list = [{ name: '2026-10-28_v1.xlsx', key: 'data/Málaga/2026-10-28_v1.xlsx' }];
-            const r = await subir(app, [fullRow('Málaga')], tokenDelInstanteSimulado);
+            const r = await subir(app, [fullRow('Málaga')], validToken);
             assert.equal(r.status, 200, JSON.stringify(r.json));
             assert.equal(argsLog.upload[0]?.[0], '2026-10-28_v2.xlsx');
         });
         test('POST /upload devuelve la misma clave que sube', async (t) => {
             t.mock.timers.enable({ apis: ['Date'], now: antesDeNoche });
             seed.list = [{ name: '2026-10-28_v1.xlsx', key: 'data/Málaga/2026-10-28_v1.xlsx' }];
-            const r = await subir(app, [fullRow('Málaga')], tokenDelInstanteSimulado);
+            const r = await subir(app, [fullRow('Málaga')], validToken);
             assert.equal(r.json?.data?.key, 'data/Málaga/2026-10-28_v2.xlsx');
         });
     });

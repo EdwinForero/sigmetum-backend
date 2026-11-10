@@ -59,7 +59,6 @@ Qué validar y dónde, con el estado real de cada ruta:
 
 | Ruta | Entrada | Valida hoy | Falta |
 |---|---|---|---|
-| `POST /log` | `username`, `password` | Que ambos sean cadenas (400); después usuario y contraseña (401) | Nada pendiente de tipo (A7 resuelto) |
 | `POST /upload` | `file` (multipart) | Que exista (400); extensión `.xlsx` (400); `MulterError` a 400; la provincia de la primera fila con `validateProvincia` (400 `Province is required`, `Province is not valid`, `Province is reserved` o `Excel contains more than one province`, antes de cualquier escritura; A4 resuelto el 28/10/2026) | Tamaño máximo (M6). En esta ruta el MIME no se comprueba porque lo manda el cliente y no es fiable |
 | `POST /upload/confirm` | `draftKey`, `confirmed` | `draftKey` cadena no vacía (400) y `isValidDraftKey` (400 `Invalid draftKey`, sin normalizar la clave, antes de tocar S3; una clave de versión también da 400); después, borrador inexistente: 404 `Draft not found` | Que `confirmed` sea booleano |
 | `POST /update-file`, `POST /delete-file` | `fileName` | Cadena no vacía (400) y `isValidDataKey` (400 `Invalid fileName`, antes de tocar S3) | Que el objeto exista (no se exige) |
@@ -105,8 +104,8 @@ Cómo validar: **una función de validación por forma de entrada**, con una lis
 ## 8. Configuración y entorno
 
 - **Toda variable nueva** entra por `config/validateEnv.js` (`required`; o `requiredLocal` si solo hace falta con `NODE_ENV=local`), por `.env.example` (con el valor **vacío** si es un secreto) y por el entorno de Beanstalk de `sigmetum-infra`. Las opcionales (`NODE_ENV`, `PORT`, `API_PREFIX`) se declaran en `OPTIONAL_ENV` de `scripts/quality-check.mjs` con su motivo. Procedimiento: skill `env-var-change`.
-- **Se valida el valor, no solo que exista.** `validateEnv` comprueba, además de la presencia, que `ADMIN_PASSWORD` sea un hash bcrypt completo, que `JWT_SECRET` tenga al menos 32 caracteres y que `JWT_EXPIRATION` sea una duración con unidad y positiva (M15 resuelto el 28/10/2026). Es estricto (el arranque falla) salvo con `NODE_ENV` exactamente `local` o `test`, donde solo avisa. Los mensajes nunca llevan el valor.
-- Se lee `process.env` **al usarse o al arrancar, de forma centralizada**, no dispersa. Hoy se lee al cargar los módulos (`routes/auth.js`) y dentro de las funciones (`awsS3connect.js`).
+- **Se valida el valor, no solo que exista.** `validateEnv` comprueba, además de la presencia, que `COGNITO_USER_POOL_ID` tenga la forma `<región>_<id>` (con la regla de `aws-jwt-verify`) y la región de `AWS_REGION` (M15), y que `TRUST_PROXY_HOPS` sea un entero válido (M12). El pool falla cerrado en todo entorno, también `local` y `test`; `TRUST_PROXY_HOPS` es estricta salvo con `NODE_ENV` exactamente `local` o `test`, donde solo avisa. Las reglas de `JWT_SECRET`, `JWT_EXPIRATION` y `ADMIN_PASSWORD` desaparecieron el 09/11/2026 con las variables. Los mensajes nunca llevan el valor.
+- Se lee `process.env` **al usarse o al arrancar, de forma centralizada**, no dispersa. Hoy se lee al cargar los módulos y dentro de las funciones (`awsS3connect.js`; `tokenAuth` lee `COGNITO_USER_POOL_ID` de forma perezosa, al crear el verificador en la primera petición).
 - Nada de valores por defecto que oculten una configuración ausente en producción.
 
 ## 9. Versionado de la API
@@ -156,7 +155,7 @@ Cómo validar: **una función de validación por forma de entrada**, con una lis
 1. `convertExcelToJson`: columnas por posición, celdas vacías, valores con coma, fórmulas y texto enriquecido.
 2. `getNextVersion` y `formatFileName`: versiones del mismo día y cambio de día (A1).
 3. Flujo `upload` → `upload/confirm` → `delete-file`: versión activa tras cada paso (A2).
-4. Login: usuario incorrecto, contraseña incorrecta, **contraseña ausente** (A7).
+4. Autenticación: token válido, de otro emisor, de otro `token_use`, caducado, de firma ajena, con `alg` distinto de RS256 y JWKS caído (`tests/cognito-verificador.test.js` y `tests/cognito-jwks.test.js`; el login propio ya no existe, A7 sin objeto).
 5. Validación de entrada de cada ruta (400 en lugar de 500).
 6. Tests de contrato con el frontend (fixtures de respuestas reales), como recomienda su documento.
 
@@ -196,7 +195,7 @@ No los repitas al escribir código nuevo:
 
 | Patrón | Dónde | Hallazgo |
 |---|---|---|
-| Manejador `async` sin `try/catch` | (el manejador de login, hoy en `routes/auth.js`, lo tenía; corregido el 28/10/2026) | A7 resuelto |
+| Manejador `async` sin `try/catch` | (el manejador de login lo tenía; corregido el 28/10/2026 y retirado con `POST /log` el 09/11/2026) | A7 resuelto, sin objeto |
 | Leer `req.file.buffer` o `term.trim()` sin validar | (corregido el 28/10/2026 en las rutas listadas de A3; quedan las entradas no revisadas) | A3 |
 | Dos fuentes de fecha para el versionado | `getNextVersion.js` y `formatFileName.js` | A1 (resuelto el 28/10/2026) |
 | Tragarse todos los errores y devolver un valor por defecto | `getTextJsonS3` | A6 |

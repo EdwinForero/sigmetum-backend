@@ -24,7 +24,6 @@ const ROUTES = {
     'GET /list-files': 'public',
     'GET /get-data/:path(*)': 'public',
     'GET /get-merged-data': 'public',
-    'POST /log': 'public',
     'GET /auth': 'protected',
     'POST /upload': 'protected',
     'POST /upload/confirm': 'protected',
@@ -46,7 +45,7 @@ const { routes, routerLevelAuth } = declaredRoutes(app);
 const declared = new Map(routes.map((r) => [`${r.method} ${r.path}`, r]));
 
 test('la tabla de rutas y la pila declarada no están vacías', () => {
-    assert.equal(Object.keys(ROUTES).length, 17);
+    assert.equal(Object.keys(ROUTES).length, 16);
     assert.ok(routes.length > 0);
 });
 

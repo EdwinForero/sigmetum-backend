@@ -45,7 +45,7 @@ sigmetum-backend/
 │   ├── trustProxy.js            # Saltos de proxy de confianza (TRUST_PROXY_HOPS) y entornos permisivos
 │   └── s3Paths.js               # Constantes de rutas (prefijos) dentro del bucket
 ├── routes/
-│   ├── auth.js                  # Login (bcrypt + JWT) y verificación de token
+│   ├── auth.js                  # GET /auth: comprobación de sesión (sin login propio)
 │   ├── data.js                  # Datos de series de vegetación (Excel/JSON, versiones)
 │   └── content.js               # Galería, términos, email de contacto
 ├── functions/
@@ -63,7 +63,7 @@ sigmetum-backend/
 │   └── awsS3connect.js          # Todas las operaciones contra S3
 ├── middleware/
 │   ├── errorHandler.js          # Manejador de errores centralizado
-│   ├── tokenAuthentication.js   # Middleware de verificación JWT (tokenAuth)
+│   ├── tokenAuthentication.js   # Verificador de tokens de acceso de Cognito (tokenAuth)
 │   └── notFound.js              # 404 con envoltorio para rutas y métodos no definidos
 ├── scripts/
 │   ├── docs-check.mjs           # Comprueba que docs/ coincide con el código (npm run docs:check)
@@ -83,6 +83,8 @@ sigmetum-backend/
 ## Flujo agéntico
 
 Toda feature o fix puede pasar por `/ciclo <tarea>`, del plugin [ciclo-agentico](../plugins/ciclo-agentico/README.md): requisitos, arquitectura, desarrollo y verificación con documentación, con una puerta humana entre fases y sin commits del agente. La configuración de este repositorio está en `.claude/flujo.json` y `.claude/settings.json` (qué hace cada uno: [03-configuracion.md](03-configuracion.md#flujo-agéntico)). Los traspasos entre roles (specs, planes y avisos para PR) se guardan en `docs/specs/`.
+
+Cada rol del ciclo tiene su modelo y esfuerzo fijados en el frontmatter; `CLAUDE_CODE_SUBAGENT_MODEL` y `CLAUDE_CODE_EFFORT_LEVEL` los anulan y `/ciclo` lo avisa en el paso 0. Tras cambiar el plugin hace falta `/reload-plugins` o una sesión nueva, y la comprobación manual la hace el usuario: ver [Modelos y esfuerzo por rol](../plugins/ciclo-agentico/README.md#modelos-y-esfuerzo-por-rol).
 
 ### Equipo nuevo
 

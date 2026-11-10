@@ -1,12 +1,12 @@
 // Criterio 15 del antiguo script de verificación de rutas (retirado): prefijo con barra en los listados, sobre el aws/awsS3connect.js REAL con
 // S3Client.prototype.send parcheado (sin red). Este archivo no carga helpers/simulados: no inyecta los espías de S3.
 // Los nombres de los casos son los mismos que los del script.
-const { TEST_SECRET } = require('./helpers/entorno');
+require('./helpers/entorno');
+const { validToken } = require('./helpers/cognito');
 const { test, before, after, beforeEach, mock } = require('node:test');
 const assert = require('node:assert/strict');
 const { Readable } = require('node:stream');
 const { S3Client, ListObjectsV2Command, GetObjectCommand } = require('@aws-sdk/client-s3');
-const jwt = require('jsonwebtoken');
 const request = require('supertest');
 const { fullRow, makeXlsx, subir } = require('./helpers/excel');
 
@@ -43,7 +43,7 @@ after(() => enviar.mock.restore());
 beforeEach(() => { prefijos.length = 0; leidas.length = 0; escritas.length = 0; });
 
 const ultimo = () => prefijos[prefijos.length - 1];
-const token = jwt.sign({ userId: 1 }, TEST_SECRET, { expiresIn: '1h' });
+const token = validToken;
 
 test('el módulo real está cargado y S3Client.send está parcheado (no hay red)', () => {
     assert.equal(typeof realAws.getMergedDataInS3Folder, 'function');
@@ -81,10 +81,8 @@ test('deleteFileFromS3 de Santa Cruz solo considera sus archivos', async () => {
 
 test('POST /upload de Santa Cruz lista con barra final y no cuenta Santa Cruz de Tenerife', async (t) => {
     const instante = new Date('2026-10-05T12:00:00Z');
-    // Token firmado FUERA del mock de Date, con el instante simulado como iat: así sigue vigente bajo el mock.
-    const tokenDelInstante = jwt.sign({ userId: 1, iat: Math.floor(instante.getTime() / 1000) }, TEST_SECRET, { expiresIn: '1h' });
     t.mock.timers.enable({ apis: ['Date'], now: instante });
-    const r = await subir(app, [fullRow('Santa Cruz')], tokenDelInstante);
+    const r = await subir(app, [fullRow('Santa Cruz')], token);
     assert.equal(r.status, 200, JSON.stringify(r.json));
     assert.deepEqual(prefijos, ['data/Santa Cruz/', 'data/drafts/Santa Cruz/']); // versiones y, al final, borradores previos
     // Si el prefijo perdiera la barra, contaría data/Santa Cruz de Tenerife/2026-10-05_v3.xlsx y daría otra versión.

@@ -34,38 +34,27 @@ El desarrollo con agentes de Claude Code sigue el plugin `ciclo-agentico` (`plug
 
 ## Variables de entorno
 
-`config/validateEnv.js` aborta el arranque si falta alguna obligatoria y, además, valida el **valor** de tres de ellas (M15) y de la opcional `TRUST_PROXY_HOPS` (M12):
+`config/validateEnv.js` aborta el arranque si falta alguna obligatoria y, además, valida el **valor** de `COGNITO_USER_POOL_ID` y de la opcional `TRUST_PROXY_HOPS` (M12):
 
-- `ADMIN_PASSWORD`: hash bcrypt completo (`$2a$`, `$2b$` o `$2y$`, 60 caracteres); un valor truncado o en claro hace que todos los logins den 401.
-- `JWT_SECRET`: al menos 32 caracteres.
-- `JWT_EXPIRATION`: duración con unidad y mayor que cero (`8h`, `10m`, `1d`). Se rechazan los números sin unidad (`3600`, que `jsonwebtoken` leería como milisegundos), los valores `<= 0` (`0`, `-5m`, `0h`) y los que `jsonwebtoken` no entiende.
+- `COGNITO_USER_POOL_ID` (obligatoria en **todo** entorno, también `local` y `test`): forma `<región>_<identificador>` (región de AWS, guion bajo e identificador alfanumérico, con la regla de `aws-jwt-verify`: un solo dígito de región y prefijo `eusc-` admitido) y región igual a `AWS_REGION`. Falla cerrado: con otro formato o región el backend no arranca, sin aviso relajado en `local` ni `test` (a diferencia de `TRUST_PROXY_HOPS`). El mensaje nombra la variable y la regla, nunca el valor.
 
-Política: es **estricta** (el arranque falla con un error que nombra variable y regla, nunca el valor) salvo que `NODE_ENV` valga exactamente `local` o `test`, donde solo se emite un `console.warn` con prefijo `[validateEnv]`. Sin `NODE_ENV`, con `production` o con cualquier otro valor, es estricta; `NODE_ENV` se compara exacto (`Production`, `LOCAL`, ` local` o `test ` son estrictos). Hueco heredado de M15: con `NODE_ENV=test` en un despliegue, `TRUST_PROXY_HOPS` admitiría `0` y valores inválidos con solo un aviso (se usaría 1 si es inválido y 0 si es `0`).
+Las cuatro claves del login propio (`JWT_SECRET`, `JWT_EXPIRATION`, `ADMIN_USERNAME`, `ADMIN_PASSWORD`) **ya no existen**: el backend no las exige, no las valida ni las lee. Si un entorno aún las conserva (caso de `prod` hasta `S18-prod`), no se usan ni dan error. Con ellas desaparecieron las reglas de valor de M15.
+
+Política de `TRUST_PROXY_HOPS`: es **estricta** (el arranque falla con un error que nombra variable y regla, nunca el valor) salvo que `NODE_ENV` valga exactamente `local` o `test`, donde solo se emite un `console.warn` con prefijo `[validateEnv]`. Sin `NODE_ENV`, con `production` o con cualquier otro valor, es estricta; `NODE_ENV` se compara exacto (`Production`, `LOCAL`, ` local` o `test ` son estrictos). Hueco heredado de M15: con `NODE_ENV=test` en un despliegue, `TRUST_PROXY_HOPS` admitiría `0` y valores inválidos con solo un aviso (se usaría 1 si es inválido y 0 si es `0`).
 
 | Variable | Obligatoria | Ejemplo | Descripción |
 |---|---|---|---|
-| `NODE_ENV` | No | `local` | Con `local`: credenciales SSO, stack traces en logs y `AWS_PROFILE` pasa a ser obligatoria. Con `local` o `test` la validación de valores solo avisa; con cualquier otro valor o sin definir, es estricta |
+| `NODE_ENV` | No | `local` | Con `local`: credenciales SSO, stack traces en logs y `AWS_PROFILE` pasa a ser obligatoria. Con `local` o `test` la validación de `TRUST_PROXY_HOPS` solo avisa; con cualquier otro valor o sin definir, es estricta (`COGNITO_USER_POOL_ID` es estricta siempre) |
 | `PORT` | No | `8000` | Puerto HTTP |
 | `API_PREFIX` | No | `/api/v1` | Prefijo de todas las rutas (salvo `/healthcheck`) |
-| `TRUST_PROXY_HOPS` | No | `1` | Saltos de proxy de confianza (`trust proxy` de Express, en `app.js`): cuántos proxies entre el cliente y Express añaden su dirección a `X-Forwarded-For`; de ahí salen `req.ip` y el cupo de los limitadores de login y `/send-email`. Entero de 1 a 5 en todo entorno; `0` solo con `NODE_ENV` exactamente `local` o `test`. Sin definir vale 1 (como antes). Son inválidos: vacía, `true`, `false`, listas, rangos, IP, negativos, decimales, mayores de 5, espacios y ceros a la izquierda (`01`). Estricto: error al arrancar; `local` y `test`: `console.warn` con el nombre y la regla (nunca el valor) y se usa 1. Los saltos reales los fija infra por entorno **(por confirmar con infra)**; ver [para-infra](integracion/para-infra.md). Un valor mayor que los saltos reales, o más saltos que entradas en la cabecera, hace que `req.ip` sea lo que escribe el cliente (con 5 saltos y una sola entrada, `req.ip` es esa entrada) y se esquiva el límite; uno menor hace que todos compartan el cupo |
+| `TRUST_PROXY_HOPS` | No | `1` | Saltos de proxy de confianza (`trust proxy` de Express, en `app.js`): cuántos proxies entre el cliente y Express añaden su dirección a `X-Forwarded-For`; de ahí salen `req.ip` y el cupo del limitador de `/send-email`. Entero de 1 a 5 en todo entorno; `0` solo con `NODE_ENV` exactamente `local` o `test`. Sin definir vale 1 (como antes). Son inválidos: vacía, `true`, `false`, listas, rangos, IP, negativos, decimales, mayores de 5, espacios y ceros a la izquierda (`01`). Estricto: error al arrancar; `local` y `test`: `console.warn` con el nombre y la regla (nunca el valor) y se usa 1. Los saltos reales los fija infra por entorno **(por confirmar con infra)**; ver [para-infra](integracion/para-infra.md). Un valor mayor que los saltos reales, o más saltos que entradas en la cabecera, hace que `req.ip` sea lo que escribe el cliente (con 5 saltos y una sola entrada, `req.ip` es esa entrada) y se esquiva el límite; uno menor hace que todos compartan el cupo |
 | `AWS_REGION` | Sí | `eu-west-3` | Región del bucket |
 | `AWS_BUCKET_NAME` | Sí | `sigmetum-app-assets-dev` | Bucket de la aplicación |
 | `AWS_PROFILE` | Sólo si `NODE_ENV=local` | `my-sso-profile` | Perfil SSO de AWS CLI |
-| `JWT_SECRET` | Sí | — | Secreto de firma de los JWT (HS256); mínimo 32 caracteres |
-| `JWT_EXPIRATION` | Sí | `8h` | Caducidad del token (formato de `jsonwebtoken`, con unidad y mayor que cero) |
-| `ADMIN_USERNAME` | Sí | — | Usuario administrador |
-| `ADMIN_PASSWORD` | Sí | `$2b$10$...` | **Hash bcrypt** completo de la contraseña, no la contraseña en claro |
+| `COGNITO_USER_POOL_ID` | Sí | `<región>_<id>` (marcador) | Id del pool de usuarios de Cognito del entorno (lo inyecta Terraform). Forma `<región>_<id>` y región igual a `AWS_REGION`; de él salen el emisor y el JWKS con los que `tokenAuth` verifica los tokens de acceso. Obligatoria en todo entorno; sin ella o con otro formato o región, el backend no arranca |
 | `EMAIL` | Sí | — | Cuenta Gmail que envía y recibe el formulario de contacto |
 | `EMAIL_PASSWORD` | Sí | — | Contraseña de aplicación de Gmail |
 | `ALLOWED_ORIGIN` | Sí | `http://localhost:3000` | Orígenes del frontend permitidos por CORS: **una lista separada por comas** (`app.js` divide por `,`, recorta espacios y compara cada origen de forma exacta, sin barra final; p. ej. `https://a.com,https://b.com`); una petición sin `Origin` también se permite; otro origen recibe `403` `Origin not allowed` (el valor de la variable no cambia) |
-
-### Generar el hash de `ADMIN_PASSWORD`
-
-`routes/auth.js` (manejador de login) hace `bcrypt.compare(password, ADMIN_PASSWORD)`, así que la variable debe contener un hash:
-
-```bash
-node -e "require('bcrypt').hash('mi-contraseña', 10).then(console.log)"
-```
 
 ## Credenciales AWS
 

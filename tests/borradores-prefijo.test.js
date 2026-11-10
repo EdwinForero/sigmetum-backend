@@ -8,9 +8,8 @@ process.env.AWS_SECRET_ACCESS_KEY = 'ficticia-clave-de-prueba';
 
 const { describe, test, before, after, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
-const jwt = require('jsonwebtoken');
 const request = require('supertest');
-const { TEST_SECRET } = require('./helpers/entorno');
+const { validToken } = require('./helpers/cognito');
 const { fullRow, makeXlsx, subir } = require('./helpers/excel');
 const { crearS3Simulado } = require('./helpers/s3-con-estado');
 const { getProvinciaNameError } = require('../functions/validateProvincia');
@@ -24,7 +23,7 @@ const BORRADORES = 'data/drafts/Sevilla';
 const ACTIVA = 'data/active/Sevilla.json';
 const CENTINELA = '[{"Municipio":"centinela"}]';
 const UUID = '123e4567-e89b-42d3-a456-426614174000';
-const token = jwt.sign({ userId: 1 }, TEST_SECRET, { expiresIn: '1h' });
+const token = validToken;
 const post = (ruta, cuerpo) => request(app).post(`/api/v1/${ruta}`).set('Authorization', `Bearer ${token}`).send(cuerpo);
 
 const fila = (municipio, hueco = false) => {
@@ -38,10 +37,9 @@ const municipiosDelActivo = () => JSON.parse(s3.leer(ACTIVA).toString()).map((r)
 
 const DIA = '2026-10-05';
 const instante = new Date(`${DIA}T12:00:00Z`);
-const tokenDelInstante = jwt.sign({ userId: 1, iat: Math.floor(instante.getTime() / 1000) }, TEST_SECRET, { expiresIn: '1h' });
 const congelar = (t) => t.mock.timers.enable({ apis: ['Date'], now: instante });
 const subirIncompleta = async (municipio) => {
-    const r = await subir(app, [fila(municipio, true)], tokenDelInstante);
+    const r = await subir(app, [fila(municipio, true)], token);
     assert.equal(r.status, 400);
     return r.json.data.draftKey;
 };
@@ -87,7 +85,7 @@ describe('el borrador no es una versión', () => {
         s3.sembrar(ajeno, await makeXlsx([fila('norte')]));
         const draftKey = await subirIncompleta('sevilla');
         assert.ok(s3.existe(ajeno), 'la subida de Sevilla no descarta el borrador de Sevilla Norte');
-        const completa = await subir(app, [fila('completa')], tokenDelInstante);
+        const completa = await subir(app, [fila('completa')], token);
         assert.equal(completa.status, 200);
         assert.ok(s3.existe(ajeno));
         assert.equal(s3.existe(draftKey), false);
@@ -197,7 +195,7 @@ describe('ciclo de vida del borrador', () => {
         congelar(t);
         const previo = await subirIncompleta('previo');
         s3.alEnviar((llamada) => { if (llamada.op === 'Delete') throw new Error('fallo interno de prueba'); });
-        const res = await subir(app, [fila('completa')], tokenDelInstante);
+        const res = await subir(app, [fila('completa')], token);
         assert.equal(res.status, 200, JSON.stringify(res.json));
         assert.deepEqual(municipiosDelActivo(), ['completa']);
         assert.ok(s3.existe(`${BASE}/${DIA}_v1.xlsx`));
@@ -207,7 +205,7 @@ describe('ciclo de vida del borrador', () => {
         congelar(t);
         const previo = await subirIncompleta('previo');
         s3.alEnviar((llamada) => { if (llamada.op === 'Delete') throw new Error('fallo interno de prueba'); });
-        const res = await subir(app, [fila('nuevo', true)], tokenDelInstante);
+        const res = await subir(app, [fila('nuevo', true)], token);
         assert.equal(res.status, 500);
         assert.equal(s3.claves(`${BORRADORES}/`).length, 2);
         assert.ok(s3.existe(previo));
@@ -221,7 +219,7 @@ describe('operaciones sobre S3', () => {
         assert.equal((await post('upload/confirm', { confirmed: true, draftKey: a })).status, 200);
         const b = await subirIncompleta('b');
         assert.equal((await post('upload/confirm', { confirmed: false, draftKey: b })).status, 200);
-        assert.equal((await subir(app, [fila('c')], tokenDelInstante)).status, 200);
+        assert.equal((await subir(app, [fila('c')], token)).status, 200);
         const ops = new Set(s3.llamadas.map((c) => c.op));
         assert.deepEqual([...ops].sort(), ['Delete', 'Get', 'List', 'Put']);
     });

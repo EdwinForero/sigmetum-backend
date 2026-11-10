@@ -35,9 +35,9 @@ Construye y exporta la app (`module.exports = app`) sin abrir puerto, sin `doten
 
 | Elemento | Descripción |
 |---|---|
-| `required` | Array con las variables siempre obligatorias |
+| `required` | Array con las variables siempre obligatorias (`COGNITO_USER_POOL_ID`, `EMAIL`, `EMAIL_PASSWORD`, `AWS_REGION`, `AWS_BUCKET_NAME`, `ALLOWED_ORIGIN`) |
 | `requiredLocal` | `['AWS_PROFILE']`, obligatorias sólo si `NODE_ENV === 'local'` |
-| `validateEnv()` | Recorre ambas listas y lanza `Error("Variables de entorno requeridas no definidas: ...")` con todas las que falten. Después valida el valor de las presentes (M15): `ADMIN_PASSWORD` hash bcrypt completo, `JWT_SECRET` de al menos 32 caracteres y `JWT_EXPIRATION` con unidad y mayor que cero (`isValidExpiration`: rechaza solo números y duraciones <= 0, y delega el formato en `jsonwebtoken`). Si `NODE_ENV` no es exactamente `local` ni `test` lanza `Error("Variables de entorno con valor no válido: ...")`; en `local` y `test` solo emite `console.warn` con prefijo `[validateEnv]`. Los mensajes nombran variable y regla, nunca el valor. Detalle en [03](03-configuracion.md#variables-de-entorno) |
+| `validateEnv()` | Recorre ambas listas y lanza `Error("Variables de entorno requeridas no definidas: ...")` con todas las que falten. Después valida `COGNITO_USER_POOL_ID` con `poolProblem()`: forma `<región>_<identificador>` según la regla de `aws-jwt-verify` (un solo dígito de región y prefijo `eusc-` admitido) y región igual a `AWS_REGION`; si no cumple **siempre** lanza `Error("Variables de entorno con valor no válido: ...")`, también con `NODE_ENV` `local` o `test`. Las reglas de valor de `JWT_SECRET`, `JWT_EXPIRATION` y `ADMIN_PASSWORD` (M15) desaparecieron con las variables. Del resto de valores solo queda `TRUST_PROXY_HOPS`: si `NODE_ENV` no es exactamente `local` ni `test` lanza el mismo error; en `local` y `test` solo emite `console.warn` con prefijo `[validateEnv]`. Los mensajes nombran variable y regla, nunca el valor. Detalle en [03](03-configuracion.md#variables-de-entorno) |
 | `TRUST_PROXY_HOPS` | Dentro de la validación de valores, añade el `problem` de `resolveTrustProxyHops()` (M12); la política local/test usa `LENIENT_ENVS` de `trustProxy.js` |
 
 Exporta: `validateEnv` (función por defecto).
@@ -81,10 +81,8 @@ Todos los routers declaran sus rutas en un único `router`. `tokenAuth` es el **
 
 | Elemento | Descripción |
 |---|---|
-| `loginLimiter` | `rateLimit({ windowMs: 15 min, limit: 10 })` con cabeceras estándar `RateLimit-*` |
-| `userAuth(req, res, next)` (privada, no se exporta) | Manejador de login, movido desde `functions/userAuthentication.js` el 30/10/2026 (B7) sin cambiar su comportamiento. Construye en memoria un array `users` con un único usuario `{ id: 1, username: ADMIN_USERNAME, password: ADMIN_PASSWORD }`. Todo el cuerpo va dentro de `try/catch`; un fallo inesperado llega a `errorHandler` con `next(error)`. Si `username` o `password` no son cadenas (ausentes, número, objeto, `null`) → 400 `Username and password are required and must be strings`. Busca por `username`; si no existe → 401. `bcrypt.compare(password, user.password)`; si falla → 401 (**`ADMIN_PASSWORD` debe ser un hash bcrypt**). Firma `jwt.sign({ userId }, JWT_SECRET, { expiresIn: JWT_EXPIRATION, algorithm: 'HS256' })` y responde `{ success: true, data: { token } }`. `JWT_SECRET`, `JWT_EXPIRATION`, `ADMIN_USERNAME` y `ADMIN_PASSWORD` se leen al cargar `routes/auth.js`, no en cada petición |
-| `POST /log` | `loginLimiter` → `userAuth` |
-| `GET /auth` | `tokenAuth` → responde `Authorized` |
+| (sin login) | `POST /log`, `loginLimiter` y `userAuth` se retiraron: el backend ya no emite tokens ni guarda usuarios ni contraseñas (el login es de Cognito, en el frontend). `POST /log` responde 404 `Not found`. `routes/auth.js` solo importa `express` y `tokenAuth` |
+| `GET /auth` | `tokenAuth` → responde `Authorized` (comprobación de sesión del frontend) |
 
 ### `data.js`
 
@@ -107,7 +105,7 @@ Todos los routers declaran sus rutas en un único `router`. `tokenAuth` es el **
 |---|---|
 | `upload` | Instancia `multer` en memoria con `limits.fileSize` = 5 MB + 1 (mismo motivo que en `data.js`): 5 MB exactos se aceptan y 5 MB + 1 byte da 400 |
 | `transporter` | `nodemailer.createTransport` contra `smtp.gmail.com:587` (`secure: false` → STARTTLS) con `EMAIL`/`EMAIL_PASSWORD` |
-| `sendEmailLimiter` | `rateLimit({ windowMs: 15 min, limit: 5 })` con cabeceras estándar; al superarlo responde 429 con `{ success: false, error }`. Almacén en memoria (se reinicia al reiniciar y se multiplica por instancia). Copia de `loginLimiter`; los dos usan `limit` (B6 resuelto) |
+| `sendEmailLimiter` | `rateLimit({ windowMs: 15 min, limit: 5 })` con cabeceras estándar; al superarlo responde 429 con `{ success: false, error }`. Almacén en memoria (se reinicia al reiniciar y se multiplica por instancia). Es el único limitador de la API desde que se retiró el login; usa `limit` (B6 resuelto) |
 | `POST /send-email` | `sendEmailLimiter` → `validateContactMessage(req.body)`; si devuelve `error`, 400; si no, construye `mailOptions` con los valores recortados (from/to = `EMAIL`, `replyTo` = email del usuario) y `transporter.sendMail`. Todo el cuerpo va dentro de `try/catch` con `next(error)`. Ruta pública (sin `tokenAuth`). El limitador es el primer manejador, cuenta antes de validar y cuenta también el tráfico anónimo |
 | `GET /list-images` | `getPresignedUrlsFromS3Folder(GALLERY_PATH)` |
 | `GET /get-image` | 400 si `imageKey` falta, está vacío o no es cadena; 400 `imageKey is not valid` si `isValidImageKey` lo rechaza; si no, `getPresignedUrlFromS3(GALLERY_PATH, imageKey)` |
@@ -281,13 +279,16 @@ Middlewares transversales: `errorHandler`, `notFound` y `tokenAuth`. `middleware
 
 ## `middleware/tokenAuthentication.js` → `tokenAuth(req, res, next)`
 
-Movido desde `functions/tokenAuthentication.js` el 30/10/2026 (B7), sin cambios de comportamiento. Lo importan `routes/auth.js`, `routes/data.js` y `routes/content.js`.
+Verificador único de los tokens de acceso de Cognito con `aws-jwt-verify` (sin convivencia con el verificador HS256 anterior). Lo importan `routes/auth.js`, `routes/data.js` y `routes/content.js`; sigue exportando solo `{ tokenAuth }`, ahora `async`.
 
-- Lee `Authorization`, toma lo que va tras el primer espacio (`Bearer <token>`).
-- Sin token → 401 `No token provided`.
-- `jwt.verify` con `JWT_SECRET`: error → 401 `Token expired` o `Invalid token`.
-- Éxito → `req.user = payload` y `next()`.
-- `jwt.verify` fija `algorithms: ['HS256']` (B8): un token firmado con otro algoritmo o con `alg: none` da 401 `Invalid token`; los emitidos antes siguen valiendo porque `jsonwebtoken` firma con HS256 por defecto.
+- **Verificador**: `getVerifier()` crea una sola vez y de forma perezosa un `CognitoJwtVerifier` con `userPoolId = COGNITO_USER_POOL_ID`, `tokenUse: 'access'` y `clientId: null` (no se comprueba `client_id` ni grupos: C16). RS256 fijo por la librería; región, `iss` y ruta del JWKS salen del `userPoolId`. La librería acepta el `iss` en dos formatos del mismo pool (`cognito-idp` e `issuer-cognito-idp`).
+- **Caché y penalización**: el verificador usa un `SimpleJwksCache` con un fetcher propio que envuelve al `SimpleFetcher` de la librería y, si el fetch falla, registra el fallo en la `SimplePenaltyBox` (la de la librería, espera de 10 s por URI). La librería solo penaliza el `kid` no encontrado; sin este envoltorio un JWKS caído iría a la red en cada petición (criterio 5). Un `JwksValidationError` no penaliza (límite).
+- Lee `Authorization`, toma lo que va tras el primer espacio (`Bearer <token>`). Sin token → 401 `No token provided`.
+- `verify(token)`; además se exige `exp` numérico finito (la librería no lo exige): si no, 401 `Invalid token`.
+- Éxito → `req.user = { sub, client_id, username }` (nunca el token, `scope` ni grupos) y `next()`.
+- Mapeo de errores, sin usar nunca `err.message` en la respuesta: `JwtExpiredError` → 401 `Token expired`; `FetchError`, `NonRetryableFetchError`, `JwksValidationError`, `JwksNotAvailableInCacheError` y `WaitPeriodNotYetEndedJwkError` → 503 `Authentication service unavailable` con una línea `console.error('[auth] JWKS no disponible:', error.constructor.name)` (las clases de la librería no fijan `name`); cualquier otro `JwtBaseError` (firma, emisor, `token_use`, algoritmo, `kid` desconocido, parseo) → 401 `Invalid token`; un error que no es de la librería → `next(error)` (500 genérico). Tabla de códigos en [04-api.md](04-api.md#autenticación-routesauthjs).
+- Un `kid` falso provoca hasta 10 s de 503 a los `kid` nuevos (no a los cacheados); el frontend debe reintentar.
+- `errorHandler` conserva sus mapeos de `TokenExpiredError` y `JsonWebTokenError`, que `tokenAuth` ya no produce (código residual, sin tocar en esta iteración).
 
 ---
 

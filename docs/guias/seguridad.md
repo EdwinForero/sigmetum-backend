@@ -12,7 +12,7 @@ Normas para no introducir vulnerabilidades en este repositorio, con el estado re
 
 | Activo | Riesgo principal |
 |---|---|
-| **Sesión del administrador** (JWT firmado con `JWT_SECRET`) | Que alguien firme o reutilice un token; que se adivine o fuerce el login |
+| **Sesión del administrador** (token de acceso de Cognito, verificado con las claves públicas del pool) | Que se acepte un token falso, de otro emisor o de otro tipo; que cualquier usuario del pool administre (C16); que el JWKS caído deje la API sin servicio |
 | **Datos de investigación** (públicos, pero su integridad importa) | Que una carga incorrecta o maliciosa los corrompa o los borre |
 | **El bucket de S3** | Leer o escribir fuera de lo previsto mediante claves que construye el cliente |
 | **La cuenta de Gmail** del formulario de contacto (`EMAIL`, `EMAIL_PASSWORD`) | Que se use para enviar correo no deseado |
@@ -33,26 +33,32 @@ Toda la seguridad real está aquí: el frontend solo evita errores y no facilita
 
 | Regla | Por qué | Se comprueba | Estado |
 |---|---|---|---|
-| `ADMIN_PASSWORD` contiene un **hash bcrypt**, nunca la contraseña en claro | `userAuth` hace `bcrypt.compare`: con un valor que no sea un hash, **todos los logins dan 401** sin avisar | Revisión | `validateEnv` comprueba al arrancar que tiene forma de hash bcrypt completo (M15 resuelto el 28/10/2026; estricto salvo `NODE_ENV` `local` o `test`, donde solo avisa). Cómo generarlo: [03](../03-configuracion.md#generar-el-hash-de-admin_password) |
-| `JWT_SECRET` es largo y aleatorio (al menos 32 bytes; por ejemplo `node -e "console.log(require('crypto').randomBytes(48).toString('base64'))"`), **distinto por entorno** | Con un secreto corto se pueden falsificar tokens por fuerza bruta | Revisión | `validateEnv` exige al menos 32 caracteres (M15 resuelto el 28/10/2026; estricto salvo `NODE_ENV` `local` o `test`). La aleatoriedad y los valores reales de despliegue **(por confirmar)** |
-| **Rotación** de `JWT_SECRET`: al sospechar una filtración o cuando cambie quien lo conoce | Cambiarlo invalida todos los tokens, lo que con un único administrador es aceptable | Revisión | Sin procedimiento escrito |
-| Los tokens **caducan** (`JWT_EXPIRATION`, `8h` en el ejemplo) y el valor es el mínimo útil | Un token robado deja de servir | `validateEnv` exige la variable y que sea una duración con unidad y mayor que cero (M15) | Cumple |
-| `jwt.verify` fija el algoritmo (`algorithms: ['HS256']`) | No depender del valor por defecto de la librería | Test (`tests/jwt-algoritmo.test.js`) | Cumple desde el 28/10/2026 (B8): `jwt.verify` con `algorithms: ['HS256']` y `jwt.sign` con `algorithm: 'HS256'` |
-| El login tiene **límite de intentos** y `trust proxy` bien configurado | Detrás del ALB, sin `trust proxy`, todos los clientes comparten una IP y el mismo contador: cualquiera puede bloquear el login del administrador | `routes/auth.js` | Límite de 10 intentos cada 15 minutos. `trust proxy` es configurable con `TRUST_PROXY_HOPS` (M12, 30/10/2026; `app.js`, regla en `config/trustProxy.js`; 1 si no se define), pero el valor correcto depende de la cadena real de proxies, que infra debe medir y fijar **(por confirmar con infra)**: mayor que el real deja esquivar el límite con `X-Forwarded-For`, menor hace que todos compartan el cupo. Los limitadores usan `limit` (B6 resuelto el 28/10/2026) |
-| Un manejador de login **no puede quedarse colgado** | Quien conoce el usuario puede agotar conexiones enviando peticiones sin contraseña | Test (cuando existan) | **No cumple**: `userAuth` sin `try/catch` deja la petición sin respuesta **(verificado ejecutándolo)** (A7) |
-| Mensaje único para usuario y contraseña incorrectos | No revela qué usuarios existen | Revisión | Cumple (`Invalid credentials`) |
-| Las dependencias de autenticación están al día | `jsonwebtoken` depende de `jws`, con un aviso alto sobre la verificación de firmas HMAC | `npm run quality` | **No cumple** (M16); el alcance real del aviso, **por confirmar** |
+| El backend **solo verifica tokens de acceso de Cognito** con `aws-jwt-verify` (sin login propio, sin secretos de firma, sin contraseñas): `iss` del pool configurado, `token_use` `access`, `exp` numérico finito y vigente, y firma RS256 con el JWKS del pool | El backend no emite ni firma nada: no hay `JWT_SECRET` que filtrar ni contraseña que adivinar. Cada token falso, de otro pool o de otro tipo da 401 | Tests (`tests/cognito-verificador.test.js`) | Cumple desde el 09/11/2026 (reemplaza a HS256, `JWT_SECRET` y el login con bcrypt) |
+| El algoritmo es **RS256 fijo** y nunca sale del cabecero del token (B8) | Evita la confusión de algoritmo (HS256 con la clave pública como secreto) y `alg: none` | Tests (`tests/jwt-algoritmo.test.js`, `tests/cognito-verificador.test.js`) | Cumple desde el 09/11/2026: HS256, HS512, HS256 con la clave pública como secreto y `none` dan 401 `Invalid token` |
+| `COGNITO_USER_POOL_ID` es obligatoria en todo entorno y se valida (forma `<región>_<id>`, región igual a `AWS_REGION`, con la regla de la propia librería) | Un pool mal escrito haría que cada petición diera un 401 silencioso | `validateEnv` y `tests/validate-env.test.js` | Cumple (M15): falla cerrado también en `local` y `test`; el mensaje nombra variable y regla, nunca el valor |
+| El emisor se acepta en los dos formatos que emite Cognito para el **mismo pool** (`cognito-idp` e `issuer-cognito-idp`) | Es el comportamiento de la librería (misma clave y mismo pool); se documenta en vez de ocultarlo | Test de caracterización | Aceptado; otra región u otro pool dan 401 |
+| El JWKS **no se pide en cada petición**: caché y penalización de recargas | Un `kid` desconocido o un JWKS caído no puede provocar una petición de red por petición entrante | `tests/cognito-jwks.test.js` (cuenta peticiones con un JWKS simulado) | Cumple con límites: la librería penaliza por URI (espera de 10 s, no por `kid`) y solo cuando el JWKS carga y el `kid` no está; un fetcher propio envuelve al de la librería y registra los fallos de red en la misma penalización. Consecuencia: un `kid` falso provoca hasta 10 s de `503` a los `kid` **nuevos** (los cacheados no se ven afectados; el frontend debe reintentar). `JwksValidationError` (JWKS cargado pero inválido) no penaliza. Node 22 **(por confirmar)**: solo se probó con Node 24.16 |
+| Los errores no filtran nada: `401` `No token provided` / `Invalid token` / `Token expired`, `503` `Authentication service unavailable` (texto fijo); `req.user` solo con `sub`, `client_id` y `username` | Ni el mensaje de la librería, ni el token, ni `scope` ni grupos llegan al cliente o a `req.user`; el log de un 503 lleva solo el nombre de la clase del error | Tests | Cumple |
+| Los tokens **caducan** (acceso 60 minutos, refresco 8 horas: los fija Cognito, no el backend) y el backend **no revoca** | Un token robado deja de servir al caducar; el backend no tiene logout ni lista de revocación | `exp` vigente exigido | Cumple; la revocación anticipada queda fuera de alcance |
+| Los limitadores tienen **`trust proxy`** bien configurado | Detrás del ALB, sin `trust proxy`, todos los clientes comparten una IP y el mismo contador | `app.js`, `config/trustProxy.js` | El login ya no existe; el único limitador es el de `/send-email` (5 por 15 minutos por IP). `trust proxy` es configurable con `TRUST_PROXY_HOPS` (M12, 30/10/2026; 1 si no se define), pero el valor correcto depende de la cadena real de proxies, que infra debe medir y fijar **(por confirmar con infra)**: mayor que el real deja esquivar el límite con `X-Forwarded-For`, menor hace que todos compartan el cupo. Los limitadores usan `limit` (B6 resuelto el 28/10/2026) |
+| Las dependencias de autenticación están al día | Una librería de verificación desactualizada puede aceptar tokens falsos | `npm run quality` | `aws-jwt-verify` 5.2.1 (versión exacta; mantenida por AWS, Apache-2.0, sin dependencias). `jsonwebtoken` y `bcrypt` se retiraron, y con ellas sus avisos (M16); el `npm audit` de producción queda como estaba (M20, sin tapar) |
+
+Sin objeto desde el 09/11/2026: el manejador de login sin `try/catch` (A7), el mensaje único para usuario y contraseña incorrectos, la rotación de `JWT_SECRET` y el hash bcrypt de `ADMIN_PASSWORD`; las cuatro variables ya no existen. Si `prod` aún las conserva hasta `S18-prod`, el backend no las lee.
+
+### C16. Cualquier usuario del pool es administrador
+
+- **Riesgo aceptado.** El backend no valida `client_id` ni grupos: **cualquier usuario autenticado del pool es administrador**. Es aceptable solo con registro cerrado (`allow_admin_create_user_only = true`) y un pool que contenga solo administradores. Si entra un usuario que no deba administrar (otro cliente de aplicación en el mismo pool, un grupo no administrador), este diseño lo autoriza igualmente.
+- **Vía de salida (fuera de alcance, spec nueva):** validar el `client_id` esperado (exige `COGNITO_CLIENT_ID` en el backend y, en `dev`, separar el cliente en otro `apply` de infra) y/o exigir un grupo `admin`. `req.user` conserva `client_id` desde el principio; los grupos no se exponen.
 
 ### S3. Autorización
 
-- **Por qué:** `tokenAuth` es la única barrera. Hay un solo rol: cualquier token válido es el administrador.
+- **Por qué:** `tokenAuth` es la única barrera. Hay un solo rol: cualquier token válido de Cognito es el administrador (C16, en S2).
 - **Reglas:** toda ruta `POST`, `PUT`, `PATCH` o `DELETE` lleva `tokenAuth` como **primer manejador de la propia ruta** (`router.post('/x', tokenAuth, ...)`, y antes de `multer` en las subidas). No se usa `router.use(tokenAuth)` sin ruta: intercepta peticiones de otras rutas (M21). Una ruta pública que modifica estado es una **excepción registrada y justificada**.
 - **Cómo:** `npm run quality` falla con una ruta mutante cuyo `tokenAuth` no sea el primer manejador y que no esté en `PUBLIC_MUTATING_ROUTES` (y con una excepción que ya no exista). Además ejecuta la suite de `tests/` (`--test-reporter=tap`), que recorre la pila real de `app.js`: `tests/estructura-rutas.test.js` falla con una ruta sin clasificar, una protegida sin `tokenAuth` como primer manejador, una pública con `tokenAuth` o un `use(tokenAuth)` a nivel de router, y `tests/rutas-protegidas.test.js` comprueba el `401` de las protegidas, incluido `GET /auth`, y de toda ruta mutante de la pila. La detección estática no ve `router.route()`, `router.all`, `router.use` ni rutas en variables: solo la pila real las cubre. Tampoco ve una declaración partida en varias líneas (limitación en el lado inseguro: una mutante así no se marcaría como sin proteger); por eso `quality` suma como problema, con `unparsedRouteLines()` de `scripts/lib/repo.mjs`, toda línea de `routes/` que empieza por `router.`, `protectedRouter.` o `app.` seguido de `get|post|put|patch|delete|all|use|route(` y no casa con el patrón completo, y esa ruta hay que escribirla en una sola línea. La suite carga la `app.js` real (incluidos `cors`, `compression` y `morgan`, este último silenciado en los tests) con S3 y nodemailer simulados; el 403 de CORS se comprueba por comportamiento (sin reflejar el origen, `publicMessage` en el cuerpo y `warn` truncado). Un arranque real con entorno ficticio sigue siendo la prueba del despliegue.
 - **Estado:** cumple **(verificado)**. Excepciones vigentes:
 
 | Ruta | Por qué es pública | Condición para mantenerla |
 |---|---|---|
-| `POST /log` | Es el login | Límite de intentos y arreglar A7 y M12 |
 | `POST /send-email` | Formulario de contacto: no exige token (ni lo ejecuta, desde la entrega 2 de M21) | Límite de peticiones y validación (M3). Los tiene desde el 28/10/2026: 5 por 15 minutos por IP (almacén en memoria; cuenta también el tráfico anónimo y los 400) y validación de los cuatro campos. El límite depende de que `TRUST_PROXY_HOPS` (1 por defecto) cuente bien los saltos delante de Express **(por confirmar con infra)** |
 
 Rutas de **lectura** públicas (los datos del portal son públicos): `GET /list-files`, `GET /get-data/:path`, `GET /get-merged-data`, `GET /list-images`, `GET /get-image`, `GET /list-terms` y `GET /healthcheck`. Una lectura nueva se hace pública **a propósito**. `GET /get-data/:path` es la excepción problemática: desde M25 (30/10/2026) solo lee versiones `.xlsx` y activos `data/active/{provincia}.json` (el resto da 400 sin llamar a S3), pero sigue siendo público y sin token (M2, y D1 antes de cerrarlo del todo).
@@ -77,7 +83,7 @@ Rutas de **lectura** públicas (los datos del portal son públicos): `GET /list-
 | Regla | Por qué | Estado |
 |---|---|---|
 | `multer` con `limits.fileSize` | `memoryStorage` guarda el fichero entero en RAM: un fichero enorme tumba el proceso | Cumple desde el 28/10/2026 (M6): 10 MB en `/upload` y 5 MB en `/upload-image`, máximo aceptado exacto; 400 `File exceeds the maximum allowed size` |
-| Se valida la **extensión y el tipo**: para datos (`/upload`), la extensión `.xlsx`, sin comprobar el MIME porque lo manda el cliente; para la galería (`/upload-image`), extensión `jpg`/`jpeg`/`png`/`gif`/`webp`, MIME canónico exacto y firma (magic bytes) del contenido | El backend solo procesa `.xlsx`; el `ContentType` de las imágenes lo fija el backend desde el tipo validado (M5, 29/10/2026). Un fichero con nombre `.xlsx` se carga entero en memoria y `exceljs` lo descomprime sin límite (M9); la ruta exige JWT y es solo del administrador | **Cumple en parte**: imágenes cumple desde el 29/10/2026 (M5; la firma no sustituye un reprocesado: un polyglot imagen+script con cabecera válida pasa); datos **no cumple** (D3) |
+| Se valida la **extensión y el tipo**: para datos (`/upload`), la extensión `.xlsx`, sin comprobar el MIME porque lo manda el cliente; para la galería (`/upload-image`), extensión `jpg`/`jpeg`/`png`/`gif`/`webp`, MIME canónico exacto y firma (magic bytes) del contenido | El backend solo procesa `.xlsx`; el `ContentType` de las imágenes lo fija el backend desde el tipo validado (M5, 29/10/2026). Un fichero con nombre `.xlsx` se carga entero en memoria y `exceljs` lo descomprime sin límite (M9); la ruta exige un token de acceso de Cognito y es solo del administrador | **Cumple en parte**: imágenes cumple desde el 29/10/2026 (M5; la firma no sustituye un reprocesado: un polyglot imagen+script con cabecera válida pasa); datos **no cumple** (D3) |
 | Un `.xlsx` es un zip: se trata como **no confiable** (zip bomb, libros con millones de filas) | `exceljs` lo carga entero en memoria y no hay límite de descompresión **(por confirmar)** | Sin límites (M9). Mitigado porque solo el administrador sube ficheros |
 | El procesamiento pesado sale de la petición si el volumen crece | Una conversión larga bloquea el event loop | M9 |
 | Se comprueba que la subida llegó a S3 antes de dar el éxito | Un fallo parcial deja datos a medias | Cumple: se espera a cada `putObject` |
@@ -89,7 +95,7 @@ Rutas de **lectura** públicas (los datos del portal son públicos): `GET /list-
 | CORS con orígenes **exactos** por entorno (`ALLOWED_ORIGIN`: un origen o una lista separada por comas, sin comodín) | Solo el frontend debe poder llamar desde un navegador | `quality` prohíbe `origin: '*'` y `cors()` sin opciones | Cumple |
 | Límite del cuerpo JSON explícito | `express.json()` usa el valor por defecto de `body-parser` (100 kb) **(verificado en 1.20.3)**: suficiente hoy, pero implícito | Revisión | Cumple por defecto |
 | Cabeceras de seguridad (`helmet`) | Limitan el daño si algo falla (por ejemplo, `nosniff` en las respuestas) | Revisión | **No cumple** (B1) |
-| **Límite de peticiones** en los endpoints públicos que cuestan (`/send-email`; valorar `/get-merged-data`) | Sin límite, cualquiera puede agotar la cuota de Gmail o la CPU | Revisión | Cumple en el login y en `/send-email` (5 por 15 minutos por IP, M3 resuelto el 28/10/2026; almacén en memoria, IP real tras el proxy **(por confirmar con infra)**). `/get-merged-data` sin límite |
+| **Límite de peticiones** en los endpoints públicos que cuestan (`/send-email`; valorar `/get-merged-data`) | Sin límite, cualquiera puede agotar la cuota de Gmail o la CPU | Revisión | Cumple en `/send-email` (5 por 15 minutos por IP, M3 resuelto el 28/10/2026; almacén en memoria, IP real tras el proxy **(por confirmar con infra)**). `/get-merged-data` sin límite |
 | `/send-email` valida **todos** los campos: que existan, que sean cadenas, el formato básico de `email`, longitudes máximas y ausencia de caracteres de control | `subject`, `username` y `email` entran en el asunto y en `replyTo`; sin validar pueden colarse saltos de línea o direcciones distintas. `nodemailer` normaliza muchas de estas cosas, pero **no confíes en ello** (por confirmar) | Revisión | Cumple desde el 28/10/2026 (`validateContactMessage`; M3) |
 | `nodemailer` actualizado | El aviso alto de `nodemailer` incluye **inyección de comandos SMTP** y envío a un dominio no previsto, y el destinatario de respuesta (`replyTo`) sale del usuario | `npm run quality` | **No cumple** (M16) |
 | Sin ejecución de código ni de procesos a partir de la entrada | Es la vulnerabilidad más grave posible | `quality` y ESLint prohíben `eval`, `new Function` y `child_process` en el código de la API (los scripts de `scripts/` son herramientas de desarrollo y quedan fuera: `quality-check` lanza la suite con `runWithTimeout` de `scripts/lib/repo.mjs`, que al agotarse el tiempo máximo mata el árbol de procesos y no deja huérfanos, M24 b; `docs-check` falla si `index.js` declara rutas, M24 a) | Cumple **(verificado)** |
@@ -124,14 +130,7 @@ Rutas de **lectura** públicas (los datos del portal son públicos): `GET /list-
   - Se corrige con `npm audit fix`, **nunca con `--force`** (subiría `nodemailer` a otra versión mayor sin avisar).
   - **Solo se acepta** lo que no es alcanzable en producción o no tiene arreglo, con la justificación escrita. Que exista un arreglo con cambios mayores **no** es motivo para aceptar un aviso alcanzable.
   - Antes de añadir una librería: mantenimiento, licencia, tamaño y que funcione con Node 22 (`engines` de `package.json`).
-- **Excepciones vigentes** (en `ACCEPTED_ADVISORIES`):
-
-| Dependencia | Gravedad | Por qué se acepta |
-|---|---|---|
-| `tar` | Crítica | Solo la usa `@mapbox/node-pre-gyp`, que `bcrypt` ejecuta al **instalar** para descargar su binario. No se carga en ejecución |
-| `@mapbox/node-pre-gyp` | Alta | Herramienta de instalación de `bcrypt`. No se carga en ejecución |
-| `brace-expansion` | Alta | Llega por `minimatch`, en la instalación de `bcrypt` y en `archiver` (que usa `exceljs` al escribir `.xlsx`). Los patrones son internos y no hay entrada del usuario (por confirmar en `exceljs`) |
-
+- **Excepciones vigentes** (en `ACCEPTED_ADVISORIES`): ninguna. Las tres que había (`tar`, `@mapbox/node-pre-gyp`, `brace-expansion`) venían de la instalación de `bcrypt`, retirada el 09/11/2026.
 - **Avisos de producción:** sin excepciones aceptadas (`ACCEPTED_ADVISORIES` vacío). M16 y M20 están resueltos; solo queda el moderado de `uuid` vía `exceljs` (M20), cuyo único arreglo exige `--force`. `npm audit fix` resuelve lo que no exige un cambio mayor.
 
 ### S10. Privacidad
@@ -146,7 +145,7 @@ Solo nombres de categoría; el detalle de cada riesgo está en la fuente.
 | Categoría | Reglas y hallazgos relacionados |
 |---|---|
 | API1 Broken Object Level Authorization | S4 (`/get-data` solo lee versiones y activos válidos, pero sin token: M2), S3 |
-| API2 Broken Authentication | S2 (A7, M12, M15, B8, M16) |
+| API2 Broken Authentication | S2 (B8, C16, M12, M15) |
 | API3 Broken Object Property Level Authorization | S6 y la respuesta de `POST /upload` (D8) |
 | API4 Unrestricted Resource Consumption | S5 (M6, M9), S6 (M3, M12) |
 | API5 Broken Function Level Authorization | S3 (rutas mutantes protegidas) |
@@ -163,11 +162,11 @@ Solo nombres de categoría; el detalle de cada riesgo está en la fuente.
 | `eval`, `new Function`, `child_process` en el código | **Ninguno** |
 | Secretos, JWT o hashes bcrypt literales en código, `.env.example`, documentación y `.claude/` | **Ninguno** |
 | `.env` versionado / `package-lock.json` versionado | **No** / **Sí** |
-| Rutas que modifican estado sin autenticación | Solo `POST /log` y `POST /send-email` (excepciones registradas) |
+| Rutas que modifican estado sin autenticación | Solo `POST /send-email` (excepción registrada; `POST /log` se retiró el 09/11/2026) |
 | Variables de entorno que usa el código y no están declaradas | **Ninguna** |
 | `npm audit` de producción (alta o crítica) | **Pasa**: sin avisos altos o críticos y sin excepciones aceptadas. Solo queda el moderado de `uuid` vía `exceljs` (M20) |
 | ESLint | Sin errores; avisos en el tope (ver [buenas prácticas](buenas-practicas-backend.md#14-eslint-y-el-tope-de-avisos)) |
-| Login con el usuario correcto y sin contraseña | La petición **no recibe respuesta** (A7) |
+| Autenticación | Solo tokens de acceso de Cognito, RS256 fijo (S2); el login propio ya no existe (A7 sin objeto); C16 aceptado con registro cerrado |
 | `trust proxy`, `helmet`, límite de `multer`, límite en `/send-email` | `trust proxy` (configurable con `TRUST_PROXY_HOPS`, valor real por confirmar con infra) y el límite de `/send-email` configurados; `helmet` no (B1); el límite de `multer` configurado desde el 28/10/2026 (M6) |
 | Validación de la entrada de las rutas | Parcial: ver la tabla de [buenas prácticas](buenas-practicas-backend.md#4-validación-de-entrada) |
 | `errorHandler` y mensajes al cliente | Sin trazas en producción; mensajes fijos o mapeados, sin `err.message` (M17, resuelto el 28/10/2026); CORS rechazado como `403` sin el origen (M22) |
@@ -192,7 +191,7 @@ Márcala **siempre** que el cambio toque autenticación, rutas, subida de archiv
 ## 6. Si encuentras una vulnerabilidad
 
 1. No la publiques en un issue ni en una PR abierta: díselo directamente a quien mantiene el proyecto.
-2. Si hay un secreto expuesto (clave, token, contraseña, `JWT_SECRET`), **se rota primero** y después se limpia el historial. Rotar `JWT_SECRET` invalida todos los tokens.
+2. Si hay un secreto expuesto (clave, token, contraseña), **se rota primero** y después se limpia el historial. El backend ya no tiene secreto de firma de sesiones: las claves de los tokens son de Cognito.
 3. Se corrige con un test que la reproduzca.
 4. Se anota en [07](../07-estado-y-deuda-tecnica.md) una vez resuelta, sin detalles que faciliten reproducirla.
 

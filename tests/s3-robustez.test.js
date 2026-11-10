@@ -1,6 +1,7 @@
 // Robustez de S3 (A5/D5, A6, A8, M7, M10) sobre el aws/awsS3connect.js REAL con S3Client.prototype.send parcheado (sin red).
 // Este archivo no carga helpers/simulados: construye la app por su cuenta y no inyecta los espías de S3.
-const { TEST_SECRET } = require('./helpers/entorno');
+require('./helpers/entorno');
+const { validToken } = require('./helpers/cognito');
 // Credenciales ficticias (no empiezan por AKIA) para que la firma de URLs no consulte ningún proveedor.
 process.env.AWS_ACCESS_KEY_ID = 'ficticia-id-de-prueba';
 process.env.AWS_SECRET_ACCESS_KEY = 'ficticia-clave-de-prueba';
@@ -9,7 +10,6 @@ const path = require('node:path');
 const { test, describe, before, after, beforeEach, mock } = require('node:test');
 const assert = require('node:assert/strict');
 const { Readable } = require('node:stream');
-const jwt = require('jsonwebtoken');
 const request = require('supertest');
 const { fullRow, makeXlsx } = require('./helpers/excel');
 const {
@@ -35,7 +35,7 @@ const awsError = (name, Code, status = 400) => Object.assign(new Error(`${name} 
 const errorRed = (code) => Object.assign(new Error(`${code} interno de prueba`), { name: 'Error', code });
 const cuerpo = (texto) => ({ Body: Readable.from([Buffer.from(texto)]) });
 const puts = () => estado.llamadas.filter((c) => c instanceof PutObjectCommand);
-const token = jwt.sign({ userId: 1 }, TEST_SECRET, { expiresIn: '1h' });
+const token = validToken;
 
 before(() => {
     enviar = mock.method(S3Client.prototype, 'send', async function send(command) {

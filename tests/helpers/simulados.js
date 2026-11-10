@@ -1,9 +1,9 @@
 // Simulacros compartidos: S3 y SMTP sustituidos por espías inyectados en require.cache ANTES de cargar app.js.
 // `node --test` ejecuta cada archivo de test en un proceso propio, así que la caché no se comparte entre archivos.
-const { TEST_SECRET } = require('./entorno');
+require('./entorno');
 const path = require('node:path');
-const jwt = require('jsonwebtoken');
 const request = require('supertest');
+const { validToken, expiredToken, invalidToken } = require('./cognito');
 
 const ROOT = path.join(__dirname, '..', '..');
 
@@ -61,10 +61,7 @@ injectInCache(require.resolve('nodemailer'), {
 const morganReal = require('morgan');
 injectInCache(require.resolve('morgan'), (format, options) => morganReal(format, { ...options, stream: { write: () => {} } }));
 
-// Tokens: válido, firmado con otra clave (inválido) y caducado.
-const validToken = jwt.sign({ userId: 1 }, TEST_SECRET, { expiresIn: '1h' });
-const expiredToken = jwt.sign({ userId: 1 }, TEST_SECRET, { expiresIn: -10 });
-const invalidToken = jwt.sign({ userId: 1 }, 'otra-clave-distinta-de-prueba', { expiresIn: '1h' });
+// Tokens de acceso de Cognito (helpers/cognito.js): válido, firmado con otro par (inválido) y caducado.
 const TOKEN_STATES = [
     ['sin token', undefined, 'No token provided'],
     ['token inválido', invalidToken, 'Invalid token'],
