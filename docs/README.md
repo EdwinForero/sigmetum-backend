@@ -45,7 +45,7 @@ sigmetum-backend/
 │   ├── trustProxy.js            # Saltos de proxy de confianza (TRUST_PROXY_HOPS) y entornos permisivos
 │   └── s3Paths.js               # Constantes de rutas (prefijos) dentro del bucket
 ├── routes/
-│   ├── auth.js                  # Login (bcrypt + JWT) y verificación de token
+│   ├── auth.js                  # GET /auth: comprobación de sesión (sin login propio)
 │   ├── data.js                  # Datos de series de vegetación (Excel/JSON, versiones)
 │   └── content.js               # Galería, términos, email de contacto
 ├── functions/
@@ -63,7 +63,7 @@ sigmetum-backend/
 │   └── awsS3connect.js          # Todas las operaciones contra S3
 ├── middleware/
 │   ├── errorHandler.js          # Manejador de errores centralizado
-│   ├── tokenAuthentication.js   # Middleware de verificación JWT (tokenAuth)
+│   ├── tokenAuthentication.js   # Verificador de tokens de acceso de Cognito (tokenAuth)
 │   └── notFound.js              # 404 con envoltorio para rutas y métodos no definidos
 ├── scripts/
 │   ├── docs-check.mjs           # Comprueba que docs/ coincide con el código (npm run docs:check)

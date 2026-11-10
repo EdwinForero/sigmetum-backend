@@ -1,7 +1,7 @@
-// Criterio 1 del antiguo script de verificación de rutas (retirado): las ocho rutas públicas responden sin token (nunca 401).
+// Criterio 1 del antiguo script de verificación de rutas (retirado): las siete rutas públicas responden sin token (nunca 401).
 const { test, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
-const { appNueva, llamar, isEnvelopeError, nextIp, reiniciar } = require('./helpers/simulados');
+const { appNueva, llamar, nextIp, reiniciar } = require('./helpers/simulados');
 
 const app = appNueva();
 beforeEach(reiniciar);
@@ -9,11 +9,11 @@ beforeEach(reiniciar);
 const publicas = [
     ['POST', '/send-email', 400, {}], ['GET', '/get-image?imageKey=foto.jpg', 200], ['GET', '/list-images', 200],
     ['GET', '/list-terms', 200], ['GET', '/list-files', 200], ['GET', '/get-data/data/active/Malaga.json', 200],
-    ['GET', '/get-merged-data', 200], ['POST', '/log', 400, {}],
+    ['GET', '/get-merged-data', 200],
 ];
 
-test('la lista de rutas públicas tiene las ocho rutas', () => {
-    assert.equal(publicas.length, 8);
+test('la lista de rutas públicas tiene las siete rutas', () => {
+    assert.equal(publicas.length, 7);
 });
 
 for (const [method, path, esperado, body] of publicas) {
@@ -23,9 +23,3 @@ for (const [method, path, esperado, body] of publicas) {
         assert.equal(r.status, esperado, `${r.status} ${r.json?.error ?? ''}`.trim());
     });
 }
-
-test('POST /log llega a su manejador con envoltorio', async () => {
-    const log = await llamar(app, 'POST', '/api/v1/log', { body: {} });
-    assert.equal(log.status, 400);
-    assert.ok(isEnvelopeError(log));
-});

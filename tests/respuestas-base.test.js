@@ -57,6 +57,14 @@ for (const [method, path] of [['DELETE', '/list-terms'], ['POST', '/list-images'
 }
 
 // c. Mensaje fijo: no refleja ruta, método ni consulta.
+// POST /log (el login propio) se retiró con el verificador único de Cognito: ya no existe, con o sin token.
+test('POST /log retirado da 404 con envoltorio', async () => {
+    for (const [estado, token] of ESTADOS) {
+        const r = await llamar(app, 'POST', `${PREFIX}/log`, { token, body: { username: 'admin', password: 'x' } });
+        assert.ok(es404(r), `${estado}: ${resumen(r)}`);
+    }
+});
+
 test('c. el error es idéntico en dos rutas distintas', async () => {
     const c1 = await llamar(app, 'GET', `${PREFIX}/no-existe/%3Cscript%3Ealert(1)%3C%2Fscript%3E?x=1`);
     const c2 = await llamar(app, 'POST', `${PREFIX}/otra-ruta-distinta`, { body: {} });

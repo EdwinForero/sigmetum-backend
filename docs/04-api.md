@@ -2,10 +2,10 @@
 
 Todas las rutas van bajo `API_PREFIX` (por defecto `/api/v1`), salvo `/healthcheck`.
 
-- 🔓 = pública · 🔒 = requiere `Authorization: Bearer <token>`
+- 🔓 = pública · 🔒 = requiere `Authorization: Bearer <token de acceso de Cognito>`
 - Respuesta de éxito: `{ "success": true, "data": ... }`
 - Respuesta de error: `{ "success": false, "error": "mensaje" }`
-- Las rutas 🔓 se alcanzan **sin** cabecera `Authorization` y la ignoran: con un token inválido o caducado responden igual que sin token. Las rutas 🔒 llevan `tokenAuth` como primer manejador de la propia ruta y responden `401` sin token (`No token provided`), con token inválido (`Invalid token`) o caducado (`Token expired`) (M21, entrega 2, 28/10/2026; ver [07](07-estado-y-deuda-tecnica.md)).
+- Las rutas 🔓 se alcanzan **sin** cabecera `Authorization` y la ignoran: con un token inválido o caducado responden igual que sin token. Las rutas 🔒 llevan `tokenAuth` como primer manejador de la propia ruta y responden `401` sin token (`No token provided`), con token inválido (`Invalid token`) o caducado (`Token expired`) y `503` (`Authentication service unavailable`) si no se pueden obtener las claves públicas del JWKS (ver [Autenticación](#autenticación-routesauthjs); M21, entrega 2, 28/10/2026; ver [07](07-estado-y-deuda-tecnica.md)).
 - **Rutas inexistentes y métodos no definidos** (M21, entrega 3, 28/10/2026): una ruta que ningún router resuelve (`GET /api/v1/no-existe`, también fuera del prefijo: `GET /`, `GET /otra`) o un método no definido en una ruta existente (`DELETE /list-terms`, `HEAD` incluido) responde `404` con `{ "success": false, "error": "Not found" }`, texto fijo que no refleja la ruta, el método ni la consulta, con o sin token (los ignora). No hay `405` ni cabecera `Allow`. `/healthcheck` queda a salvo (`200 ok`, texto). Un `Origin` no permitido sigue dando el error de CORS por `errorHandler`, no el 404.
 - **Recurso ausente en S3** (B9, 29/10/2026): cualquier `NoSuchKey` de S3 que llegue a `errorHandler` responde `404` `{ "success": false, "error": "The requested file does not exist in storage" }`, texto fijo distinto de `Not found` (ruta inexistente): así el cliente distingue «recurso» de «ruta». Caso normal: `GET /get-data/:path`, `POST /update-file` y `POST /upload/confirm` al confirmar. Solo en carrera (el objeto desaparece entre el listado y la lectura): `GET /get-merged-data`, `POST /delete-file` y `POST /upload/confirm` al cancelar. No cambian: `DELETE /delete-image` y `POST /delete-file` de una clave inexistente (`200`, `DeleteObject` es idempotente), `GET /get-image` (`200`, solo firma la URL) y las rutas del glosario (`200`, A6).
 
@@ -14,7 +14,6 @@ Todas las rutas van bajo `API_PREFIX` (por defecto `/api/v1`), salvo `/healthche
 | Método | Ruta | Acceso | Router |
 |---|---|---|---|
 | GET | `/healthcheck` | 🔓 | `app.js` |
-| POST | `/log` | 🔓 (rate limit) | `auth.js` |
 | GET | `/auth` | 🔒 | `auth.js` |
 | GET | `/list-files` | 🔓 | `data.js` |
 | GET | `/get-data/:path` | 🔓 | `data.js` |
@@ -43,23 +42,32 @@ Responde `200 ok` en texto plano. Lo usa el health check del balanceador.
 
 ## Autenticación (`routes/auth.js`)
 
-### `POST /log`
-Login del administrador. Limitado a **10 intentos cada 15 minutos por IP**.
+El backend no emite tokens ni tiene login propio: **verifica solo tokens de acceso de Amazon Cognito** (el login es del frontend, por Hosted UI; ver [para-frontend](integracion/para-frontend.md)). `POST /log` se retiró y ahora responde `404` `Not found` como cualquier ruta inexistente (cambio **incompatible** con el frontend anterior).
 
-Body:
-```json
-{ "username": "admin", "password": "secreto" }
-```
-Respuestas:
-- `200` → `{ success: true, data: { token } }`
-- `400` → `Username and password are required and must be strings` (falta `username` o `password`, o no es una cadena; antes la petición se quedaba sin respuesta)
-- `401` → `Invalid credentials` (cadenas válidas, usuario o contraseña incorrectos; una cadena vacía también da 401)
-- `429` → `Too many login attempts. Please try again in 15 minutes.`
+`tokenAuth` (`middleware/tokenAuthentication.js`) acepta un token solo si:
 
-El token lleva `{ userId }`, se firma con HS256 (el algoritmo va fijado al firmar y `tokenAuth` solo acepta HS256; un token con otro algoritmo, como HS512, o con `alg: none` da `401` `Invalid token`) y caduca según `JWT_EXPIRATION`.
+- el emisor (`iss`) es el del pool configurado en `COGNITO_USER_POOL_ID`. La librería `aws-jwt-verify` acepta los dos formatos que emite Cognito para el mismo pool y la misma clave: `https://cognito-idp.<región>.amazonaws.com/<id>` y `https://issuer-cognito-idp.<región>.amazonaws.com/<id>` (aceptado y documentado; hay un test de caracterización). Otra región u otro pool dan `401`;
+- `token_use` es `access` (el token de identidad se rechaza);
+- `exp` es numérico finito y está vigente;
+- la firma es RS256 con las claves públicas del JWKS del pool (`https://cognito-idp.<región>.amazonaws.com/<id>/.well-known/jwks.json`). El algoritmo es RS256 fijo y nunca sale del cabecero: HS256, HS512 (incluida la confusión de algoritmo con la clave pública como secreto) y `alg: none` dan `401` `Invalid token` (B8).
+
+No se valida `aud`, `client_id` ni grupos: **cualquier usuario autenticado del pool es administrador** (riesgo aceptado C16, ver [seguridad](guias/seguridad.md#c16-cualquier-usuario-del-pool-es-administrador)). Si el token es válido, `req.user` lleva solo `sub`, `client_id` y `username` (nunca el token, `scope` ni grupos).
+
+| Código | Cuerpo `error` | Cuándo |
+|---|---|---|
+| `401` | `No token provided` | Sin cabecera `Authorization` o sin token tras `Bearer` |
+| `401` | `Invalid token` | Firma incorrecta, otro emisor, `token_use` distinto de `access`, algoritmo no permitido, `kid` desconocido, token mal formado o sin `exp` numérico |
+| `401` | `Token expired` | `exp` vencido (el frontend renueva con el refresco o redirige a login) |
+| `503` | `Authentication service unavailable` | No se pueden obtener las claves públicas (JWKS caído o inalcanzable y sin clave en caché), o la librería está en su espera de penalización. Texto fijo: nunca el mensaje de la librería ni el token. **Reintentable**: no es una sesión caducada |
+
+Cualquier otro error inesperado va por `next(error)` y responde `500` genérico. Los `401` no se registran; cada `503` deja una sola línea en consola con el nombre de la clase del error (sin la URI del JWKS, sin token y sin cabeceras).
+
+**Límite de peticiones al JWKS (criterio 5)**: la librería guarda las claves en una caché en memoria de la instancia y penaliza las recargas con una espera de **10 s por URI** (no por `kid`). La librería solo penaliza cuando el JWKS carga y el `kid` no está; un fallo de red no penaliza, así que el verificador se crea con un *fetcher* propio que envuelve al de la librería y registra ese fallo en la misma penalización: con el JWKS caído y sin caché, las peticiones siguientes dentro de la espera dan `503` sin salir a la red (comprobado en `tests/cognito-jwks.test.js`: 20 peticiones seguidas hacen como máximo una petición al JWKS). Consecuencia aceptada: un atacante sin autenticar que envíe un token con un `kid` falso provoca hasta 10 s de `503` para cualquier `kid` **nuevo** (por ejemplo, tras una rotación de claves de Cognito, infrecuente); los `kid` ya cacheados no se ven afectados. El frontend debe reintentar el `503`.
+
+Límites: un `JwksValidationError` (JWKS cargado pero inválido) se responde `503` pero no penaliza, así que cada petición volvería a la red; Node 22 **(por confirmar)**: solo se probó con Node 24.16.
 
 ### `GET /auth` 🔒
-Comprueba que el token es válido. `200` → `data: "Authorized"`; `401` → `No token provided` / `Token expired` / `Invalid token`.
+Comprueba que el token es válido. `200` → `data: "Authorized"`; `401` → `No token provided` / `Token expired` / `Invalid token`; `503` → `Authentication service unavailable`.
 
 ---
 
@@ -183,8 +191,8 @@ Body: `{ "term": "texto" }`. Elimina todas las entradas con ese texto exacto. `4
 
 | Origen | Mensaje devuelto |
 |---|---|
-| `TokenExpiredError` | `Token expired` |
-| `JsonWebTokenError` | `Invalid token` |
+| `TokenExpiredError` | `Token expired` (mapeo heredado: `tokenAuth` ya no lanza este error, responde él mismo) |
+| `JsonWebTokenError` | `Invalid token` (mapeo heredado, igual) |
 | `MulterError` con código `LIMIT_FILE_SIZE` | `File exceeds the maximum allowed size` |
 | Otros `MulterError` | `File upload error: ...` |
 | S3 `NoSuchKey` (`name` o `Code`; responde `404`, B9) | `The requested file does not exist in storage` |

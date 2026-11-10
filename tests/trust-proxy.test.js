@@ -84,7 +84,6 @@ describe('M12: resolveTrustProxyHops', () => {
 // Parte 2: app.js real. IPs de documentación (TEST-NET), nunca de infra.
 const XFF = '203.0.113.7, 198.51.100.2, 192.0.2.9';
 const CLIENTE = '203.0.113.7';
-const LOGIN = { username: 'nadie', password: 'x' };
 const MAIL = { username: 'Ana', email: 'ana@example.com', subject: 'Consulta', message: 'Hola, tengo una pregunta.' };
 
 const appCon = (hops, nodeEnv = 'test') => {
@@ -157,21 +156,14 @@ describe('M12: req.ip según los saltos (X-Forwarded-For de varios elementos)', 
 });
 
 describe('M12: contador de los limitadores con la app real', () => {
-    test('hops 1: falsas antepuestas distintas comparten cupo en login (10 veces 401, la 11.ª 429)', async () => {
-        const app = appCon('1');
-        const statuses = [];
-        for (let i = 1; i <= 11; i += 1) {
-            statuses.push((await post(app, '/api/v1/log', LOGIN, `198.51.100.${i}, 192.0.2.9`)).status);
-        }
-        assert.deepEqual(statuses, [...Array(10).fill(401), 429]);
-    });
-    test('hops 0: X-Forwarded-For distinto comparte cupo en login (la 11.ª da 429)', async () => {
+    test('hops 0: X-Forwarded-For distinto comparte cupo en send-email (la 6.ª da 429)', async () => {
         const app = appCon('0');
         const statuses = [];
-        for (let i = 1; i <= 11; i += 1) {
-            statuses.push((await post(app, '/api/v1/log', LOGIN, `198.51.100.${i}`)).status);
+        for (let i = 1; i <= 6; i += 1) {
+            statuses.push((await post(app, '/api/v1/send-email', MAIL, `198.51.100.${i}`)).status);
         }
-        assert.deepEqual(statuses, [...Array(10).fill(401), 429]);
+        assert.equal(statuses[5], 429);
+        assert.ok(statuses.slice(0, 5).every((s) => s !== 429), statuses.join(','));
     });
     test('hops 1: falsas antepuestas distintas comparten cupo en send-email (la 6.ª da 429)', async () => {
         const app = appCon('1');

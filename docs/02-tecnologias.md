@@ -11,9 +11,8 @@ Runtime: **Node.js** (CommonJS, `require`). Arranque con `npm start` → `node i
 | `compression` | 1.8.2 | Compresión gzip de respuestas (los JSON de datos son grandes) |
 | `morgan` | 1.12.1 | Log de peticiones en formato `combined` |
 | `dotenv` | 16.4.5 | Carga `.env` en `process.env` |
-| `express-rate-limit` | 8.5.2 | Limita intentos de login (10 cada 15 min por IP) |
-| `jsonwebtoken` | 9.0.2 | Emisión y verificación de JWT |
-| `bcrypt` | 6.0.0 | Comparación de la contraseña del admin contra un hash |
+| `express-rate-limit` | 8.5.2 | Limita los envíos del formulario de contacto (`POST /send-email`, 5 cada 15 min por IP) |
+| `aws-jwt-verify` | 5.2.1 | Verificador único de los tokens de acceso de Cognito (`CognitoJwtVerifier`: `iss`, `token_use`, `exp` y firma RS256 con el JWKS del pool, con caché y penalización de recargas). Versión exacta, sin `^` (es el verificador de seguridad). Mantenida por empleados de AWS, Apache-2.0, sin dependencias propias, Node >= 18; Node 22 **(por confirmar)**: solo se probó con Node 24.16. Se descartó `jose` por exigir más código propio para `iss`, `token_use` y la gestión de recargas. Sustituye a `jsonwebtoken` y `bcrypt`, retiradas porque el backend ya no emite tokens ni guarda contraseñas |
 | `multer` | 1.4.5-lts.1 | Recepción de ficheros `multipart/form-data` en memoria |
 | `exceljs` | 4.4.0 | Lectura de los Excel de series de vegetación |
 | `nodemailer` | 10.2.1 | Envío del formulario de contacto vía SMTP de Gmail |

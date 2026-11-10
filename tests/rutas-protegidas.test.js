@@ -78,7 +78,7 @@ const mutantes = routes.filter((r) => r.method !== 'GET');
 test('hay rutas mutantes en la pila', () => assert.ok(mutantes.length > 0, 'la pila no tiene rutas mutantes'));
 
 for (const route of mutantes) {
-    if (['POST /log', 'POST /send-email'].includes(`${route.method} ${route.path}`)) continue;
+    if (['POST /send-email'].includes(`${route.method} ${route.path}`)) continue;
     const path = route.path.replace(/:\w+(\(\*\))?/g, 'x');
     for (const [estado, token] of TOKEN_STATES) {
         test(`${estado} ${route.method} ${route.path}`, async () => {

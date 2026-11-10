@@ -35,7 +35,7 @@ Monolito Express pequeño, sin base de datos. S3 actúa como única capa de pers
 | Rutas (controladores) | `routes/` | Validan entrada, orquestan llamadas, dan forma a la respuesta |
 | Lógica auxiliar | `functions/` | Parseo de Excel, nombres y versiones de fichero |
 | Acceso a datos | `aws/awsS3connect.js` | Único punto de contacto con S3 |
-| Errores y autenticación | `middleware/errorHandler.js`, `middleware/notFound.js`, `middleware/tokenAuthentication.js` | `errorHandler` traduce excepciones a respuestas JSON uniformes; `notFound` responde el 404 con el mismo envoltorio; `tokenAuth` verifica el JWT de las rutas protegidas |
+| Errores y autenticación | `middleware/errorHandler.js`, `middleware/notFound.js`, `middleware/tokenAuthentication.js` | `errorHandler` traduce excepciones a respuestas JSON uniformes; `notFound` responde el 404 con el mismo envoltorio; `tokenAuth` verifica el token de acceso de Cognito (RS256, claves públicas del JWKS del pool) de las rutas protegidas |
 
 Las rutas no hablan con S3 directamente: siempre pasan por `awsS3connect.js`. Las rutas de S3 (prefijos) no se escriben a mano: salen de `config/s3Paths.js`.
 
@@ -46,7 +46,7 @@ Las rutas no hablan con S3 directamente: siempre pasan por `awsS3connect.js`. La
 3. `express.json()` parsea el body; `compression()` comprime la respuesta.
 4. El router correspondiente (bajo `API_PREFIX`, por defecto `/api/v1`) procesa la ruta.
    - Rutas públicas: se atienden directamente.
-   - Rutas protegidas: pasan antes por `tokenAuth` (cabecera `Authorization: Bearer <jwt>`).
+   - Rutas protegidas: pasan antes por `tokenAuth` (cabecera `Authorization: Bearer <token de acceso de Cognito>`).
 5. Si ningún router resuelve la petición (ruta inexistente o método no definido), `notFound` responde `404` `{ success: false, error: "Not found" }`.
 6. Si algo falla, el handler llama a `next(error)` y `errorHandler` responde `{ success: false, error }` con el status adecuado; el mensaje es fijo o de una lista de mapeados, y el real solo va a la consola.
 
@@ -79,4 +79,4 @@ Definido en el repo **sigmetum-infra** (Terraform, región `eu-west-3`):
 
 En Beanstalk el SDK de AWS obtiene credenciales del IAM role de la instancia (sin claves en el entorno). En local se usa un perfil SSO (ver [03-configuracion.md](03-configuracion.md)).
 
-Como en prod hay hasta 3 instancias detrás del ALB, el backend debe seguir siendo **sin estado**: nada de caché o colas en memoria del proceso. Hoy lo cumple (todo el estado está en S3 y el JWT es autocontenido).
+Como en prod hay hasta 3 instancias detrás del ALB, el backend debe seguir siendo **sin estado**: nada de caché o colas en memoria del proceso. Hoy lo cumple: todo el estado está en S3 y el token de acceso es un JWT autocontenido emitido por Cognito (el backend ya no emite tokens ni guarda sesiones). La única caché en memoria es la de claves públicas del JWKS que usa `tokenAuth`; es reconstruible por instancia, no guarda datos de usuarios y, si el JWKS no responde y no hay clave en caché, las rutas protegidas dan `503` mientras `/healthcheck` y las rutas públicas siguen funcionando. Detalle en [04-api.md](04-api.md#autenticación-routesauthjs).

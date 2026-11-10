@@ -10,9 +10,8 @@ process.env.AWS_SECRET_ACCESS_KEY = 'ficticia-clave-de-prueba';
 
 const { describe, test, before, after, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
-const jwt = require('jsonwebtoken');
 const request = require('supertest');
-const { TEST_SECRET } = require('./helpers/entorno');
+const { validToken } = require('./helpers/cognito');
 const { fullRow, makeXlsx, subir } = require('./helpers/excel');
 const { crearS3Simulado } = require('./helpers/s3-con-estado');
 const { convertExcelToJson } = require('../functions/convertExcelToJson');
@@ -27,7 +26,7 @@ const ACTIVA = 'data/active/Sevilla.json';
 const UUID_RE = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 const CLAVE_BORRADOR = new RegExp(`^${BORRADORES}/${UUID_RE}\\.xlsx$`);
 const CENTINELA = '[{"Municipio":"centinela"}]';
-const token = jwt.sign({ userId: 1 }, TEST_SECRET, { expiresIn: '1h' });
+const token = validToken;
 const auth = (req, t = token) => req.set('Authorization', `Bearer ${t}`);
 const post = (ruta, cuerpo) => auth(request(app).post(`/api/v1/${ruta}`)).send(cuerpo);
 
@@ -43,10 +42,9 @@ const operaciones = () => s3.llamadas.map((c) => `${c.op} ${c.key}`);
 const sobreActiva = (op) => s3.llamadas.filter((c) => c.op === op && c.key === ACTIVA);
 const lecturas = () => s3.llamadas.filter((c) => c.op === 'Get').map((c) => c.key);
 
-// Instante simulado para POST /upload; el token lleva ese instante como iat (como tests/fecha-utc.test.js).
+// Instante simulado para POST /upload (el token de Cognito vence a las 24 h del reloj real, posterior a este instante).
 const DIA = '2026-10-05';
 const instante = new Date(`${DIA}T12:00:00Z`);
-const tokenDelInstante = jwt.sign({ userId: 1, iat: Math.floor(instante.getTime() / 1000) }, TEST_SECRET, { expiresIn: '1h' });
 const congelar = (t) => t.mock.timers.enable({ apis: ['Date'], now: instante });
 
 before(() => {
@@ -207,7 +205,7 @@ describe('A9: cancelar un borrador no toca las versiones ni el activo', () => {
         assert.equal(elegida.status, 200);
         assert.deepEqual(municipiosDelActivo(), ['antigua']);
 
-        const subida = await subir(app, [fila('borrador', true)], tokenDelInstante);
+        const subida = await subir(app, [fila('borrador', true)], token);
         assert.equal(subida.status, 400);
         assert.match(subida.json.data.draftKey, CLAVE_BORRADOR);
         assert.deepEqual(municipiosDelActivo(), ['antigua'], 'subir un borrador no toca el activo');
@@ -222,10 +220,10 @@ describe('A9: cancelar un borrador no toca las versiones ni el activo', () => {
         congelar(t);
         s3.sembrar(ACTIVA, CENTINELA);
 
-        const primera = await subir(app, [fila('borrador-1', true)], tokenDelInstante);
+        const primera = await subir(app, [fila('borrador-1', true)], token);
         assert.equal(primera.status, 400);
         assert.match(primera.json.data.draftKey, CLAVE_BORRADOR);
-        const segunda = await subir(app, [fila('borrador-2', true)], tokenDelInstante);
+        const segunda = await subir(app, [fila('borrador-2', true)], token);
         assert.equal(segunda.status, 400);
         assert.match(segunda.json.data.draftKey, CLAVE_BORRADOR);
         assert.notEqual(segunda.json.data.draftKey, primera.json.data.draftKey);
@@ -247,7 +245,7 @@ describe('POST /upload', () => {
         await sembrarVersion(`${DIA}_v10.xlsx`, 'v10');
         await sembrarVersion('2026-10-04_v50.xlsx', 'ayer');
         await sembrarVersion('2026-10-06_v77.xlsx', 'mañana');
-        const r = await subir(app, [fila('nueva')], tokenDelInstante);
+        const r = await subir(app, [fila('nueva')], token);
         assert.equal(r.status, 200, JSON.stringify(r.json));
         assert.equal(r.json.data.key, `${BASE}/${DIA}_v11.xlsx`);
         assert.ok(s3.existe(`${BASE}/${DIA}_v11.xlsx`));
@@ -255,13 +253,13 @@ describe('POST /upload', () => {
     test('solo versiones de otros días: la primera del día es _v1', async (t) => {
         congelar(t);
         await sembrarVersion('2026-10-04_v50.xlsx', 'ayer');
-        const r = await subir(app, [fila('nueva')], tokenDelInstante);
+        const r = await subir(app, [fila('nueva')], token);
         assert.equal(r.status, 200, JSON.stringify(r.json));
         assert.equal(r.json.data.key, `${BASE}/${DIA}_v1.xlsx`);
     });
     test('sin celdas vacías: dos Put (el xlsx y el activo) sin ContentType, tras un List y con un List final de borradores', async (t) => {
         congelar(t);
-        const r = await subir(app, [fila('completa')], tokenDelInstante);
+        const r = await subir(app, [fila('completa')], token);
         assert.equal(r.status, 200, JSON.stringify(r.json));
         assert.deepEqual(r.json, { success: true, data: { message: 'Files uploaded successfully', key: `${BASE}/${DIA}_v1.xlsx` } });
         assert.deepEqual(operaciones(), [`List ${BASE}/`, `Put ${BASE}/${DIA}_v1.xlsx`, `Put ${ACTIVA}`, `List ${BORRADORES}/`]);
@@ -275,7 +273,7 @@ describe('POST /upload', () => {
         congelar(t);
         s3.sembrar(ACTIVA, CENTINELA);
         s3.llamadas.length = 0;
-        const r = await subir(app, [fila('incompleta', true)], tokenDelInstante);
+        const r = await subir(app, [fila('incompleta', true)], token);
         assert.equal(r.status, 400);
         assert.equal(r.json.error, 'Some rows have empty fields.');
         const { draftKey } = r.json.data;
