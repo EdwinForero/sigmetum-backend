@@ -220,8 +220,9 @@ describe('destinatarios de /send-email: la lista con EMAIL de respaldo', () => {
         assert.equal(calls.sendMail, 1);
         assert.deepEqual(argsLog.mail[0].to, [process.env.EMAIL]);
         assert.equal(argsLog.mail[0].subject, `${LIST_UNAVAILABLE_SUBJECT_PREFIX}Consulta - enviado por Ana<ana@example.com>`);
-        assert.equal(registros.length, 1);
-        assert.equal(registros[0][0], '[send-email] recipient list unavailable, using EMAIL:');
+        // Node 22 emite un ExperimentalWarning de MockTimers por console.error: se cuentan solo los registros de /send-email.
+        const propios = registros.filter(([texto]) => String(texto).startsWith('[send-email]'));
+        assert.deepEqual(propios, [['[send-email] recipient list unavailable, using EMAIL:', 'TimeoutError']]);
     });
     test('si la lectura responde a tiempo, el límite no altera el envío', async (t) => {
         t.mock.timers.enable({ apis: ['setTimeout'] });
