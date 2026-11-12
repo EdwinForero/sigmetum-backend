@@ -13,6 +13,9 @@ const HEADER_FORBIDDEN = /[\p{Cc}\u2028\u2029]/u;
 // Mensaje: admite \n, \r y \t; rechaza el resto de controles.
 const MESSAGE_FORBIDDEN = /(?![\n\r\t])\p{Cc}/u;
 
+// Regla del correo (la usan /send-email y la lista de destinatarios): recibe el valor ya recortado.
+const isValidEmailAddress = (trimmed) => trimmed.length <= EMAIL_MAX && !HEADER_FORBIDDEN.test(trimmed) && EMAIL_PATTERN.test(trimmed);
+
 const validateContactMessage = (body) => {
     const { username, email, subject, message } = body || {};
     const fields = [username, email, subject, message];
@@ -52,4 +55,4 @@ const validateContactMessage = (body) => {
     return { value };
 };
 
-module.exports = { validateContactMessage };
+module.exports = { validateContactMessage, isValidEmailAddress };

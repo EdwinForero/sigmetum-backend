@@ -47,18 +47,19 @@ sigmetum-backend/
 ├── routes/
 │   ├── auth.js                  # GET /auth: comprobación de sesión (sin login propio)
 │   ├── data.js                  # Datos de series de vegetación (Excel/JSON, versiones)
-│   └── content.js               # Galería, términos, email de contacto
+│   └── content.js               # Galería, términos, email de contacto y su lista de destinatarios
 ├── functions/
 │   ├── convertExcelToJson.js    # Parser de Excel con columnas fijas
 │   ├── activeVersion.js         # Reglas de la versión activa (carpeta, clave del activo y plan tras borrar)
 │   ├── formatFileName.js        # Nombre de fichero versionado por fecha
 │   ├── getNextVersion.js        # Cálculo de la siguiente versión del día
 │   ├── versionName.js           # Interpretación única del nombre de versión (parseVersionName, latestVersionFile)
+│   ├── contactRecipients.js     # Reglas puras de la lista de destinatarios del formulario de contacto (alta, baja, aviso enmascarado)
 │   ├── validateImageKey.js      # Lista de permitidos del imageKey (GET /get-image, DELETE /delete-image)
 │   ├── validateImageUpload.js   # Tipo, firma y título de la imagen (POST /upload-image)
 │   ├── validateProvincia.js     # Validación de la provincia del Excel (POST /upload)
 │   ├── validateDataKey.js       # Listas de permitidos: isValidDataKey (fileName; update-file, delete-file) e isValidDraftKey (draftKey; upload/confirm)
-│   └── validateContactMessage.js # Validación del cuerpo de POST /send-email
+│   └── validateContactMessage.js # Validación del cuerpo de POST /send-email y regla del correo (isValidEmailAddress)
 ├── aws/
 │   └── awsS3connect.js          # Todas las operaciones contra S3
 ├── middleware/

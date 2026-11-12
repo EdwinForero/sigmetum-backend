@@ -38,6 +38,10 @@ test('reservada da Province is reserved', () => {
     assert.equal(nombre('active'), 'Province is reserved');
     assert.equal(nombre('drafts'), 'Province is reserved');
 });
+test('contact está reservada (data/contact/ guarda la lista de destinatarios)', () => {
+    assert.equal(nombre('contact'), 'Province is reserved');
+    assert.equal(filas([{ Provincia: 'contact' }]).error, 'Province is reserved');
+});
 for (const [n, rows, esperado] of casos) {
     test(`validateProvincia ${n}`, () => assert.equal(filas(rows).error, esperado));
 }

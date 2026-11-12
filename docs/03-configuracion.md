@@ -52,7 +52,7 @@ Política de `TRUST_PROXY_HOPS`: es **estricta** (el arranque falla con un error
 | `AWS_BUCKET_NAME` | Sí | `sigmetum-app-assets-dev` | Bucket de la aplicación |
 | `AWS_PROFILE` | Sólo si `NODE_ENV=local` | `my-sso-profile` | Perfil SSO de AWS CLI |
 | `COGNITO_USER_POOL_ID` | Sí | `<región>_<id>` (marcador) | Id del pool de usuarios de Cognito del entorno (lo inyecta Terraform). Forma `<región>_<id>` y región igual a `AWS_REGION`; de él salen el emisor y el JWKS con los que `tokenAuth` verifica los tokens de acceso. Obligatoria en todo entorno; sin ella o con otro formato o región, el backend no arranca |
-| `EMAIL` | Sí | — | Cuenta Gmail que envía y recibe el formulario de contacto |
+| `EMAIL` | Sí | — | Cuenta Gmail **remitente** (`from`) del formulario de contacto y de los avisos de cambio de la lista, y **respaldo** de destino: a ella van los mensajes si la lista de destinatarios (`data/contact/recipients.json`) está vacía, no tiene direcciones válidas o no se puede leer (en ese último caso con el asunto marcado `[Aviso: lista de destinatarios no disponible] `, así que hay que vigilar su buzón). Desde el 12/11/2026 ya no es el único destino; no hay variables nuevas |
 | `EMAIL_PASSWORD` | Sí | — | Contraseña de aplicación de Gmail |
 | `ALLOWED_ORIGIN` | Sí | `http://localhost:3000` | Orígenes del frontend permitidos por CORS: **una lista separada por comas** (`app.js` divide por `,`, recorta espacios y compara cada origen de forma exacta, sin barra final; p. ej. `https://a.com,https://b.com`); una petición sin `Origin` también se permite; otro origen recibe `403` `Origin not allowed` (el valor de la variable no cambia) |
 

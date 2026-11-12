@@ -5,6 +5,9 @@ exports.TERMS_PATH = 'data/terms';
 // Borradores de POST /upload con celdas vacías: data/drafts/<provincia>/<uuid>.xlsx (no son versiones: A2 y A9).
 exports.DRAFTS_PATH = 'data/drafts';
 exports.TERMS_FILE = 'noLatinTerms.json';
+// Lista de destinatarios del formulario de contacto: data/contact/recipients.json (clave fija, sin texto del cliente).
+exports.CONTACT_PATH = 'data/contact';
+exports.CONTACT_RECIPIENTS_FILE = 'recipients.json';
 
 // imageKey (GET /get-image, DELETE /delete-image): ruta relativa a GALLERY_PATH, sin texto libre.
 // Uno o más segmentos separados por un único "/". Cada segmento empieza por una letra o número Unicode
@@ -34,7 +37,7 @@ exports.IMAGE_UPLOAD_TYPES = {
 // combinantes U+0300-U+036F, salvo U+034F y U+0345; cirílico, griego y otros alfabetos se rechazan, M23); una parte
 // vacía (separador en los extremos o doble) se rechaza. Rechaza "/", "\", ".", dígitos.
 // Longitud máxima antes de ejecutar la expresión.
-// PROVINCIA_RESERVED: nombres que no pueden ser carpeta de provincia (RESERVED_SEGMENTS, que incluye drafts). Además
+// PROVINCIA_RESERVED: nombres que no pueden ser carpeta de provincia (RESERVED_SEGMENTS, que incluye drafts y contact). Además
 // se rechaza todo nombre que en minúsculas empiece por "active" o "terms" y los nombres de propiedades de objeto.
 // DATA_FILE_NAME_PATTERN: nombre de archivo de una versión (AAAA-MM-DD_vN.xlsx), contrato con el frontend (D2).
 // Fuente única del nombre de versión (la usan isValidDataKey y functions/versionName.js); grupos: 1 = fecha, 2 = N.
@@ -44,7 +47,7 @@ exports.PROVINCIA_WORD_PATTERN = /^(?=\p{L})\p{Script=Latin}(?:(?=\p{L})\p{Scrip
 exports.DATA_FILE_NAME_PATTERN = /^(\d{4}-\d{2}-\d{2})_v(\d+)\.xlsx$/;
 
 // Folder segments reserved inside DATA_PATH — excluded from /list-files grouping
-exports.RESERVED_SEGMENTS = ['active', 'terms', 'drafts'];
+exports.RESERVED_SEGMENTS = ['active', 'terms', 'drafts', 'contact'];
 exports.PROVINCIA_RESERVED = [...exports.RESERVED_SEGMENTS];
 
 // Nombre de archivo de un borrador: <uuid en minúsculas>.xlsx (lo genera el servidor con crypto.randomUUID()).

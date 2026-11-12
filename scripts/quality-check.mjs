@@ -205,12 +205,12 @@ const ACCEPTED_ADVISORIES = {};
 // omitidos ni pendientes, al menos MIN_TESTS tests y presentes las suites de la pila (estructura-rutas) y de las
 // rutas protegidas (rutas-protegidas). Si añades tests, sube MIN_TESTS; si quitas alguno, hay que justificarlo.
 
-const MIN_TESTS = 1620;
+const MIN_TESTS = 1775;
 // Un test de cada suite imprescindible: el reporter TAP no nombra los archivos, así que se comprueba por existencia
 // del archivo y por este test centinela (su nombre exacto debe aparecer como superado).
 const REQUIRED_SUITES = {
   'tests/estructura-rutas.test.js': 'la tabla de rutas y la pila declarada no están vacías',
-  'tests/rutas-protegidas.test.js': 'la lista de rutas protegidas tiene las nueve rutas y los tres estados de token',
+  'tests/rutas-protegidas.test.js': 'la lista de rutas protegidas tiene las doce rutas y los tres estados de token',
 };
 
 {

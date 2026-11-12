@@ -12,15 +12,20 @@ const calls = { sendMail: 0, getPresigned: 0, deleteImage: 0, s3Other: 0 };
 const spyTotal = () => Object.values(calls).reduce((sum, n) => sum + n, 0);
 
 // Errores sembrados (null = comportamiento normal; el doble lanza el error, como aws/) y argumentos recibidos por los espías de versiones.
-const inject = { getTextJson: null, deleteImage: null, deleteTerm: null };
-const argsLog = { upload: [], getBuffer: [], put: [], del: [], list: [], image: [] };
-const seed = { list: [] };
+// inject.sendMail: error que lanza el transporte (null = envío normal). inject.sendMailEspera: promesa que el envío aguarda
+// antes de terminar (null = no espera). inject.getTextJsonEspera: promesa que la lectura de texto JSON aguarda antes de responder
+// (una que nunca se resuelve simula un S3 colgado). argsLog.mail: opciones de cada envío.
+const inject = { getTextJson: null, deleteImage: null, deleteTerm: null, sendMail: null, sendMailEspera: null, getTextJsonEspera: null };
+const argsLog = { upload: [], getBuffer: [], put: [], del: [], list: [], image: [], mail: [] };
+// seed.textJson: JSON de texto por clave completa (carpeta/fichero); lo que no está sembrado es []. putJsonToS3 lo actualiza.
+const seed = { list: [], textJson: {} };
 
 const reiniciar = () => {
     for (const key of Object.keys(calls)) calls[key] = 0;
     for (const key of Object.keys(inject)) inject[key] = null;
     for (const key of Object.keys(argsLog)) argsLog[key].length = 0;
     seed.list = [];
+    seed.textJson = {};
 };
 
 const injectInCache = (filename, exports) => {
@@ -34,7 +39,17 @@ injectInCache(path.join(ROOT, 'aws', 'awsS3connect.js'), {
     getPresignedUrlFromS3: async () => { calls.getPresigned += 1; return 'https://s3.example.invalid/url-prefirmada'; },
     uploadImageToS3: async (...args) => { calls.s3Other += 1; argsLog.image.push(args); },
     deleteImageFromS3: async () => { calls.deleteImage += 1; if (inject.deleteImage) throw inject.deleteImage; },
-    getTextJsonS3: async () => { calls.s3Other += 1; if (inject.getTextJson) throw inject.getTextJson; return []; },
+    // Como aws/: AccessDenied solo equivale a [] si la lectura pasa vacioSiAccessDenied; cualquier otro error sembrado se lanza.
+    getTextJsonS3: async (fileName, folderName, { vacioSiAccessDenied = false } = {}) => {
+        calls.s3Other += 1;
+        if (inject.getTextJsonEspera) await inject.getTextJsonEspera;
+        if (inject.getTextJson) {
+            const e = inject.getTextJson;
+            if (vacioSiAccessDenied && (e.name === 'AccessDenied' || e.Code === 'AccessDenied')) return [];
+            throw e;
+        }
+        return [...(seed.textJson[`${folderName}/${fileName}`] ?? [])];
+    },
     uploadTextToJsonS3: other(undefined),
     deleteTermFromS3: async () => { calls.s3Other += 1; if (inject.deleteTerm) throw inject.deleteTerm; },
     uploadFileToS3: async (...args) => { calls.s3Other += 1; argsLog.upload.push(args); },
@@ -48,12 +63,24 @@ injectInCache(path.join(ROOT, 'aws', 'awsS3connect.js'), {
         const { fullRow, makeXlsx } = require('./excel');
         return makeXlsx([fullRow('Málaga')]);
     },
-    putJsonToS3: async (...args) => { calls.s3Other += 1; argsLog.put.push(args); },
+    putJsonToS3: async (...args) => {
+        calls.s3Other += 1;
+        argsLog.put.push(args);
+        if (args[1] !== undefined) seed.textJson[args[0]] = JSON.parse(JSON.stringify(args[1]));
+    },
     listFilesInS3Folder: async (...args) => { calls.s3Other += 1; argsLog.list.push(args); return seed.list; },
 });
 
 injectInCache(require.resolve('nodemailer'), {
-    createTransport: () => ({ sendMail: async () => { calls.sendMail += 1; return { accepted: [] }; } }),
+    createTransport: () => ({
+        sendMail: async (options) => {
+            calls.sendMail += 1;
+            argsLog.mail.push(options);
+            if (inject.sendMailEspera) await inject.sendMailEspera;
+            if (inject.sendMail) throw inject.sendMail;
+            return { accepted: [] };
+        },
+    }),
 });
 
 // morgan real, pero sin escribir en stdout (evita ruido de 'combined' en la salida de los tests). La capa sigue
