@@ -264,6 +264,98 @@ test('ejecutar lee del disco el aviso para PR que está en cambios', () => {
   }
 });
 
+test('coincide: avisoPR bajo specsDir cubre la carpeta de mes y la raíz', () => {
+  const patron = 'docs/specs/**-aviso-pr.md';
+  assert.equal(coincide('docs/specs/2026-11/x-aviso-pr.md', patron), true);
+  assert.equal(coincide('docs/specs/x-aviso-pr.md', patron), true);
+  assert.equal(coincide('docs/specs/2026-11/x-design.md', patron), false);
+});
+
+test('evaluarGate: un aviso borrado no cuenta como aviso para PR', () => {
+  const aviso = 'docs/integracion/aviso-front.md';
+  const r = evaluarGate({
+    cambios: CONTRATO,
+    flujo: flujoBase(),
+    hoy: HOY,
+    textoEstado: TEXTO_OK,
+    borrados: [aviso],
+  });
+  assert.equal(r.ok, false);
+  assert.ok(r.problemas.some((p) => p.includes('falta el aviso para PR')), r.problemas.join(' | '));
+});
+
+// Repositorio temporal con avisoPR bajo docs/specs; preparar(dir, git) deja el árbol de trabajo listo
+function ejecutarEnRepo(preparar) {
+  const dir = mkdtempSync(join(tmpdir(), 'docs-gate-'));
+  const original = [console.log, console.error];
+  const errores = [];
+  try {
+    const git = gitEn(dir);
+    git('init', '-q');
+    mkdirSync(join(dir, '.claude'));
+    const flujo = {
+      ...flujoBase(),
+      avisoPR: 'docs/specs/**-aviso-pr.md',
+      guias: [],
+      verificacion: {},
+      specsDir: 'docs/specs',
+      maxVueltas: 1,
+      consultor: 'ninguno',
+      estilo: 'ninguno',
+      perfiles: ['base'],
+    };
+    writeFileSync(join(dir, '.claude', 'flujo.json'), JSON.stringify(flujo));
+    mkdirSync(join(dir, 'docs', 'specs', '2026-11'), { recursive: true });
+    mkdirSync(join(dir, 'routes'), { recursive: true });
+    preparar(dir, git);
+    writeFileSync(join(dir, 'docs', 'estado.md'), `actualizado ${fechaHoy()}\n`);
+    writeFileSync(join(dir, 'routes', 'a.js'), 'x');
+    writeFileSync(join(dir, 'docs', 'api.md'), 'x');
+    console.log = () => {};
+    console.error = (m) => errores.push(String(m));
+    return { codigo: ejecutar(['--raiz', dir]), errores: errores.join('\n') };
+  } finally {
+    [console.log, console.error] = original;
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+const confirmar = (git) => {
+  git('add', '.');
+  git('commit', '-q', '-m', 'inicial');
+};
+const AVISO_RAIZ = ['docs', 'specs', 'x-aviso-pr.md'];
+
+test('ejecutar: un aviso borrado en disco no cuenta como aviso para PR', () => {
+  const { codigo, errores } = ejecutarEnRepo((dir, git) => {
+    writeFileSync(join(dir, ...AVISO_RAIZ), `# Aviso\n\n${LINEA}\n`);
+    confirmar(git);
+    rmSync(join(dir, ...AVISO_RAIZ));
+  });
+  assert.equal(codigo, 1);
+  assert.ok(errores.includes('falta el aviso para PR'), errores);
+});
+
+test('ejecutar: un aviso borrado y otro presente: cuenta el presente', () => {
+  const { codigo, errores } = ejecutarEnRepo((dir, git) => {
+    writeFileSync(join(dir, ...AVISO_RAIZ), `# Aviso\n\n${LINEA}\n`);
+    confirmar(git);
+    rmSync(join(dir, ...AVISO_RAIZ));
+    writeFileSync(join(dir, 'docs', 'specs', '2026-11', 'y-aviso-pr.md'), `# Aviso\n\n${LINEA}\n`);
+  });
+  assert.equal(codigo, 0, errores);
+  assert.ok(!errores.includes('falta el aviso'), errores);
+});
+
+test('ejecutar: un aviso renombrado a la carpeta de mes cuenta como aviso', () => {
+  const { codigo, errores } = ejecutarEnRepo((dir, git) => {
+    writeFileSync(join(dir, ...AVISO_RAIZ), `# Aviso\n\n${LINEA}\n`);
+    confirmar(git);
+    git('mv', 'docs/specs/x-aviso-pr.md', 'docs/specs/2026-11/x-aviso-pr.md');
+  });
+  assert.equal(codigo, 0, errores);
+});
+
 test('evaluarGate: solo documentos más estado es ok', () => {
   const r = evaluarGate({
     cambios: ['docs/estado.md', 'docs/otro.md'],

@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { cargarFlujo } from './lib/flujo.mjs';
@@ -64,7 +64,8 @@ const PREFIJO_SIN_IMPACTO = 'Integración: sin impacto — ';
 const LINEA_SIN_IMPACTO = /^Integración: sin impacto — [^\n]*\S/m;
 
 // textosAviso (opcional): { ruta: texto } de los avisos para PR; sin él, solo vale que cambie integracion
-export function evaluarGate({ cambios, flujo, hoy, textoEstado, textosAviso = {} }) {
+// borrados (opcional): rutas de cambios que ya no existen; un aviso borrado no cuenta como aviso
+export function evaluarGate({ cambios, flujo, hoy, textoEstado, textosAviso = {}, borrados = [] }) {
   const problemas = [];
   const lista = cambios.map(normalizarRuta);
 
@@ -97,7 +98,8 @@ export function evaluarGate({ cambios, flujo, hoy, textoEstado, textosAviso = {}
 
   const contrato = lista.find((c) => flujo.areasContrato.some((p) => coincide(c, p)));
   if (contrato !== undefined) {
-    const avisos = lista.filter((c) => coincide(c, flujo.avisoPR));
+    const ausentes = borrados.map(normalizarRuta);
+    const avisos = lista.filter((c) => coincide(c, flujo.avisoPR) && !ausentes.includes(c));
     if (avisos.length === 0) {
       problemas.push(`${contrato} toca un área de contrato y falta el aviso para PR (${flujo.avisoPR})`);
     }
@@ -168,7 +170,9 @@ export function ejecutar(argv) {
     }
   }
 
-  const resultado = evaluarGate({ cambios, flujo, hoy: fechaHoy(), textoEstado, textosAviso });
+  const borrados = cambios.filter((c) => !existsSync(join(raiz, c)));
+
+  const resultado = evaluarGate({ cambios, flujo, hoy: fechaHoy(), textoEstado, textosAviso, borrados });
   if (resultado.ok) {
     console.log('Cierre documental correcto');
     return 0;

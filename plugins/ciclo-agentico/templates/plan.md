@@ -1,6 +1,6 @@
 # <Tema>: plan
 
-Fecha: AAAA-MM-DD · Estado: aprobado · Spec: `<specsDir>/AAAA-MM-DD-<tema>-design.md`
+Fecha: AAAA-MM-DD · Estado: aprobado · Spec: `<specsDir>/AAAA-MM/AAAA-MM-DD-<tema>-design.md`
 
 ## Fase 1 (máximo 5 pasos por fase)
 

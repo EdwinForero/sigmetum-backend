@@ -24,5 +24,5 @@
     "package.json": ["docs/tecnologias.md"]
   },
   "areasContrato": ["src/api/**"],
-  "avisoPR": "docs/specs/*-aviso-pr.md"
+  "avisoPR": "docs/specs/**-aviso-pr.md"
 }

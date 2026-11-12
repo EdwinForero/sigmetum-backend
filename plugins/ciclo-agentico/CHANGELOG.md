@@ -1,5 +1,14 @@
 # Cambios
 
+## 0.1.2
+
+Specs por mes y retención. Contiene:
+
+- **Rutas por mes**: spec, plan y aviso para PR van en `<specsDir>/AAAA-MM/`; la plantilla de `avisoPR` pasa a `docs/specs/**-aviso-pr.md`.
+- **Retención de specs**: política en el README (sección «Retención de specs») y punto 7 nuevo del paso 0 de `/ciclo`, que pregunta y borra en el árbol de trabajo, sin `git rm`.
+- **`docs-gate`**: un aviso borrado (`borrados`) no cuenta como aviso para PR.
+- **`refresh-estado`**: lista `specsDir` en recursivo e informa de los candidatos a depurar.
+
 ## 0.1.1
 
 Enrutado de modelos por rol. Contiene:
