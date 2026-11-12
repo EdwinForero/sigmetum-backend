@@ -29,7 +29,7 @@ Nombres únicamente; nunca valores reales. Fuente: `config/validateEnv.js` **(ve
 | Variable | Secreto | Notas |
 |---|---|---|
 | `COGNITO_USER_POOL_ID` | No | **Nueva (09/11/2026), obligatoria en todo entorno.** La inyecta Terraform. Forma `<región>_<id>` y región **igual a `AWS_REGION`**; si no, el backend no arranca (sin aviso relajado en `local` ni `test`). Los valores reales no se escriben en este repositorio |
-| `EMAIL` | Sí | Cuenta Gmail del formulario de contacto |
+| `EMAIL` | Sí | Cuenta Gmail del formulario de contacto: remitente y, desde el 12/11/2026, **respaldo** de destino (ver el requisito de despliegue de la sección 4). Sin variables nuevas |
 | `EMAIL_PASSWORD` | Sí | Contraseña de aplicación de Gmail, no la contraseña de la cuenta |
 | `AWS_REGION` | No | `eu-west-3` en ambos entornos **(verificado)** |
 | `AWS_BUCKET_NAME` | No | Debe coincidir con el bucket que crea `modules/storage` (`sigmetum-app-assets-dev` / `sigmetum-app-assets-prod`) |
@@ -83,7 +83,7 @@ Acciones que usa el código, deducidas de `aws/awsS3connect.js` **(verificado)**
 | Acción del SDK | Dónde se usa |
 |---|---|
 | `GetObjectCommand` / `s3.getObject` | Leer JSON activos, buffers de Excel, firmar URLs de imágenes |
-| `s3.putObject` | Subir Excel, JSON activos, imágenes, el glosario |
+| `s3.putObject` | Subir Excel, JSON activos, imágenes, el glosario, la lista de destinatarios del formulario de contacto |
 | `s3.deleteObject` | Borrar versiones de Excel, imágenes, el JSON activo al quedar una provincia sin versiones |
 | `ListObjectsV2Command` / `s3.listObjectsV2` | Listar versiones por provincia, listar la galería |
 | `getSignedUrl` (firma local, no es una llamada de red aparte) | URLs prefirmadas de descarga, caducidad 3600 s |
@@ -99,6 +99,10 @@ Acciones que usa el código, deducidas de `aws/awsS3connect.js` **(verificado)**
   - **Mitigación temporal (acción manual de operaciones, por confirmar quién):** subir un `[]` a `data/terms/noLatinTerms.json` en dev y en prod. Es **necesaria para poder dar de alta el primer término** (hasta entonces el primer alta falla con `500`); **no es necesaria para `GET /get-data`**, que ahora da `404` con `AccessDenied`.
   - **Orden de despliegue:** primero el backend con este cambio y después el `apply` de infra. Con el `apply` antes, `GET /list-terms` daría `500` sin glosario creado.
   - `GET /get-data` ahora valida la clave y responde `400` sin llamar a S3 si no es una versión ni un activo (ver [para-frontend](para-frontend.md)).
+- **Lista de destinatarios del formulario de contacto (12/11/2026): sin variables de entorno ni permisos nuevos (`GetObject` y `PutObject` ya cubiertos), pero con un requisito de despliegue manual.**
+  - **Antes de desplegar este backend en cada entorno (dev y prod), una persona sube `[]` a `data/contact/recipients.json`** (quién: **por confirmar**). Sin el fichero, S15 da `AccessDenied` (la política con `s3:ListBucket` acotado por `Prefix` hace que S3 no distinga «no existe» de «sin permiso»; qué código devuelve en cada entorno: **por confirmar**) y la lista no lo tolera: `GET /list-recipients`, `POST /add-recipient` y `DELETE /delete-recipient` responden `500` sin escribir, y `POST /send-email` sigue enviando, pero a `EMAIL` con el asunto `[Aviso: lista de destinatarios no disponible] `. La lectura de la lista en `/send-email` tiene un plazo de 4 segundos (`RECIPIENTS_READ_TIMEOUT_MS`): si S3 no responde, el mensaje cae igual a `EMAIL` (registro `TimeoutError`); el cliente S3 sigue sin `requestTimeout` propio.
+  - **Vigilar el buzón `EMAIL`**: es el destino de respaldo (lista vacía, sin direcciones válidas o ilegible) y recibe también los avisos de cambio de la lista cuando esta estaba vacía.
+  - Sin cambios en el rol IAM ni en `app_env_vars`. La lista guarda correos del personal en el bucket de datos (S10).
 - El rol se asigna por nombre fijo (`aws-elasticbeanstalk-ec2-role`), no por referencia al recurso del rol: si ese nombre cambia en el futuro, esta política deja de aplicarse sin que Terraform avise **(verificado, es una observación sobre el propio Terraform, no un hallazgo del backend)**.
 - Sin local: en Beanstalk no hay `AWS_PROFILE`; el SDK usa la cadena de credenciales por defecto, que resuelve al rol de la instancia (`IamInstanceProfile = aws-elasticbeanstalk-ec2-role` en `modules/beanstalk/main.tf`).
 

@@ -2,8 +2,11 @@
 // (anónimo). Los nombres de los casos son los mismos que los del script.
 const { test, describe, before, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
-const { appNueva, llamar, isEnvelopeError, nextIp, reiniciar, calls, validToken } = require('./helpers/simulados');
+const { appNueva, llamar, isEnvelopeError, nextIp, reiniciar, calls, validToken, argsLog, seed, inject } = require('./helpers/simulados');
+const { LIST_UNAVAILABLE_SUBJECT_PREFIX } = require('../functions/contactRecipients');
 
+const realSetTimeout = setTimeout;
+const realClearTimeout = clearTimeout;
 const URL = '/api/v1/send-email';
 const validMail = { username: 'Ana', email: 'ana@example.com', subject: 'Consulta', message: 'Hola, tengo una pregunta.' };
 
@@ -128,4 +131,119 @@ describe('criterio 3: validación de /send-email (anónimo)', () => {
             assert.equal(calls.sendMail, 1);
         });
     }
+});
+
+// Destinatarios de /send-email (BE4, BE8, BE9): la lista de data/contact/recipients.json, con EMAIL de respaldo.
+// El doble de S3 (helpers/simulados.js) devuelve [] cuando el fichero no existe, como aws/ con NoSuchKey (ver s3-robustez.test.js).
+describe('destinatarios de /send-email: la lista con EMAIL de respaldo', () => {
+    const app = appNueva();
+    const CLAVE = 'data/contact/recipients.json';
+    const enviar = (body = validMail) => llamar(app, 'POST', URL, { body, ip: nextIp() });
+    const registrarErrores = (t) => {
+        const registros = [];
+        t.mock.method(console, 'error', (...args) => { registros.push(args); });
+        return registros;
+    };
+
+    test('con la lista sembrada, un solo envío con to igual al array de la lista y el resto de campos como siempre', async (t) => {
+        const registros = registrarErrores(t);
+        seed.textJson[CLAVE] = [{ email: 'a@x.es' }, { email: 'b@x.es' }];
+        const r = await enviar();
+        assert.equal(r.status, 200);
+        assert.equal(calls.sendMail, 1);
+        assert.deepEqual(argsLog.mail[0].to, ['a@x.es', 'b@x.es']);
+        assert.equal(argsLog.mail[0].from, process.env.EMAIL);
+        assert.equal(argsLog.mail[0].replyTo, 'ana@example.com');
+        assert.equal(argsLog.mail[0].subject, 'Consulta - enviado por Ana<ana@example.com>');
+        assert.equal(argsLog.mail[0].text, 'Hola, tengo una pregunta.');
+        assert.deepEqual(registros, []);
+    });
+    test('una entrada no válida del fichero se descarta', async () => {
+        seed.textJson[CLAVE] = [{ email: 'a@x.es' }, { email: 'mal' }, { email: 'x@y.es,z@w.es' }, { email: 'q@r.es\nBcc: s@t.es' }, { email: 5 }, { email: ' b@x.es ' }];
+        assert.equal((await enviar()).status, 200);
+        assert.deepEqual(argsLog.mail[0].to, ['a@x.es']);
+    });
+    for (const [nombre, contenido] of [['sin fichero o con la lista vacía', []], ['sin ninguna entrada válida', [{ email: 'mal' }, { email: 5 }, null]]]) {
+        test(`${nombre}: to es [EMAIL], asunto sin marca y sin registro`, async (t) => {
+            const registros = registrarErrores(t);
+            seed.textJson[CLAVE] = contenido;
+            const r = await enviar();
+            assert.equal(r.status, 200);
+            assert.deepEqual(argsLog.mail[0].to, [process.env.EMAIL]);
+            assert.equal(argsLog.mail[0].subject, 'Consulta - enviado por Ana<ana@example.com>');
+            assert.deepEqual(registros, []);
+        });
+    }
+    const fallos = [
+        ['AccessDenied (S15: también es «falta el fichero»)', Object.assign(new Error('secreto sdk 1'), { name: 'AccessDenied', Code: 'AccessDenied' }), 'AccessDenied'],
+        ['JSON roto', Object.assign(new SyntaxError('secreto sdk 2 en la posición 1'), {}), 'SyntaxError'],
+        ['red', Object.assign(new Error('secreto sdk 3 conexión'), { name: 'NetworkingError' }), 'NetworkingError'],
+        ['error genérico', new Error('secreto sdk 4'), 'Error'],
+    ];
+    for (const [nombre, error, nombreEsperado] of fallos) {
+        test(`si la lectura falla (${nombre}): 200, to es [EMAIL], asunto con la marca y un registro que solo lleva ${nombreEsperado}`, async (t) => {
+            const registros = registrarErrores(t);
+            seed.textJson[CLAVE] = [{ email: 'a@x.es' }];
+            inject.getTextJson = error;
+            const r = await enviar();
+            assert.equal(r.status, 200);
+            assert.deepEqual(r.json, { success: true, data: 'Email sent successfully.' });
+            assert.equal(calls.sendMail, 1);
+            assert.deepEqual(argsLog.mail[0].to, [process.env.EMAIL]);
+            assert.equal(argsLog.mail[0].subject, `${LIST_UNAVAILABLE_SUBJECT_PREFIX}Consulta - enviado por Ana<ana@example.com>`);
+            assert.equal(argsLog.mail[0].replyTo, 'ana@example.com');
+            assert.deepEqual(registros, [['[send-email] recipient list unavailable, using EMAIL:', nombreEsperado]]);
+            assert.ok(!JSON.stringify(registros).includes('secreto'));
+        });
+    }
+    // S3 colgado: el cliente global no tiene requestTimeout, así que la lectura no rechaza nunca. /send-email corta la espera
+    // (RECIPIENTS_READ_TIMEOUT_MS = 4000) y la trata como fallo de lectura. Temporizadores falsos: no se espera de verdad.
+    test('si la lectura se cuelga: pasados 4 s, 200, to es [EMAIL], asunto con la marca y un registro fijo', { timeout: 5000 }, async (t) => {
+        const registros = registrarErrores(t);
+        t.mock.timers.enable({ apis: ['setTimeout'] });
+        seed.textJson[CLAVE] = [{ email: 'a@x.es' }];
+        inject.getTextJsonEspera = new Promise(() => {});
+        const pendiente = enviar();
+        while (calls.s3Other === 0) await new Promise((resolve) => setImmediate(resolve));
+        assert.equal(calls.sendMail, 0);
+        t.mock.timers.tick(3999);
+        await new Promise((resolve) => setImmediate(resolve));
+        assert.equal(calls.sendMail, 0, 'a los 3999 ms todavía espera');
+        t.mock.timers.tick(1);
+        // Sin límite la lectura nunca termina: el guardián usa el setTimeout real (capturado antes de falsear) para fallar en vez de colgarse.
+        let guardian;
+        const r = await Promise.race([
+            pendiente,
+            new Promise((_, reject) => { guardian = realSetTimeout(() => reject(new Error('la lectura colgada no se cortó')), 1500); }),
+        ]).finally(() => realClearTimeout(guardian));
+        assert.equal(r.status, 200);
+        assert.equal(calls.sendMail, 1);
+        assert.deepEqual(argsLog.mail[0].to, [process.env.EMAIL]);
+        assert.equal(argsLog.mail[0].subject, `${LIST_UNAVAILABLE_SUBJECT_PREFIX}Consulta - enviado por Ana<ana@example.com>`);
+        // Node 22 emite un ExperimentalWarning de MockTimers por console.error: se cuentan solo los registros de /send-email.
+        const propios = registros.filter(([texto]) => String(texto).startsWith('[send-email]'));
+        assert.deepEqual(propios, [['[send-email] recipient list unavailable, using EMAIL:', 'TimeoutError']]);
+    });
+    test('si la lectura responde a tiempo, el límite no altera el envío', async (t) => {
+        t.mock.timers.enable({ apis: ['setTimeout'] });
+        seed.textJson[CLAVE] = [{ email: 'a@x.es' }];
+        const r = await enviar();
+        assert.equal(r.status, 200);
+        assert.deepEqual(argsLog.mail[0].to, ['a@x.es']);
+        t.mock.timers.tick(10000);
+        assert.equal(calls.sendMail, 1);
+    });
+    test('la marca del asunto es la constante exportada', () => {
+        assert.equal(LIST_UNAVAILABLE_SUBJECT_PREFIX, '[Aviso: lista de destinatarios no disponible] ');
+    });
+    test('un 400 de validación no lee S3', async () => {
+        const r = await enviar({ ...validMail, email: 'mal' });
+        assert.equal(r.status, 400);
+        assert.equal(calls.s3Other, 0);
+        assert.equal(calls.sendMail, 0);
+    });
+    test('una petición válida lee la lista una sola vez', async () => {
+        await enviar();
+        assert.equal(calls.s3Other, 1);
+    });
 });

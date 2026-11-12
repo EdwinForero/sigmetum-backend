@@ -440,6 +440,34 @@ test('ciclo.md (paso 5): el aviso para PR es el archivo de avisoPR que cambió e
   );
 });
 
+test('retención de specs: la política vive solo en el README y ciclo.md la aplica en el paso 0', () => {
+  const readme = leerTexto('README.md');
+  const politica = seccion(readme, '## Retención de specs');
+  assert.ok(politica !== '', 'el README no tiene la sección Retención de specs');
+  for (const frase of ['<specsDir>/AAAA-MM/', 'mientras la PR no se fusione', 'primera iteración de `/ciclo`', 'nunca con `git rm`', 'hash del commit']) {
+    assert.ok(politica.includes(frase), `la política no incluye: ${frase}`);
+  }
+  const ciclo = leerTexto('commands', 'ciclo.md');
+  const paso0 = seccion(ciclo, '## Paso 0: refresh y comprobaciones');
+  for (const frase of ['Retención de specs', 'AskUserQuestion', 'sin `git rm`', 'Todos fusionados', 'Ninguno', 'Indicar cuáles']) {
+    assert.ok(paso0.includes(frase), `el paso 0 no incluye: ${frase}`);
+  }
+  assert.ok(!ciclo.includes('mientras la PR no se fusione'), 'ciclo.md repite la política del README');
+});
+
+test('specs por mes: instrucciones, plantillas y refresh-estado usan AAAA-MM/', () => {
+  assert.ok(leerAgente('requirements').cuerpo.includes('<specsDir>/AAAA-MM/AAAA-MM-DD-<tema>-design.md'), 'requirements.md sin carpeta de mes');
+  const ciclo = leerTexto('commands', 'ciclo.md');
+  assert.ok(ciclo.includes('<specsDir>/AAAA-MM/AAAA-MM-DD-<tema>-plan.md'), 'ciclo.md sin carpeta de mes en el plan');
+  assert.ok(ciclo.includes('<specsDir>/AAAA-MM/AAAA-MM-DD-<tema>-aviso-pr.md'), 'ciclo.md sin carpeta de mes en el aviso');
+  assert.ok(ciclo.includes('un aviso borrado por la retención no cuenta'), 'ciclo.md no excluye el aviso borrado');
+  assert.ok(leerTexto('templates', 'plan.md').includes('<specsDir>/AAAA-MM/AAAA-MM-DD-<tema>-design.md'), 'plan.md sin carpeta de mes');
+  assert.equal(plantillaFlujo.avisoPR, 'docs/specs/**-aviso-pr.md');
+  const refresh = leerTexto('skills', 'refresh-estado', 'SKILL.md');
+  assert.ok(refresh.includes('subcarpetas de mes'), 'refresh-estado no menciona las subcarpetas de mes');
+  assert.ok(refresh.includes('candidatos a depurar'), 'refresh-estado no informa de candidatos a depurar');
+});
+
 test('la skill principios existe con su nombre', () => {
   const ruta = join(raiz, 'skills', 'principios', 'SKILL.md');
   assert.ok(existsSync(ruta), 'falta skills/principios/SKILL.md');

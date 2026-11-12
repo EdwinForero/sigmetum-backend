@@ -33,6 +33,9 @@ const ROUTES = {
     'DELETE /delete-image': 'protected',
     'POST /upload-term': 'protected',
     'DELETE /delete-term': 'protected',
+    'GET /list-recipients': 'protected',
+    'POST /add-recipient': 'protected',
+    'DELETE /delete-recipient': 'protected',
 };
 
 // Pila de nivel app esperada, en orden exacto (Express 4: Layer.name = fn.name || '<anonymous>').
@@ -45,7 +48,7 @@ const { routes, routerLevelAuth } = declaredRoutes(app);
 const declared = new Map(routes.map((r) => [`${r.method} ${r.path}`, r]));
 
 test('la tabla de rutas y la pila declarada no están vacías', () => {
-    assert.equal(Object.keys(ROUTES).length, 16);
+    assert.equal(Object.keys(ROUTES).length, 19);
     assert.ok(routes.length > 0);
 });
 

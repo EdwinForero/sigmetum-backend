@@ -73,8 +73,17 @@ Si `.claude/flujo.json` tiene el campo opcional `marketplaceLocal` (ruta relativ
 
 Códigos de salida: 0 todo correcto (o solo se rechazaron opcionales), 1 queda sin instalar una dependencia de rol `base`, 2 no se pudo comprobar: no existe `claude`, `claude plugin list` falla (también al verificar tras instalar) o el catálogo `dependencias.json` está roto o no es válido.
 
+`awesome-design-md` no es un plugin: es un repositorio de ficheros `DESIGN.md` que se copian a mano en el proyecto, por eso no está en el catálogo.
+
 ## Cierre documental
 
-`scripts/docs-gate.mjs` comprueba, contra `.claude/flujo.json`, que se tocaron los documentos obligatorios y los de cada área, que la fecha del documento `estado` es la de hoy y, si se tocó un área de contrato, que hay aviso para PR y que cambió un documento de `integracion` o el aviso tiene una línea que empieza por `Integración: sin impacto — ` seguida del motivo. `--solo-validar` solo valida `flujo.json`.
+`scripts/docs-gate.mjs` comprueba, contra `.claude/flujo.json`, que se tocaron los documentos obligatorios y los de cada área, que la fecha del documento `estado` es la de hoy y, si se tocó un área de contrato, que hay aviso para PR y que cambió un documento de `integracion` o el aviso tiene una línea que empieza por `Integración: sin impacto — ` seguida del motivo. `--solo-validar` solo valida `flujo.json`. Un aviso para PR borrado del árbol de trabajo no cuenta como aviso.
 
-`awesome-design-md` no es un plugin: es un repositorio de ficheros `DESIGN.md` que se copian a mano en el proyecto, por eso no está en el catálogo.
+## Retención de specs
+
+- **Ubicación**: `<specsDir>/AAAA-MM/`, con el mes de la fecha del nombre; el nombre del archivo no cambia.
+- **Qué se conserva**: design, plan y aviso para PR, mientras la PR no se fusione.
+- **Cuándo se borran**: en la primera iteración de `/ciclo` posterior a la fusión, los tres tipos por igual, tanto si el tema quedó cerrado como si se revirtió.
+- **Quién decide**: el repositorio no sabe cuándo se fusionó una PR, así que lo pregunta el paso 0 de `/ciclo`.
+- **Cómo se borra**: el orquestador borra en el árbol de trabajo, nunca con `git rm`, `git add` ni commit; el borrado entra en el commit del usuario.
+- **Qué queda**: el historial de git conserva todo. Los documentos vivos citan el id del hallazgo y el hash del commit, nunca un archivo de `specsDir`.

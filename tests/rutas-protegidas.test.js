@@ -1,4 +1,4 @@
-// Criterios 6 y 7 del antiguo script de verificación de rutas (retirado): las nueve rutas protegidas dan 401 en los tres estados de token
+// Criterios 6 y 7 del antiguo script de verificación de rutas (retirado): las doce rutas protegidas dan 401 en los tres estados de token
 // y todas las rutas mutantes de la pila real dan 401 sin llamar a S3 ni a SMTP. Los nombres de los casos son los del script.
 const { test, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
@@ -13,11 +13,12 @@ beforeEach(reiniciar);
 const PROTECTED = [
     ['GET', '/auth'], ['POST', '/upload'], ['POST', '/upload/confirm'], ['POST', '/update-file'], ['POST', '/delete-file'],
     ['POST', '/upload-image'], ['DELETE', '/delete-image'], ['POST', '/upload-term'], ['DELETE', '/delete-term'],
+    ['GET', '/list-recipients'], ['POST', '/add-recipient'], ['DELETE', '/delete-recipient'],
 ];
 const esperado = (r, mensaje) => r.status === 401 && r.json?.error === mensaje;
 
-test('la lista de rutas protegidas tiene las nueve rutas y los tres estados de token', () => {
-    assert.equal(PROTECTED.length, 9);
+test('la lista de rutas protegidas tiene las doce rutas y los tres estados de token', () => {
+    assert.equal(PROTECTED.length, 12);
     assert.equal(TOKEN_STATES.length, 3);
 });
 

@@ -14,6 +14,8 @@
     ├── drafts/                     ← borradores de POST /upload con celdas vacías (no son versiones)
     │   └── Malaga/
     │       └── 0b5f3c1e-9a7d-4e2b-8c1a-6d4f2e9a1b30.xlsx
+    ├── contact/
+    │   └── recipients.json         ← destinatarios del formulario de contacto [{ "email": "..." }]
     ├── terms/
     │   └── noLatinTerms.json       ← glosario [{ "term": "..." }]
     ├── Malaga/                     ← historial de versiones (Excel originales)
@@ -24,13 +26,15 @@
         └── ...
 ```
 
-Los prefijos están en `config/s3Paths.js`. `active`, `terms` y `drafts` están en `RESERVED_SEGMENTS` para que `/list-files` no los trate como provincias. Todo listado por prefijo (`listFilesInS3Folder`) añade una `/` final al `Prefix` si falta, así que listar `data/Santa Cruz` no recoge `data/Santa Cruz de Tenerife/...` ni `data/active` recoge `data/activos/...`.
+Los prefijos están en `config/s3Paths.js`. `active`, `terms`, `drafts` y `contact` están en `RESERVED_SEGMENTS` para que `/list-files` no los trate como provincias. Todo listado por prefijo (`listFilesInS3Folder`) añade una `/` final al `Prefix` si falta, así que listar `data/Santa Cruz` no recoge `data/Santa Cruz de Tenerife/...` ni `data/active` recoge `data/activos/...`.
 
 **Listados y objetos reales (A5, M10; 29/10/2026).** Los listados recorren **todas** las páginas de `ListObjectsV2` (`IsTruncated` con `NextContinuationToken`), sin tope de páginas; si S3 dice que hay más páginas y no da token, o repite uno ya usado, la función lanza en vez de iterar sin fin. Una página sin `Contents` cuenta como vacía y continúa. Un «objeto real» es el que tiene la clave sin `/` final y `Size > 0`; el marcador de carpeta (`gallery/`) y los objetos de tamaño 0 se excluyen igual de `listFilesInS3Folder` y de las URL prefirmadas, y la galería vacía o con solo el marcador da `[]` en `GET /list-images`. La paginación usa la misma acción `s3:ListBucket` que antes.
 
 **Errores (B5, 29/10/2026).** Todas las funciones de `aws/` lanzan el error original ante un fallo (ya no hay `{ success: false }`); las rutas lo pasan con `next(error)` y `errorHandler` lo traduce. Un `NoSuchKey` que llegue hasta `errorHandler` responde `404` (B9); `getTextJsonS3` lo convierte antes en `[]` solo para el glosario (A6). `AccessDenied` sigue en `500` salvo en las dos lecturas de solo lectura descritas abajo.
 
 **Qué lecturas toleran `AccessDenied` (S15 y M25, 30/10/2026).** Con `s3:ListBucket` acotado por `Prefix`, S3 puede responder `AccessDenied` (403) en vez de `NoSuchKey` ante una clave que no existe **(por confirmar en dev: qué código devuelve S3 con la política nueva)**. Solo dos lecturas públicas lo tratan como «no existe»: `GET /list-terms` (`getTextJsonS3` con `{ vacioSiAccessDenied: true }`: `200` con `[]`) y `GET /get-data` con una clave permitida (`404`). Todas las demás lecturas y **todas las escrituras** lo propagan: `POST /upload-term` y `DELETE /delete-term` leen el glosario sin la opción, responden `500` y no llaman a `putObject`, porque un permiso roto sobrescribiría el glosario entero con `[]` (A6). Consecuencia: **hasta que exista `data/terms/noLatinTerms.json`** (subir un `[]`, ver [para-infra](integracion/para-infra.md)), el primer alta de término falla con `500` si S3 responde `AccessDenied`. Riesgo residual: un permiso roto se ve como glosario vacío en `list-terms` y como «no existe» en `get-data`.
+
+**Lista de destinatarios del formulario de contacto (12/11/2026).** Clave `data/contact/recipients.json` (`CONTACT_PATH` y `CONTACT_RECIPIENTS_FILE` de `config/s3Paths.js`; fija, sin texto del cliente). Forma: un array JSON de objetos `[ { "email": "a@b.es" } ]` (de 1 a 5 entradas cuando lo gestiona la API; al leer solo se conservan las entradas con `email` de tipo cadena). Se gestiona con **lectura-modificación-escritura del fichero entero** (`getTextJsonS3` y `putJsonToS3`), como el glosario. **Carrera M1 aceptada**: dos administradores que cambian la lista a la vez pueden pisarse (gana la última escritura); una baja perdida deja en la lista una dirección que el aviso decía haber quitado (riesgo: una dirección maliciosa sin aviso). Mitigación futura: escritura condicional `If-Match` (ver [07](07-estado-y-deuda-tecnica.md), M1). Sin el fichero, `NoSuchKey` da `[]` en `GET /list-recipients`; **con la política acotada por `Prefix` (S15) S3 responde `AccessDenied` ante el fichero inexistente, y la lista no tolera `AccessDenied`**: el listado, el alta y la baja dan `500` sin escribir y `/send-email` cae a `EMAIL` con el asunto marcado. Por eso el fichero inicial con `[]` lo crea una persona a mano **antes** de desplegar este backend (ver [para-infra](integracion/para-infra.md)). No hay permisos de S3 nuevos.
 
 **Permisos necesarios del rol del backend:** `s3:GetObject`, `s3:PutObject`, `s3:DeleteObject` y `s3:ListBucket` con condición `s3:prefix` en `gallery/` y `data/` (que todos los listados lleven `Prefix` dentro de ese ámbito está **por confirmar**).
 

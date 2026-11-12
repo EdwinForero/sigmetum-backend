@@ -46,6 +46,7 @@ Hasta el punto 5 el ciclo no escribe nada en el repositorio: la comprobación de
    - Si no existe ninguna, deben estar ignoradas las dos: `git check-ignore -q .understand-anything/` y `git check-ignore -q .ua/` salen con 0. Si falta cualquiera, avisa de que hay que ignorar las dos y sigue sin grafo.
    - Si pasa la comprobación: desactualizado, invoca `understand-anything:understand` de forma explícita (nunca con `--auto-update`); inexistente, ofrécelo con `AskUserQuestion` y, antes del primer análisis, comprueba que `.understandignore` excluye entorno, secretos y dependencias.
 6. Variables que anulan la tabla de modelos (no bloquea): ejecuta con `Bash` `node -e "for (const n of ['CLAUDE_CODE_SUBAGENT_MODEL','CLAUDE_CODE_EFFORT_LEVEL']) if (n in process.env) console.log(n)"`, que imprime solo el nombre de las variables definidas, nunca su valor. Por cada nombre impreso, avisa en una línea: "la tabla de modelos está anulada por <nombre de la variable>". No imprimas ni pidas su valor y sigue.
+7. Retención de specs: aplica la política del README del plugin (sección "Retención de specs"). Si `refresh-estado` listó candidatos a depurar, pregunta con `AskUserQuestion` con "Todos fusionados", "Ninguno" o "Indicar cuáles"; tras "Indicar cuáles", pregunta de nuevo con `AskUserQuestion` de selección múltiple por los grupos candidatos que lista `refresh-estado`; después borra del árbol de trabajo los archivos elegidos, sin `git rm`. Guarda la lista de lo borrado para pasarla al tester en el paso 4.
 
 ## Paso 1: requisitos y puerta humana
 
@@ -61,7 +62,7 @@ Hasta el punto 5 el ciclo no escribe nada en el repositorio: la comprobación de
 3. Si su entrega trae preguntas (falta algo en la spec), plantéalas con `AskUserQuestion`, actualiza la spec como en el paso 1, puntos 3 y 4, y relanza `architect`.
 4. Veto: puerta humana con el motivo y la regla citada, con las opciones "Revisar requisitos" (vuelve al paso 1, punto 3, con el veto) o "Abandonar"; aquí no hay Aprobar.
 5. Plan: si es crítico, pide la segunda opinión sobre el plan. Puerta humana con el plan, la línea `crítico` y la segunda opinión. Pedir cambios: relanza `architect` con las indicaciones y repite este punto.
-6. Aprobado: guarda el plan en `<specsDir>/AAAA-MM-DD-<tema>-plan.md` con la estructura de `<plugin>/templates/plan.md`: un solo archivo, con fases de máximo 5 pasos si hay más.
+6. Aprobado: guarda el plan en `<specsDir>/AAAA-MM/AAAA-MM-DD-<tema>-plan.md` con la estructura de `<plugin>/templates/plan.md`: un solo archivo, con fases de máximo 5 pasos si hay más.
 
 ## Paso 3: desarrollo
 
@@ -74,7 +75,7 @@ Hasta el punto 5 el ciclo no escribe nada en el repositorio: la comprobación de
 Una vuelta es una pasada del paso 3 al 4; se cuentan desde 1 y el tope es `maxVueltas`.
 
 1. Foto de código, antes: de `git status --porcelain=v1 -z --untracked-files=all`, todo archivo cambiado que no sea documento, cada uno con su `git hash-object` (o "borrado"); así también se vigilan pruebas y scripts nuevos. Es documento: extensión `.md`, `.mdx` o `.txt`; el documento `estado`; los `docsObligatorios`; los valores de `docsPorArea`; los de `integracion` y `guias`; lo que esté bajo `specsDir`; y lo que coincida con `avisoPR`. Límite conocido de la foto: un documento nuevo que no sea `.md`, `.mdx` ni `.txt` y que el tester cree fuera de esas listas aparecerá como cambio de código (falso rojo); se resuelve como en el punto 3.
-2. Lanza `tester-documentador` con las rutas de la spec y el plan, indicándole la sección "A cargo del tester-documentador" del plan (pasos de documentación que el developer no hace) y, si lo hay, el resultado de `understand-diff`.
+2. Lanza `tester-documentador` con las rutas de la spec y el plan, indicándole la sección "A cargo del tester-documentador" del plan (pasos de documentación que el developer no hace) y, si lo hay, el resultado de `understand-diff`. Si `avisoPR` está bajo `specsDir`, el aviso va en `<specsDir>/AAAA-MM/AAAA-MM-DD-<tema>-aviso-pr.md`; y si en el paso 0 se depuraron archivos, pásale la lista.
 3. Foto de código, después, igual. Si difiere en algo (archivo nuevo, desaparecido u otro hash), la iteración falla porque el tester no puede tocar código de producción: escala con los archivos afectados. Opciones: volver al paso 3 con ese diff como devolución (cuenta como vuelta y respeta el tope del punto 4), que el usuario lo resuelva a mano y repetir el paso 4, o abandonar.
 4. Según la entrega del tester:
    - **Devolución al developer**: Antes de volver al paso 3, aplica la regla **Fallo repetido**. Si la vuelta es menor que `maxVueltas`, vuelve al paso 3 con el texto de la devolución. Si es igual, escala con el estado. Opciones: conceder una vuelta más, volver al paso 2 o abandonar.
@@ -89,7 +90,7 @@ Una vuelta es una pasada del paso 3 al 4; se cuentan desde 1 y el tope es `maxVu
 
 Bloque fijo de la puerta humana y, debajo:
 
-1. El "Aviso para PR" (contenido del archivo que coincide con `avisoPR` y que cambió en esta iteración, según `git status`, como hace `docs-gate`) si el cambio tocó `areasContrato`.
+1. El "Aviso para PR" (contenido del archivo que coincide con `avisoPR` y que cambió en esta iteración, según `git status`, como hace `docs-gate`; un aviso borrado por la retención no cuenta) si el cambio tocó `areasContrato`.
 2. El mensaje de commit propuesto por el tester. Si hay preexistentes aceptados, el tester no lo propone: muestra "Mensaje de commit: no propuesto por el tester (verificación no totalmente en verde por fallos preexistentes aceptados)" y una sugerencia breve tuya (título de la spec y una nota sobre los preexistentes).
 3. Si en el paso 0 se eligió "Continuación", la línea: "la iteración incluye cambios previos".
 4. La frase: "El commit lo hace el usuario. El orquestador nunca hace commit, push ni `git add`."

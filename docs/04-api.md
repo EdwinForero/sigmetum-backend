@@ -30,6 +30,9 @@ Todas las rutas van bajo `API_PREFIX` (por defecto `/api/v1`), salvo `/healthche
 | DELETE | `/delete-image` | 🔒 | `content.js` |
 | POST | `/upload-term` | 🔒 | `content.js` |
 | DELETE | `/delete-term` | 🔒 | `content.js` |
+| GET | `/list-recipients` | 🔒 | `content.js` |
+| POST | `/add-recipient` | 🔒 | `content.js` |
+| DELETE | `/delete-recipient` | 🔒 | `content.js` |
 
 ---
 
@@ -139,7 +142,7 @@ Body: `{ "fileName": "data/Malaga/2026-01-10_v1.xlsx" }` — borra esa versión.
 ## Contenido (`routes/content.js`)
 
 ### `POST /send-email`
-Body: `{ "username", "email", "subject", "message" }`. Envía un correo desde y hacia `EMAIL`, con `replyTo` al email del usuario y asunto `"{subject} - enviado por {username}<{email}>"`.
+Body: `{ "username", "email", "subject", "message" }`. Envía **un solo correo** desde `EMAIL` a **todos** los destinatarios de la lista de `GET /list-recipients` (`to` es un array: los destinatarios se ven entre sí, decisión del 12/11/2026), con `replyTo` al email del usuario y asunto `"{subject} - enviado por {username}<{email}>"`. Destino: los correos válidos de `data/contact/recipients.json` (las entradas no válidas del fichero se descartan); si el fichero no existe (`NoSuchKey`), la lista está vacía o ninguna entrada es válida, va a `EMAIL` como antes. Si la lectura de la lista **falla** (`AccessDenied`, que por S15 equivale a «falta el fichero», JSON roto o red) **o no responde en 4 segundos** (`RECIPIENTS_READ_TIMEOUT_MS` = 4000; el cliente S3 no tiene tiempo límite propio y una lectura colgada no rechaza nunca), el mensaje va a `EMAIL` con el asunto precedido de `[Aviso: lista de destinatarios no disponible] ` y un registro fijo (`[send-email] recipient list unavailable, using EMAIL:` más el nombre del error, `TimeoutError` si venció el plazo): el buzón `EMAIL` hay que vigilarlo (ver [para-infra](integracion/para-infra.md)). Riesgo aceptado (S10 de [seguridad](guias/seguridad.md)): «Responder a todos» enseña al visitante hasta 4 direcciones del personal; se pide a los destinatarios que usen «Responder».
 
 Límite: **5 peticiones cada 15 minutos por IP** (`express-rate-limit`, almacén en memoria; también cuentan las peticiones con cuerpo inválido). Respuestas:
 - `200` → `data: "Email sent successfully."`
@@ -162,6 +165,27 @@ Con la galería vacía, o con solo el marcador de carpeta `gallery/`, responde `
 
 ### `GET /list-terms`
 Devuelve el glosario `data/terms/noLatinTerms.json`: `[ { "term": "..." } ]`. Si no existe (`NoSuchKey`) devuelve `[]`, y desde el 30/10/2026 también con `AccessDenied` (S15: con `s3:ListBucket` acotado por `Prefix`, S3 puede responder `AccessDenied` ante una clave inexistente **(por confirmar en dev)**; solo esta lectura lo tolera, mediante `getTextJsonS3(..., { vacioSiAccessDenied: true })`). Riesgo aceptado: con un permiso roto sobre un glosario que existe, devuelve `[]` en vez de error (oculta el fallo, no destruye datos). Ante cualquier otro fallo de S3 (red, 5xx, `NoSuchBucket`), un glosario de 0 bytes, con JSON corrupto o con un JSON que no es un array, responde `500` genérico por `next(error)` (A6, 29/10/2026; antes `200` `[]`). **Efecto**: un glosario ilegible ya no se autocura y bloquea esta ruta, `POST /upload-term` y `DELETE /delete-term` hasta repararlo a mano en S3 (ver [06](06-almacenamiento-s3.md)).
+
+### `GET /list-recipients` 🔒
+Devuelve la lista de destinatarios del formulario de contacto, `data/contact/recipients.json` (ver [06](06-almacenamiento-s3.md)): `{ "success": true, "data": [ { "email": "..." } ] }`. `tokenAuth` también en la lectura (son correos del personal). Sin fichero (`NoSuchKey`) responde `200` `data: []`: **no** devuelve `EMAIL`, la dirección del servidor no sale de él. Solo se conservan las entradas con `email` de tipo cadena. Con `AccessDenied` (por S15, también «falta el fichero»), JSON roto, fichero que no es un array, red o 5xx responde `500` genérico por `next(error)`: la lectura **no** pasa `vacioSiAccessDenied` (un permiso roto no debe verse como lista vacía). No lleva limitador.
+
+### `POST /add-recipient` 🔒
+Body: `{ "email": "a@b.es" }`. Lee la lista, la valida y reescribe el fichero entero (lectura-modificación-escritura; carrera M1 aceptada, ver [07](07-estado-y-deuda-tecnica.md)). Se guarda el correo recortado con su capitalización. Respuestas, con textos fijos que **no reflejan el correo recibido** (S8):
+- `200` → `data: "Recipient added successfully"`.
+- `400` → `email is required` (falta, no es cadena o está vacío tras recortar); `email is not valid` (la regla de `/send-email`: máximo 254, sin controles ni saltos de línea y formato básico, no RFC); `Recipient already exists` (duplicado sin distinguir mayúsculas ni espacios); `Recipient limit reached` (ya hay 5).
+- `429` → `Too many changes. Please try again in 15 minutes.` (10 cambios cada 15 minutos por IP, límite compartido con `DELETE /delete-recipient`; el rechazo no lee ni escribe en S3 ni envía correo).
+- `500` → fallo de S3 o fichero ilegible, sin escribir; con `AccessDenied`, `Access denied to storage` (hasta crear el fichero inicial `[]`, ver [para-infra](integracion/para-infra.md)).
+
+Tras escribir, y **sin esperar** al envío, avisa por correo a los destinatarios de la lista **anterior** (o a `EMAIL` si estaba vacía o sin direcciones válidas), un correo por destinatario, con texto fijo en español: tipo de cambio, dirección **enmascarada** (`a***@dominio`) y fecha UTC; nunca la lista completa ni quién lo hizo. El correo añadido no lo recibe. Si el aviso falla, la respuesta no cambia y solo queda el registro fijo `[recipients] change notice not sent` (sin direcciones ni `err.message`, S8).
+
+### `DELETE /delete-recipient` 🔒
+Body: `{ "email": "a@b.es" }`. Misma lectura-modificación-escritura, mismo limitador y mismo aviso (el correo quitado **sí** recibe el aviso, por estar en la lista anterior). Coincidencia sin distinguir mayúsculas ni espacios. Respuestas:
+- `200` → `data: "Recipient deleted successfully"`.
+- `400` → `email is required`; `email is not valid` (más de 254 caracteres); `At least one recipient is required` (no se puede quitar el último).
+- `404` → `Recipient not found` (no es idempotente: quitar uno inexistente es un error).
+- `429` → como el alta. `500` → como el alta.
+
+Los rechazos `400` y `404` no escriben ni envían correo.
 
 ### `POST /upload-image` 🔒
 `multipart/form-data` con `file` y `title`. Guarda en `gallery/{título_saneado}.{extensión en minúsculas}` y responde `data: { key: "gallery/..." }`. `400` `File and title are required` si falta el fichero o `title` no es una cadena o está vacío (antes, un `title` no cadena daba 500).

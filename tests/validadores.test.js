@@ -2,7 +2,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { isValidDataKey, isValidDraftKey } = require('../functions/validateDataKey');
-const { DRAFTS_PATH, RESERVED_SEGMENTS, PROVINCIA_RESERVED } = require('../config/s3Paths');
+const { DRAFTS_PATH, CONTACT_PATH, CONTACT_RECIPIENTS_FILE, RESERVED_SEGMENTS, PROVINCIA_RESERVED } = require('../config/s3Paths');
 const { isValidImageKey } = require('../functions/validateImageKey');
 const { validateContactMessage } = require('../functions/validateContactMessage');
 
@@ -63,6 +63,16 @@ test('PROVINCIA_RESERVED y RESERVED_SEGMENTS incluyen drafts', () => {
     assert.ok(PROVINCIA_RESERVED.includes('drafts'));
 });
 test('DRAFTS_PATH es data/drafts', () => assert.equal(DRAFTS_PATH, 'data/drafts'));
+test('CONTACT_PATH y CONTACT_RECIPIENTS_FILE fijan la clave de la lista de destinatarios', () => {
+    assert.equal(CONTACT_PATH, 'data/contact');
+    assert.equal(CONTACT_RECIPIENTS_FILE, 'recipients.json');
+});
+test('contact es un segmento reservado: ni carpeta de provincia ni clave de versión o de borrador', () => {
+    assert.deepEqual(RESERVED_SEGMENTS, ['active', 'terms', 'drafts', 'contact']);
+    assert.ok(PROVINCIA_RESERVED.includes('contact'));
+    assert.equal(isValidDataKey('data/contact/2026-10-28_v1.xlsx'), false);
+    assert.equal(isValidDraftKey(`data/drafts/contact/${UUID}.xlsx`), false);
+});
 
 const imagenValidas =['foto.jpg', 'sub/foto-1_2.PNG', 'a.webp', 'b.gif', 'c.jpeg', 'foto(1).jpg', `${'a'.repeat(196)}.jpg`];
 const imagenInvalidas = [

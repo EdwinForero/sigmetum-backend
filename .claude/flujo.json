@@ -142,5 +142,5 @@
     "package.json",
     ".github/**"
   ],
-  "avisoPR": "docs/specs/*-aviso-pr.md"
+  "avisoPR": "docs/specs/**-aviso-pr.md"
 }
