@@ -108,12 +108,19 @@ test('isValidGetDataKey rechaza lo que no es cadena y las claves inválidas', ()
 
 for (const [descr, clave] of getDataValidas) {
     test(`GET /get-data con ${descr}: llega a S3 y responde 200`, async () => {
-        const r = await llamar(app, 'GET', `${PREFIX}/get-data/${clave}`);
+        // La versión .xlsx exige token (se convierte a JSON en la ruta); el activo .json sigue público.
+        const r = await llamar(app, 'GET', `${PREFIX}/get-data/${clave}`, clave.endsWith('.xlsx') ? { token: validToken } : {});
         assert.equal(r.status, 200, `${r.status} ${r.json?.error}`);
         assert.equal(r.json.success, true);
         assert.equal(spyTotal(), 1);
     });
 }
+test('GET /get-data con versión .xlsx sin token: 401 sin llamar a S3', async () => {
+    const r = await llamar(app, 'GET', `${PREFIX}/get-data/${buena}`);
+    assert.equal(r.status, 401, `${r.status} ${r.json?.error}`);
+    assert.deepEqual(r.json, { success: false, error: 'No token provided' });
+    assert.equal(spyTotal(), 0);
+});
 for (const [descr, clave] of getDataInvalidas) {
     test(`GET /get-data: 400 Invalid path con ${descr}`, async () => {
         const r = await llamar(app, 'GET', `${PREFIX}/get-data/${clave}`);

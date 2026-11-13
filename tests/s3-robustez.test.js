@@ -633,13 +633,17 @@ describe('B9 NoSuchKey a 404', () => {
             assert.deepEqual(res.body, { success: false, error: 'Invalid path' });
             assert.equal(estado.llamadas.length, 0);
         });
-        // Límite documentado (caracterización, frontend:D1 y M2): una versión .xlsx real no es JSON y sigue dando 500.
-        test('límite: una versión .xlsx real sigue dando 500 por JSON.parse', async () => {
+        // Una versión .xlsx real se convierte a JSON en la ruta (con token); antes daba 500 por JSON.parse (frontend:D1).
+        test('una versión .xlsx real da 200 con las filas convertidas', async () => {
             const xlsx = await makeXlsx([fullRow('Sevilla')]);
             estado.get = () => ({ Body: Readable.from([xlsx]) });
-            const res = await request(app).get('/api/v1/get-data/data/Sevilla/2026-10-05_v1.xlsx');
-            assert.equal(res.status, 500);
-            assert.deepEqual(res.body, { success: false, error: 'Internal server error' });
+            const res = await request(app).get('/api/v1/get-data/data/Sevilla/2026-10-05_v1.xlsx').set('Authorization', `Bearer ${token}`);
+            assert.equal(res.status, 200);
+            assert.deepEqual(res.body, { success: true, data: [{
+                Provincia: 'Sevilla', Municipio: 'Municipio', 'Altitud Media': 100, 'Sector Biogeográfico': 'Sector', 'Piso Bioclimático': 'Piso',
+                Ombrotipo: 'Ombrotipo', 'Naturaleza del Sustrato': 'Sustrato', 'Tipo de Serie': 'Tipo', 'Serie de Vegetación': 'Serie',
+                'Vegetación Potencial': 'Vegetación', 'Especies Características': 'Especies',
+            }] });
         });
     });
 });

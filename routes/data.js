@@ -82,15 +82,34 @@ router.get('/list-files', async (req, res, next) => {
 // Misma detección que errorHandler y getTextJsonS3 (aws/): si cambia una, revisa las otras.
 const isAccessDenied = (error) => error.name === 'AccessDenied' || error.Code === 'AccessDenied';
 
+// Puerta de token solo para la rama que convierte un Excel: una versión .xlsx exige sesión; el activo .json sigue público. Decide sobre el
+// mismo req.params.path (ya decodificado) que usa el manejador, así que un %2F no la salta. Es el primer manejador de la propia ruta (S3).
+const tokenAuthIfVersionKey = (req, res, next) => (isValidDataKey(req.params.path) ? tokenAuth(req, res, next) : next());
+
 // La clave se valida contra una lista de permitidos (versión .xlsx o activo .json) antes de llamar a S3. Es una ruta de solo lectura:
 // con una clave permitida, AccessDenied (S3 lo devuelve en vez de NoSuchKey si falta ListBucket) se responde como inexistente; la causa
-// queda en `cause` y getFileFromS3 ya la registra en el log.
-router.get('/get-data/:path(*)', async (req, res, next) => {
+// queda en `cause` y getFileFromS3 ya la registra en el log. Una versión .xlsx se convierte a JSON como en el activo; si el archivo no es
+// un libro legible, 422 (el try solo envuelve la conversión: un fallo de S3 sigue su camino, p. ej. AccessDenied a 404).
+router.get('/get-data/:path(*)', tokenAuthIfVersionKey, async (req, res, next) => {
     try {
-        if (!isValidGetDataKey(req.params.path)) {
+        const key = req.params.path;
+        if (!isValidGetDataKey(key)) {
             return res.status(400).json({ success: false, error: 'Invalid path' });
         }
-        const jsonData = await getFileFromS3(req.params.path);
+        if (isValidDataKey(key)) {
+            const buffer = await getBufferFromS3(key);
+            let processedData;
+            try {
+                ({ processedData } = await convertExcelToJson(buffer));
+            } catch (cause) {
+                return next(Object.assign(new Error(`Unreadable Excel version: ${cause.message}`, { cause }), {
+                    status: 422, publicMessage: 'The stored file is not a readable Excel workbook',
+                }));
+            }
+            res.set('Cache-Control', 'no-store');
+            return res.json({ success: true, data: processedData });
+        }
+        const jsonData = await getFileFromS3(key);
         res.json({ success: true, data: jsonData });
     } catch (error) {
         if (isAccessDenied(error)) {
