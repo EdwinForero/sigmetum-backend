@@ -78,6 +78,10 @@ const invalidos = [
     ['BEL en subject', con('subject', 'Hola\x07')], ['BEL en message', con('message', 'Hola\x07')],
     ['correo con paréntesis', con('email', 'a(b)@example.com')], ['correo con comilla simple', con('email', "o'brien@example.com")],
     ['correo con barra invertida', con('email', 'a\\b@example.com')], ['correo con dos puntos', con('email', 'a:b@example.com')],
+    // M31: los caracteres de formato (\p{Cf}) en el correo dan el mensaje fijo de formato, no el de controles.
+    ['U+200B en email', con('email', 'ana\u{200B}@example.com'), 'email is not valid'],
+    ['U+202E en email', con('email', 'ana@exa\u{202E}mple.com'), 'email is not valid'],
+    ['U+00AD en email', con('email', 'ana\u{00AD}@example.com'), 'email is not valid'],
 ];
 const validos = [
     ['cuerpo válido', validMail],
@@ -88,6 +92,11 @@ const validos = [
     ['message con \\n, \\r\\n y \\t', { ...validMail, message: 'Línea 1\nLínea 2\r\n\tSangrada' }],
     ['correo con +tag y subdominio', { ...validMail, email: 'nombre+tag@sub.dominio.es' }],
     ['correo a@b.com', { ...validMail, email: 'a@b.com' }],
+    ['correo con letras Unicode normales', { ...validMail, email: 'josé.núñez@ejemplo.es' }],
+    ['subject con emoji compuesto (U+200D)', { ...validMail, subject: 'Hola \u{1F469}\u{200D}\u{1F4BB}' }],
+    ['subject con guion suave (U+00AD)', { ...validMail, subject: 'Co\u{00AD}operaci\u{00F3}n' }],
+    ['username con ZWJ (U+200D)', { ...validMail, username: 'Ana \u{1F469}\u{200D}\u{1F4BB}' }],
+    ['username con guion suave (U+00AD)', { ...validMail, username: 'Mar\u{00AD}\u{00ED}a' }],
 ];
 
 describe('criterio 3: validación de /send-email (anónimo)', () => {
@@ -100,7 +109,9 @@ describe('criterio 3: validación de /send-email (anónimo)', () => {
 
     // Los casos con U+2028, U+2029, U+0085 y los demás controles llevan el carácter esperado en la cadena enviada.
     test('los casos de caracteres de cabecera contienen el carácter esperado', () => {
-        const esperado = { 'U+2028': '\u{2028}', 'U+2029': '\u{2029}', 'U+0085': '\x85', NUL: '\x00', BEL: '\x07' };
+        const esperado = {
+            'U+2028': '\u{2028}', 'U+2029': '\u{2029}', 'U+0085': '\x85', NUL: '\x00', BEL: '\x07', 'U+200B': '\u{200B}', 'U+202E': '\u{202E}',
+        };
         for (const [nombre, body] of invalidos) {
             const clave = Object.keys(esperado).find((k) => nombre.startsWith(`${k} en `));
             if (!clave) continue;
@@ -108,11 +119,12 @@ describe('criterio 3: validación de /send-email (anónimo)', () => {
         }
     });
 
-    for (const [nombre, body] of invalidos) {
+    for (const [nombre, body, mensaje] of invalidos) {
         test(nombre, async () => {
             const r = await llamar(app, 'POST', URL, { body, ip: nextIp() });
             assert.equal(r.status, 400, `status=${r.status}`);
             assert.ok(isEnvelopeError(r));
+            if (mensaje) assert.equal(r.json.error, mensaje);
             assert.equal(calls.sendMail, 0);
         });
     }
@@ -160,6 +172,17 @@ describe('destinatarios de /send-email: la lista con EMAIL de respaldo', () => {
     });
     test('una entrada no válida del fichero se descarta', async () => {
         seed.textJson[CLAVE] = [{ email: 'a@x.es' }, { email: 'mal' }, { email: 'x@y.es,z@w.es' }, { email: 'q@r.es\nBcc: s@t.es' }, { email: 5 }, { email: ' b@x.es ' }];
+        assert.equal((await enviar()).status, 200);
+        assert.deepEqual(argsLog.mail[0].to, ['a@x.es']);
+    });
+    test('las direcciones repetidas (sin distinguir mayúsculas) se envían una sola vez, con el formato de la primera (M32)', async () => {
+        seed.textJson[CLAVE] = [{ email: 'a@x.es' }, { email: 'A@x.es' }, { email: 'b@x.es' }];
+        assert.equal((await enviar()).status, 200);
+        assert.equal(calls.sendMail, 1);
+        assert.deepEqual(argsLog.mail[0].to, ['a@x.es', 'b@x.es']);
+    });
+    test('una entrada con \\p{Cf} del fichero se descarta (M31)', async () => {
+        seed.textJson[CLAVE] = [{ email: 'a@x.es' }, { email: 'b\u{200B}@x.es' }, { email: 'c@x\u{202E}.es' }];
         assert.equal((await enviar()).status, 200);
         assert.deepEqual(argsLog.mail[0].to, ['a@x.es']);
     });

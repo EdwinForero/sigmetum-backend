@@ -23,7 +23,7 @@ Cambio **compatible**, sin `/api/v2`, sin variables de entorno, permisos IAM ni 
 - **Carrera M1**: la lista se reescribe entera; una baja perdida deja una dirección (quizá maliciosa) sin aviso. Mitigación futura: `If-Match` en la escritura.
 - **Los destinatarios se ven entre sí** (S10): «Responder a todos» enseña al visitante hasta 4 direcciones del personal. Mitigación: pedir que usen «Responder». `replyTo` se mantiene.
 - `GET /list-recipients` sin fichero devuelve `[]`, no `[EMAIL]`: la dirección del servidor no sale de él.
-- Hallazgos bajos de la segunda opinión, sin corregir, anotados en `docs/07-estado-y-deuda-tecnica.md` como M30 (`sanitizeRecipients` conserva entradas no válidas que cuentan para el mínimo y el máximo), M31 (`isValidEmailAddress` no rechaza `p{Cf}`: duplicados visuales y falseo en el aviso) y M32 (`recipientsForContact` no deduplica).
+- Hallazgos bajos de la segunda opinión, sin corregir, anotados en `docs/07-estado-y-deuda-tecnica.md` como M30 (`sanitizeRecipients` conserva entradas no válidas que cuentan para el mínimo y el máximo), M31 (`isValidEmailAddress` no rechaza `\p{Cf}`: duplicados visuales y falseo en el aviso) y M32 (`recipientsForContact` no deduplica).
 - La IP del limitador depende de `trust proxy` (M12, saltos reales **por confirmar con infra**).
 
 ## Integración

@@ -8,9 +8,22 @@ const EMAIL_MAX = 254;
 
 const normalizeEmail = (s) => s.trim().toLowerCase();
 
-// Del fichero solo se conservan los { email } cuyo email es una cadena.
+// Dedupe por normalizeEmail: conserva la primera aparición (orden y formato).
+const uniqueByEmail = (emails) => {
+    const seen = new Set();
+    return emails.filter((email) => {
+        const key = normalizeEmail(email);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
+};
+
+// Del fichero solo se conservan los { email } cuyo email es una cadena y una dirección válida (una con espacios alrededor
+// no lo es), sin repetir direcciones (primera aparición). Solo cuentan para el mínimo y el máximo las que quedan.
 const sanitizeRecipients = (list) => (Array.isArray(list)
-    ? list.filter((item) => item && typeof item.email === 'string').map((item) => ({ email: item.email }))
+    ? uniqueByEmail(list.filter((item) => item && typeof item.email === 'string' && isValidEmailAddress(item.email)).map((item) => item.email))
+        .map((email) => ({ email }))
     : []);
 
 const rejection = (status, error) => ({ status, error });
@@ -37,7 +50,9 @@ const planRemoveRecipient = (list, raw) => {
 };
 
 // Dirección enmascarada para el aviso: primer carácter + ***@ + dominio (sin @, ***). Nunca lleva la parte local entera.
-const maskEmail = (email) => {
+// Cada carácter \p{Cf} se sustituye por un ? visible: el aviso no reproduce caracteres invisibles ni de inversión de texto.
+const maskEmail = (raw) => {
+    const email = raw.replace(/\p{Cf}/gu, '?');
     const at = email.indexOf('@');
     if (at < 1) return '***';
     return `${[...email][0]}***@${email.slice(at + 1)}`;
@@ -62,10 +77,10 @@ const buildRecipientChangeNotice = ({ action, email, date }) => {
 // Marca del asunto de /send-email cuando no se pudo leer la lista y el mensaje va al respaldo (EMAIL).
 const LIST_UNAVAILABLE_SUBJECT_PREFIX = '[Aviso: lista de destinatarios no disponible] ';
 
-// Destinatarios de /send-email: los correos válidos de la lista (las entradas no válidas del fichero se descartan) o, si no
-// queda ninguno, [fallback].
+// Destinatarios de /send-email: los correos válidos de la lista (las entradas no válidas del fichero se descartan), sin
+// repetir direcciones, o, si no queda ninguno, [fallback].
 const recipientsForContact = (list, fallback) => {
-    const valid = list.map((item) => item.email).filter(isValidEmailAddress);
+    const valid = uniqueByEmail(list.map((item) => item.email).filter(isValidEmailAddress));
     return valid.length ? valid : [fallback];
 };
 
