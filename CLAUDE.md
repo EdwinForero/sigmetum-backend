@@ -70,7 +70,7 @@ Cambios **compatibles** no necesitan versión nueva; cambios **incompatibles** s
 
 - Los fallos se corrigen con TDD: primero un test en `tests/` que falle **por el motivo correcto**, después el cambio mínimo (la base de tests existe; es parcial, M11). Una ruta nueva se clasifica en `tests/estructura-rutas.test.js`; si añades tests, sube `MIN_TESTS` en `scripts/quality-check.mjs`.
 - Cada ruta responde `{ success: true, data }` o `{ success: false, error }`; los fallos se pasan con `next(error)` a `middleware/errorHandler.js`.
-- Las rutas protegidas llevan `tokenAuth` como primer manejador de la propia ruta.
+- Las rutas protegidas llevan `tokenAuth` como primer manejador de la propia ruta. Única excepción: `GET /get-data/:path(*)` lleva `tokenAuthIfVersionKey` (puerta local de `routes/data.js`) como primer manejador, que exige token solo para versiones `.xlsx`; el activo sigue público y `tests/estructura-rutas.test.js` la clasifica como `version-token`.
 - Las claves de S3 salen de `config/s3Paths.js`; las variables de entorno, de `config/validateEnv.js` y `.env.example`.
 - Este repositorio no corrige nada del frontend ni de `sigmetum-infra`: si un cambio los afecta, se documenta y se avisa en la PR.
 - No guardes secretos en `.env.example` ni en la documentación.

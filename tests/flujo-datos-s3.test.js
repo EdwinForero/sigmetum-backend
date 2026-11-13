@@ -221,3 +221,79 @@ describe('delete-file', () => {
         assert.equal(datos.status, 404);
     });
 });
+
+describe('GET /get-data con una versión .xlsx (convierte a JSON y exige token)', () => {
+    const getVersion = (ruta, tokenDePrueba = token) => request(app).get(`/api/v1/${ruta}`).set('Authorization', `Bearer ${tokenDePrueba}`);
+    const RUTA_V1 = `get-data/${BASE}/${DIA}_v1.xlsx`;
+    const MENSAJE_404 = 'The requested file does not exist in storage';
+
+    test('con token: la versión responde igual que el activo y que el JSON guardado, con la lista de especies limpia', async (t) => {
+        congelar(t);
+        const filaConEspecies = fila('Écija');
+        filaConEspecies[10] = 'A, B , ,C';
+        const r = await subir(app, [filaConEspecies, fila('Osuna')], token);
+        assert.equal(r.status, 200, JSON.stringify(r.json));
+        const version = await getVersion(RUTA_V1);
+        assert.equal(version.status, 200, JSON.stringify(version.body));
+        const activo = await getDatos('get-data/data/active/Sevilla.json');
+        assert.deepEqual(version.body, activo.body);
+        assert.deepEqual(version.body.data, JSON.parse(s3.leer(ACTIVA).toString()));
+        assert.deepEqual(version.body.data[0]['Especies Características'], ['A', 'B', 'C']);
+    });
+    test('versión confirmada desde un borrador con celda vacía: igual que el activo y sin la clave vacía', async (t) => {
+        congelar(t);
+        const subida = await subir(app, [fila('Borrador', true)], token);
+        assert.equal(subida.status, 400);
+        const confirmado = await post('upload/confirm', { confirmed: true, draftKey: subida.json.data.draftKey });
+        assert.equal(confirmado.status, 200);
+        const version = await getVersion(RUTA_V1);
+        assert.equal(version.status, 200, JSON.stringify(version.body));
+        const activo = await getDatos('get-data/data/active/Sevilla.json');
+        assert.deepEqual(version.body, activo.body);
+        assert.equal('Altitud Media' in version.body.data[0], false);
+    });
+    test('provincia con tilde y la clave pedida con encodeURI: 200 igual que el activo', async (t) => {
+        congelar(t);
+        const r = await subir(app, [fullRow('Málaga')], token);
+        assert.equal(r.status, 200, JSON.stringify(r.json));
+        const version = await getVersion(encodeURI(`get-data/data/Málaga/${DIA}_v1.xlsx`));
+        assert.equal(version.status, 200, JSON.stringify(version.body));
+        const activo = await getDatos(encodeURI('get-data/data/active/Málaga.json'));
+        assert.equal(activo.status, 200);
+        assert.deepEqual(version.body, activo.body);
+        assert.deepEqual(version.body.data, JSON.parse(s3.leer('data/active/Málaga.json').toString()));
+    });
+    test('la versión .xlsx autenticada lleva Cache-Control: no-store y el activo .json no', async (t) => {
+        congelar(t);
+        const r = await subir(app, [fila('Écija')], token);
+        assert.equal(r.status, 200, JSON.stringify(r.json));
+        const version = await getVersion(RUTA_V1);
+        assert.equal(version.status, 200, JSON.stringify(version.body));
+        assert.equal(version.headers['cache-control'], 'no-store');
+        const activo = await getDatos('get-data/data/active/Sevilla.json');
+        assert.equal(activo.status, 200);
+        assert.notEqual(activo.headers['cache-control'], 'no-store');
+    });
+    test('versión inexistente: 404 con el cuerpo de siempre (regresión)', async () => {
+        const res = await getVersion(RUTA_V1);
+        assert.equal(res.status, 404);
+        assert.deepEqual(res.body, { success: false, error: MENSAJE_404 });
+    });
+    test('archivo que no es un libro de Excel: 422 con mensaje público y el motivo en el log', async () => {
+        s3.sembrar(`${BASE}/${DIA}_v1.xlsx`, Buffer.from('no es un libro'));
+        const res = await getVersion(RUTA_V1);
+        assert.equal(res.status, 422);
+        assert.deepEqual(res.body, { success: false, error: 'The stored file is not a readable Excel workbook' });
+        const textos = console.error.mock.calls.map((c) => c.arguments.map(String).join(' ')).join(' | ');
+        assert.match(textos, /422/);
+    });
+    test('AccessDenied de S3 al leer la versión: 404 como siempre, no 422', async () => {
+        s3.sembrar(`${BASE}/${DIA}_v1.xlsx`, await makeXlsx([fila('X')]));
+        s3.alEnviar((llamada) => {
+            if (llamada.op === 'Get') throw Object.assign(new Error('Access Denied'), { name: 'AccessDenied', Code: 'AccessDenied', $metadata: { httpStatusCode: 403 } });
+        });
+        const res = await getVersion(RUTA_V1);
+        assert.equal(res.status, 404);
+        assert.deepEqual(res.body, { success: false, error: MENSAJE_404 });
+    });
+});

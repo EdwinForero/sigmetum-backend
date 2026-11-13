@@ -32,6 +32,31 @@ for (const [method, path] of PROTECTED) {
     }
 }
 
+// GET /get-data/:path(*) no está en PROTECTED: solo la rama de versiones .xlsx exige token (puerta tokenAuthIfVersionKey); el activo
+// .json sigue público. La puerta decide sobre la clave ya decodificada, así que un %2F no la salta.
+for (const clave of ['data/Sevilla/2026-10-05_v1.xlsx', 'data%2FSevilla%2F2026-10-05_v1.xlsx']) {
+    for (const [estado, token, mensaje] of TOKEN_STATES) {
+        test(`${estado} GET /get-data de una versión .xlsx (${clave})`, async () => {
+            const r = await llamar(app, 'GET', `${PREFIX}/get-data/${clave}`, { token });
+            assert.ok(esperado(r, mensaje), `${r.status} ${r.json?.error}`);
+            assert.equal(spyTotal(), 0);
+        });
+    }
+}
+test('control: GET /get-data del activo .json sin token da 200', async () => {
+    const r = await llamar(app, 'GET', `${PREFIX}/get-data/data/active/Sevilla.json`);
+    assert.equal(r.status, 200);
+});
+test('control: GET /get-data de una clave no permitida sin token da 400 (la puerta no la toca)', async () => {
+    const r = await llamar(app, 'GET', `${PREFIX}/get-data/data/terms/noLatinTerms.json`);
+    assert.equal(r.status, 400);
+    assert.equal(spyTotal(), 0);
+});
+test('control: GET /get-data de una versión .xlsx con token válido da 200', async () => {
+    const r = await llamar(app, 'GET', `${PREFIX}/get-data/data/Sevilla/2026-10-05_v1.xlsx`, { token: validToken });
+    assert.equal(r.status, 200);
+});
+
 // Orden de middleware: tokenAuth corre antes que multer (si multer corriera primero, un multipart roto daría 400).
 for (const path of ['/upload', '/upload-image']) {
     for (const [estado, token, mensaje] of TOKEN_STATES) {

@@ -22,7 +22,7 @@ const ROUTES = {
     'GET /get-image': 'public',
     'GET /list-terms': 'public',
     'GET /list-files': 'public',
-    'GET /get-data/:path(*)': 'public',
+    'GET /get-data/:path(*)': 'version-token',
     'GET /get-merged-data': 'public',
     'GET /auth': 'protected',
     'POST /upload': 'protected',
@@ -61,6 +61,13 @@ for (const id of Object.keys(ROUTES)) {
 for (const [id, kind] of Object.entries(ROUTES)) {
     if (kind === 'protected') {
         test(`tokenAuth es el primer manejador de ${id}`, () => assert.equal(declared.get(id)?.handlers[0], tokenAuth));
+    } else if (kind === 'version-token') {
+        // Puerta local de routes/data.js: exige token solo si la clave es una versión .xlsx; el activo .json sigue público.
+        test(`${id} lleva la puerta tokenAuthIfVersionKey y no tokenAuth directo`, () => {
+            const handlers = declared.get(id)?.handlers;
+            assert.equal(handlers?.[0].name, 'tokenAuthIfVersionKey');
+            assert.ok(!handlers.includes(tokenAuth), 'lleva tokenAuth como manejador propio');
+        });
     } else {
         test(`${id} pública sin tokenAuth`, () => assert.ok(declared.has(id) && !declared.get(id).handlers.includes(tokenAuth), 'lleva tokenAuth'));
     }
