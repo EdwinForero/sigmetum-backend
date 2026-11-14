@@ -13,8 +13,11 @@ const HEADER_FORBIDDEN = /[\p{Cc}\u2028\u2029]/u;
 // Mensaje: admite \n, \r y \t; rechaza el resto de controles.
 const MESSAGE_FORBIDDEN = /(?![\n\r\t])\p{Cc}/u;
 
+// Caracteres Unicode de formato (U+200B, U+202E...): invisibles o que invierten el texto; no valen en una dirección.
+const FORMAT_CHARS = /\p{Cf}/u;
+
 // Regla del correo (la usan /send-email y la lista de destinatarios): recibe el valor ya recortado.
-const isValidEmailAddress = (trimmed) => trimmed.length <= EMAIL_MAX && !HEADER_FORBIDDEN.test(trimmed) && EMAIL_PATTERN.test(trimmed);
+const isValidEmailAddress = (trimmed) => trimmed.length <= EMAIL_MAX && !HEADER_FORBIDDEN.test(trimmed) && !FORMAT_CHARS.test(trimmed) && EMAIL_PATTERN.test(trimmed);
 
 const validateContactMessage = (body) => {
     const { username, email, subject, message } = body || {};
@@ -48,7 +51,7 @@ const validateContactMessage = (body) => {
     if (MESSAGE_FORBIDDEN.test(value.message)) {
         return { error: 'message must not contain control characters' };
     }
-    if (!EMAIL_PATTERN.test(value.email)) {
+    if (!isValidEmailAddress(value.email)) {
         return { error: 'email is not valid' };
     }
 

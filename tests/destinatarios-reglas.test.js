@@ -13,12 +13,14 @@ const congelada = (...emails) => Object.freeze(emails.map((email) => Object.free
 const SECRETO = 'secreto@ejemplo.org';
 
 describe('isValidEmailAddress: la misma regla que /send-email', () => {
-    const validas = ['a@b.com', 'nombre+tag@sub.dominio.es', 'ana@example.com', `${'a'.repeat(242)}@example.com`];
+    const validas = ['a@b.com', 'nombre+tag@sub.dominio.es', 'ana@example.com', `${'a'.repeat(242)}@example.com`, 'josé.núñez@ejemplo.es', '用户@例子.广告'];
     const invalidas = [
         ['sin arroba', 'abc'], ['con espacio', 'a b@c.d'], ['dos destinatarios', 'a@b.c,d@e.f'], ['paréntesis', 'a(b)@example.com'],
         ['comilla simple', "o'brien@example.com"], ['barra invertida', 'a\\b@example.com'], ['dos puntos', 'a:b@example.com'],
         ['255 caracteres', `${'a'.repeat(243)}@example.com`], ['salto de línea', 'ana@example.com\nBcc: x@y.z'],
         ['U+2028', 'ana\u{2028}@example.com'], ['NUL', 'ana\x00@example.com'], ['sin punto en el dominio', 'a@b'],
+        ['U+200B (espacio de ancho cero) en la parte local', 'ana\u{200B}@example.com'],
+        ['U+202E (inversión de texto) en el dominio', 'ana@exa\u{202E}mple.com'],
     ];
     for (const v of validas) test(`acepta ${v.slice(0, 30)}`, () => assert.equal(isValidEmailAddress(v), true));
     for (const [nombre, v] of invalidas) test(`rechaza ${nombre}`, () => assert.equal(isValidEmailAddress(v), false));
@@ -36,6 +38,18 @@ describe('sanitizeRecipients', () => {
     test('deja solo los { email } con email de tipo cadena', () => {
         const sucia = [{ email: 'a@b.es' }, { email: 5 }, null, 'x@y.es', { nombre: 'x' }, { email: 'c@d.es', extra: 1 }, [], { email: undefined }];
         assert.deepEqual(sanitizeRecipients(sucia), lista('a@b.es', 'c@d.es'));
+    });
+    test('filtra por validez: descarta formato, \\p{Cf}, espacios alrededor y más de 254 caracteres (M30)', () => {
+        const sucia = [
+            { email: 'a@b.es' }, { email: 'mal' }, { email: 'x\u{200B}@y.es' }, { email: 'ana@exa\u{202E}mple.com' }, { email: ' c@d.es ' },
+            { email: `${'a'.repeat(250)}@b.es` }, { email: 'p(q)@r.es' }, { email: 'e@f.es', extra: 1 },
+        ];
+        assert.deepEqual(sanitizeRecipients(sucia), lista('a@b.es', 'e@f.es'));
+    });
+    test('deduplica al leer: conserva la primera aparición por normalizeEmail, con su formato y su orden (M32)', () => {
+        const entrada = congelada('Ana@x.es', 'b@x.es', 'ana@x.es', 'ANA@X.ES', 'b@x.es', 'c@x.es');
+        assert.deepEqual(sanitizeRecipients(entrada), lista('Ana@x.es', 'b@x.es', 'c@x.es'));
+        assert.deepEqual(entrada, lista('Ana@x.es', 'b@x.es', 'ana@x.es', 'ANA@X.ES', 'b@x.es', 'c@x.es'));
     });
     test('lo que no es un array da una lista vacía', () => {
         for (const v of [undefined, null, 'a@b.es', 5, {}]) assert.deepEqual(sanitizeRecipients(v), []);
@@ -160,6 +174,12 @@ describe('maskEmail', () => {
         assert.equal(maskEmail(''), '***');
     });
     test('no deja ver la parte local', () => assert.ok(!maskEmail('ana.garcia@example.com').includes('na.garcia')));
+    test('sustituye cada \\p{Cf} por ? (no lo borra ni lo reproduce)', () => {
+        assert.equal(maskEmail('\u{202E}ana@example.com'), '?***@example.com');
+        assert.equal(maskEmail('ana@exa\u{200B}mple.com'), 'a***@exa?mple.com');
+        assert.equal(maskEmail('ana@e\u{200B}x\u{202E}ample.com'), 'a***@e?x?ample.com');
+        for (const m of [maskEmail('\u{202E}ana@example.com'), maskEmail('ana@exa\u{200B}mple.com')]) assert.ok(!/\p{Cf}/u.test(m), m);
+    });
 });
 
 describe('buildRecipientChangeNotice', () => {
@@ -191,6 +211,18 @@ describe('buildRecipientChangeNotice', () => {
             assert.ok(!aviso.text.includes('ana.garcia@example.com'));
         }
     });
+    test('con \\p{Cf} en la dirección, el aviso lleva ? y ningún carácter de formato (M31)', () => {
+        for (const action of ['add', 'remove']) {
+            const a = buildRecipientChangeNotice({ action, email: '\u{202E}ana@example.com', date });
+            const b = buildRecipientChangeNotice({ action, email: 'ana@exa\u{200B}mple.com', date });
+            assert.ok(a.text.includes('?***@example.com'), a.text);
+            assert.ok(b.text.includes('a***@exa?mple.com'), b.text);
+            for (const aviso of [a, b]) {
+                assert.ok(!/\p{Cf}/u.test(aviso.subject), aviso.subject);
+                assert.ok(!/\p{Cf}/u.test(aviso.text), aviso.text);
+            }
+        }
+    });
     test('el texto es fijo: no depende de la hora salvo en la fecha', () => {
         const otra = buildRecipientChangeNotice({ action: 'add', email: 'ana.garcia@example.com', date: new Date('2026-12-31T23:59:00Z') });
         assert.equal(otra.text.replace('2026-12-31 23:59', '2026-11-12 09:05'), alta.text);
@@ -204,6 +236,14 @@ describe('recipientsForContact', () => {
     test('descarta las entradas no válidas (formato, controles, espacios, más de 254 caracteres)', () => {
         const sucia = lista('a@b.es', 'mal', 'x@y.es,z@w.es', 'q@r.es\nBcc: s@t.es', ' c@d.es ', `${'a'.repeat(250)}@b.es`, 'p(q)@r.es');
         assert.deepEqual(recipientsForContact(sucia, 'resp@x.es'), ['a@b.es']);
+    });
+    test('descarta las direcciones con \\p{Cf} (M31)', () => {
+        assert.deepEqual(recipientsForContact(lista('a@b.es', 'x\u{200B}@y.es', 'q@r\u{202E}.es'), 'resp@x.es'), ['a@b.es']);
+    });
+    test('deduplica sin distinguir mayúsculas ni espacios, con el orden y el formato de la primera aparición (M32)', () => {
+        const entrada = congelada('Ana@x.es', 'b@x.es', 'ana@x.es', 'ANA@X.ES', 'b@x.es');
+        assert.deepEqual(recipientsForContact(entrada, 'resp@x.es'), ['Ana@x.es', 'b@x.es']);
+        assert.deepEqual(entrada, lista('Ana@x.es', 'b@x.es', 'ana@x.es', 'ANA@X.ES', 'b@x.es'));
     });
     test('con la lista vacía o sin ninguna entrada válida devuelve [respaldo]', () => {
         assert.deepEqual(recipientsForContact([], 'resp@x.es'), ['resp@x.es']);

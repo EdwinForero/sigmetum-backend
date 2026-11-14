@@ -44,6 +44,19 @@ describe('GET /list-recipients', () => {
         const r = await llamarAutorizado(app, 'GET', '/list-recipients');
         assert.deepEqual(r.json.data, lista('a@x.es'));
     });
+    test('descarta las entradas no válidas (formato, \\p{Cf}, espacios alrededor) y deduplica sin distinguir mayúsculas (M30, M32)', async () => {
+        sembrar('a@x.es', 'mal', 'A@x.es', 'x\u{200B}@y.es', ' c@d.es ', 'b@x.es', 'B@X.ES');
+        const r = await llamarAutorizado(app, 'GET', '/list-recipients');
+        assert.equal(r.status, 200);
+        assert.deepEqual(r.json.data, lista('a@x.es', 'b@x.es'));
+        assert.deepEqual(argsLog.put, [], 'un GET no escribe nunca');
+    });
+    test('un fichero con solo entradas no válidas se comporta como la lista vacía', async () => {
+        sembrar('mal', 'x\u{200B}@y.es');
+        const r = await llamarAutorizado(app, 'GET', '/list-recipients');
+        assert.deepEqual(r.json, { success: true, data: [] });
+        assert.deepEqual(argsLog.put, []);
+    });
     test('no lleva limitador: doce lecturas desde la misma IP dan 200', async () => {
         const ip = nextIp();
         for (let i = 0; i < 12; i += 1) assert.equal((await llamarAutorizado(app, 'GET', '/list-recipients', undefined, ip)).status, 200);
@@ -80,6 +93,8 @@ describe('POST /add-recipient', () => {
         ['email vacío', { email: '   ' }, 'email is required'], ['formato inválido', { email: 'secreto(x)@ejemplo.org' }, 'email is not valid'],
         ['dos direcciones', { email: 'secreto@ejemplo.org,otro@x.es' }, 'email is not valid'],
         ['duplicado con otras mayúsculas y espacios', { email: ' A@X.ES ' }, 'Recipient already exists'],
+        ['\\p{Cf} en la parte local (U+200B)', { email: 'a\u{200B}@x.es' }, 'email is not valid'],
+        ['\\p{Cf} en el dominio (U+202E)', { email: 'a@x\u{202E}.es' }, 'email is not valid'],
     ];
     for (const [nombre, body, mensaje] of rechazos) {
         test(`rechazo ${nombre}: 400 ${mensaje}, sin escribir y sin enviar correo`, async () => {
@@ -92,6 +107,32 @@ describe('POST /add-recipient', () => {
             assert.equal(calls.sendMail, 0);
         });
     }
+    test('M30: con 4 válidas y una no válida, el alta es posible y se escriben las 5 válidas sin la no válida', async () => {
+        sembrar('a@x.es', 'b@x.es', 'c@x.es', 'd@x.es', 'mal');
+        const r = await alta('e@x.es');
+        assert.equal(r.status, 200);
+        assert.deepEqual(argsLog.put, [[CLAVE, lista('a@x.es', 'b@x.es', 'c@x.es', 'd@x.es', 'e@x.es')]]);
+    });
+    test('M30: con 5 válidas y una no válida, el sexto sigue dando 400 Recipient limit reached', async () => {
+        sembrar('a@x.es', 'b@x.es', 'c@x.es', 'd@x.es', 'e@x.es', 'mal');
+        const r = await alta('f@x.es');
+        assert.equal(r.status, 400);
+        assert.equal(r.json.error, 'Recipient limit reached');
+        assert.deepEqual(argsLog.put, []);
+    });
+    test('M30: con solo entradas no válidas, el alta se admite y escribe solo la nueva', async () => {
+        sembrar('mal', 'x\u{200B}@y.es');
+        const r = await alta('nuevo@x.es');
+        assert.equal(r.status, 200);
+        assert.deepEqual(argsLog.put, [[CLAVE, lista('nuevo@x.es')]]);
+    });
+    test('M32: el alta de un duplicado en mayúsculas de una entrada repetida sigue dando 400 Recipient already exists', async () => {
+        sembrar('a@x.es', 'A@x.es', 'b@x.es');
+        const r = await alta('A@X.ES');
+        assert.equal(r.status, 400);
+        assert.equal(r.json.error, 'Recipient already exists');
+        assert.deepEqual(argsLog.put, []);
+    });
     test('ningún mensaje de rechazo contiene el correo recibido (BE5)', async () => {
         sembrar('secreto@ejemplo.org', 'b@x.es', 'c@x.es', 'd@x.es', 'e@x.es');
         for (const email of ['secreto@ejemplo.org', 'SECRETO@EJEMPLO.ORG', 'secreto2@ejemplo.org', 'secreto(@ejemplo.org']) {
@@ -127,6 +168,32 @@ describe('DELETE /delete-recipient', () => {
         assert.equal(r.status, 400);
         assert.equal(r.json.error, 'At least one recipient is required');
         assert.deepEqual(argsLog.put, []);
+    });
+    test('M30: con 1 válida y 2 no válidas, quitar la válida da 400 At least one recipient is required sin escribir', async () => {
+        sembrar('a@x.es', 'mal', 'x\u{200B}@y.es');
+        const r = await baja('a@x.es');
+        assert.equal(r.status, 400);
+        assert.equal(r.json.error, 'At least one recipient is required');
+        assert.deepEqual(argsLog.put, []);
+    });
+    test('M30: con solo entradas no válidas, quitar una da 404 Recipient not found sin escribir', async () => {
+        sembrar('mal', 'x\u{200B}@y.es');
+        const r = await baja('mal');
+        assert.equal(r.status, 404);
+        assert.equal(r.json.error, 'Recipient not found');
+        assert.deepEqual(argsLog.put, []);
+    });
+    test('M30 y M32: la baja escribe solo las válidas, sin las no válidas ni los duplicados', async () => {
+        sembrar('a@x.es', 'A@x.es', 'b@x.es', 'mal', 'c@x.es');
+        const r = await baja('a@x.es');
+        assert.equal(r.status, 200);
+        assert.deepEqual(argsLog.put, [[CLAVE, lista('b@x.es', 'c@x.es')]]);
+    });
+    test('M32: con [a, A, b], la baja de a escribe [b]', async () => {
+        sembrar('a@x.es', 'A@x.es', 'b@x.es');
+        const r = await baja('a@x.es');
+        assert.equal(r.status, 200);
+        assert.deepEqual(argsLog.put, [[CLAVE, lista('b@x.es')]]);
     });
     test('sin fichero (lista vacía), quitar da 404 sin escribir', async () => {
         const r = await baja('a@x.es');
@@ -313,10 +380,17 @@ describe('el aviso solo va a direcciones válidas de la lista anterior', () => {
 
     test('con entradas válidas e inválidas en el fichero, solo las válidas reciben el aviso', async () => {
         seed.textJson[CLAVE] = sucia;
-        // 5 entradas con texto en el fichero: el alta daría 400 (máximo), por eso se prueba con una baja.
+        // Solo 2 entradas son válidas (M30): la baja de una es posible (queda 1) y el aviso va a las dos válidas anteriores.
         assert.equal((await llamarAutorizado(app, 'DELETE', '/delete-recipient', { email: 'a@x.es' })).status, 200);
         await esperarAviso();
         assert.deepEqual(argsLog.mail.map((m) => m.to), ['a@x.es', 'b@x.es']);
+    });
+    test('M32: con direcciones repetidas en el fichero, el aviso de una baja envía un correo por dirección', async () => {
+        sembrar('a@x.es', 'A@x.es', 'b@x.es', 'B@X.ES', 'c@x.es');
+        assert.equal((await llamarAutorizado(app, 'DELETE', '/delete-recipient', { email: 'c@x.es' })).status, 200);
+        await esperarAviso();
+        assert.equal(calls.sendMail, 3);
+        assert.deepEqual(argsLog.mail.map((m) => m.to), ['a@x.es', 'b@x.es', 'c@x.es']);
     });
     test('con todas las entradas inválidas, el aviso va a EMAIL como con la lista vacía', async () => {
         seed.textJson[CLAVE] = [{ email: 'a b@x.com' }, { email: '' }, { email: 'c,d@x.com' }];
